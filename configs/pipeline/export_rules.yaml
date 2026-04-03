@@ -1,0 +1,3 @@
+﻿export:
+  formats: [ttl, nt, csv]
+  include_levels: [major, sub, allen]

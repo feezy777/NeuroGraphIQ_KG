@@ -1,0 +1,4 @@
+﻿rules:
+  require_cn_name: true
+  require_en_name: true
+  enforce_level_table_consistency: true

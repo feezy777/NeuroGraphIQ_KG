@@ -1,0 +1,6 @@
+configs/local/
+artifacts/ui_runs/
+artifacts/ui_file_center/
+artifacts/desktop/
+__pycache__/
+*.pyc

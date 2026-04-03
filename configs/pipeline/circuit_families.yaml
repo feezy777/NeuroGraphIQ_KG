@@ -1,0 +1,293 @@
+version: 1
+description: >
+  Major-level circuit family templates for recall -> instantiate -> decompose flow.
+  This file is ontology-aware but intentionally coarse-grained for V2.
+
+families:
+  - circuit_family: corticostriatal_thalamocortical
+    functional_domain: motor_control
+    core_node_aliases:
+      - [cortex, frontal cortex, prefrontal cortex, motor cortex, cingulate cortex]
+      - [caudate, putamen, striatum, accumbens, pallidum, globus pallidus]
+      - [thalamus, thalamus proper]
+    optional_node_aliases:
+      - [supplementary motor area, premotor cortex]
+      - [brain stem]
+    compressed_rules:
+      allow_missing_core: 1
+      allow_semantic_compression: true
+    aliases:
+      - cortico-striato-thalamo-cortical
+      - cstc
+      - basal ganglia loop
+    recommended_search_queries:
+      - corticostriatal thalamocortical circuit review
+      - basal ganglia thalamus cortex pathway human
+    allowed_relation_types:
+      - direct_structural_connection
+      - indirect_pathway_connection
+      - same_circuit_member
+
+  - circuit_family: hippocampal_memory
+    functional_domain: memory
+    core_node_aliases:
+      - [hippocampus, parahippocampal, parahippocampal gyrus]
+      - [entorhinal, medial temporal]
+      - [thalamus, mammillary]
+    optional_node_aliases:
+      - [fornix]
+      - [cingulate]
+      - [amygdala]
+    compressed_rules:
+      allow_missing_core: 1
+      allow_semantic_compression: true
+    aliases:
+      - hippocampal-entorhinal memory system
+      - papez-like memory loop
+    recommended_search_queries:
+      - hippocampal entorhinal memory circuit review
+      - hippocampus thalamus cingulate memory pathway
+    allowed_relation_types:
+      - direct_structural_connection
+      - indirect_pathway_connection
+      - same_circuit_member
+
+  - circuit_family: amygdala_orbitofrontal_affective
+    functional_domain: affect_reward
+    core_node_aliases:
+      - [amygdala]
+      - [orbitofrontal cortex, frontal cortex, prefrontal cortex]
+      - [cingulate, anterior cingulate]
+    optional_node_aliases:
+      - [insula]
+      - [accumbens]
+      - [thalamus]
+    compressed_rules:
+      allow_missing_core: 1
+      allow_semantic_compression: true
+    aliases:
+      - amygdala orbitofrontal loop
+      - affective salience reward loop
+    recommended_search_queries:
+      - amygdala orbitofrontal cingulate connectivity review
+      - amygdala prefrontal reward circuit
+    allowed_relation_types:
+      - direct_structural_connection
+      - indirect_pathway_connection
+      - same_circuit_member
+
+  - circuit_family: salience_insula_cingulate
+    functional_domain: salience
+    core_node_aliases:
+      - [insula, insular cortex]
+      - [anterior cingulate, cingulate]
+      - [thalamus]
+    optional_node_aliases:
+      - [amygdala]
+      - [prefrontal cortex]
+      - [brain stem]
+    compressed_rules:
+      allow_missing_core: 1
+      allow_semantic_compression: true
+    aliases:
+      - salience network core
+      - insula-cingulate loop
+    recommended_search_queries:
+      - salience network insula anterior cingulate review
+      - insula cingulate thalamus pathway
+    allowed_relation_types:
+      - direct_structural_connection
+      - indirect_pathway_connection
+      - same_circuit_member
+
+  - circuit_family: cerebello_thalamo_cortical
+    functional_domain: motor_cognitive_modulation
+    core_node_aliases:
+      - [cerebellum, cerebellar vermal lobules, cerebellum exterior, cerebellum white matter]
+      - [thalamus, thalamus proper]
+      - [motor cortex, frontal cortex, prefrontal cortex]
+    optional_node_aliases:
+      - [brain stem]
+      - [pons]
+      - [basal ganglia]
+    compressed_rules:
+      allow_missing_core: 1
+      allow_semantic_compression: true
+    aliases:
+      - cerebellar thalamic cortical pathway
+      - ctc circuit
+    recommended_search_queries:
+      - cerebellum thalamus motor cortex pathway review
+      - cerebello thalamo cortical connectivity
+    allowed_relation_types:
+      - direct_structural_connection
+      - indirect_pathway_connection
+      - same_circuit_member
+
+  - circuit_family: visual_recognition
+    functional_domain: vision
+    core_node_aliases:
+      - [occipital cortex, visual cortex]
+      - [temporal cortex, inferotemporal]
+      - [thalamus, lateral geniculate]
+    optional_node_aliases:
+      - [parietal cortex]
+      - [frontal eye field]
+      - [superior colliculus]
+    compressed_rules:
+      allow_missing_core: 1
+      allow_semantic_compression: true
+    aliases:
+      - ventral visual stream
+      - dorsal visual stream
+    recommended_search_queries:
+      - visual cortex temporal recognition pathway review
+      - occipital thalamic cortical visual system
+    allowed_relation_types:
+      - direct_structural_connection
+      - indirect_pathway_connection
+      - same_circuit_member
+
+  - circuit_family: auditory_language_association
+    functional_domain: language_auditory
+    core_node_aliases:
+      - [temporal cortex, superior temporal]
+      - [frontal cortex, inferior frontal]
+      - [parietal cortex]
+    optional_node_aliases:
+      - [thalamus]
+      - [insula]
+      - [cingulate]
+    compressed_rules:
+      allow_missing_core: 1
+      allow_semantic_compression: true
+    aliases:
+      - language auditory association
+      - fronto-temporo-parietal language loop
+    recommended_search_queries:
+      - temporal frontal language connectivity review
+      - auditory association circuit human
+    allowed_relation_types:
+      - direct_structural_connection
+      - indirect_pathway_connection
+      - same_circuit_member
+
+  - circuit_family: default_mode_framework
+    functional_domain: internally_directed_cognition
+    core_node_aliases:
+      - [medial prefrontal, prefrontal cortex]
+      - [posterior cingulate, cingulate]
+      - [parietal cortex, precuneus]
+    optional_node_aliases:
+      - [hippocampus]
+      - [temporal cortex]
+      - [thalamus]
+    compressed_rules:
+      allow_missing_core: 1
+      allow_semantic_compression: true
+    aliases:
+      - default mode network
+      - dmn framework
+    recommended_search_queries:
+      - default mode network structural functional review
+      - medial prefrontal posterior cingulate connectivity
+    allowed_relation_types:
+      - direct_structural_connection
+      - indirect_pathway_connection
+      - same_circuit_member
+
+  - circuit_family: frontoparietal_control_framework
+    functional_domain: executive_control
+    core_node_aliases:
+      - [dorsolateral prefrontal, prefrontal cortex, frontal cortex]
+      - [parietal cortex]
+      - [cingulate, anterior cingulate]
+    optional_node_aliases:
+      - [thalamus]
+      - [insula]
+      - [caudate]
+    compressed_rules:
+      allow_missing_core: 1
+      allow_semantic_compression: true
+    aliases:
+      - frontoparietal control network
+      - executive control framework
+    recommended_search_queries:
+      - frontoparietal control network review
+      - prefrontal parietal cingulate connectivity
+    allowed_relation_types:
+      - direct_structural_connection
+      - indirect_pathway_connection
+      - same_circuit_member
+
+  - circuit_family: limbic_reward_framework
+    functional_domain: reward_motivation
+    core_node_aliases:
+      - [accumbens, ventral striatum]
+      - [amygdala]
+      - [prefrontal cortex, orbitofrontal cortex]
+    optional_node_aliases:
+      - [hippocampus]
+      - [thalamus]
+      - [pallidum]
+    compressed_rules:
+      allow_missing_core: 1
+      allow_semantic_compression: true
+    aliases:
+      - reward loop
+      - mesolimbic-like framework
+    recommended_search_queries:
+      - accumbens amygdala prefrontal reward circuit review
+      - limbic reward connectivity human
+    allowed_relation_types:
+      - direct_structural_connection
+      - indirect_pathway_connection
+      - same_circuit_member
+
+  - circuit_family: thalamo_cortical_sensory_framework
+    functional_domain: sensory_relay
+    core_node_aliases:
+      - [thalamus, thalamus proper]
+      - [somatosensory cortex, sensory cortex, parietal cortex]
+      - [brain stem]
+    optional_node_aliases:
+      - [insula]
+      - [cingulate]
+      - [cerebellum]
+    compressed_rules:
+      allow_missing_core: 1
+      allow_semantic_compression: true
+    aliases:
+      - sensory relay framework
+      - thalamocortical sensory pathway
+    recommended_search_queries:
+      - thalamocortical sensory pathway review
+      - sensory relay thalamus cortex connectivity
+    allowed_relation_types:
+      - direct_structural_connection
+      - indirect_pathway_connection
+      - same_circuit_member
+
+  - circuit_family: brainstem_arousal_framework
+    functional_domain: arousal_regulation
+    core_node_aliases:
+      - [brain stem]
+      - [thalamus]
+      - [frontal cortex, cingulate]
+    optional_node_aliases:
+      - [hypothalamus]
+      - [insula]
+      - [amygdala]
+    compressed_rules:
+      allow_missing_core: 1
+      allow_semantic_compression: true
+    aliases:
+      - ascending arousal framework
+      - brainstem thalamic cortical arousal
+    recommended_search_queries:
+      - brainstem thalamus arousal network review
+      - ascending arousal frontal cingulate pathway
+    allowed_relation_types:
+      - direct_structural_connection
+      - indirect_pathway_connection
+      - same_circuit_member

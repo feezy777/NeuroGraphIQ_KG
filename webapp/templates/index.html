@@ -1,0 +1,306 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title data-i18n="app.title">NeuroKG IDE Workbench</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body data-theme="light-workspace">
+    <div id="ide-shell" class="ide-shell">
+      <header class="top-toolbar">
+        <div class="toolbar-left">
+          <span class="brand-dot"></span>
+          <div class="brand-group">
+            <div class="app-name" data-i18n="app.brand">NeuroKG Workbench</div>
+            <div class="workspace-name" id="workspace-name">workspace: NeuroGraphIQ_KG_V2</div>
+          </div>
+        </div>
+        <div class="toolbar-right">
+          <button id="btn-import-ontology" class="ide-btn" data-i18n="app.toolbar.importOntology">导入本体</button>
+          <button id="btn-import-files" class="ide-btn" data-i18n="app.toolbar.importFiles">导入文件</button>
+          <button id="btn-new-task" class="ide-btn ide-btn-primary" data-i18n="app.toolbar.newTask">新建任务</button>
+          <button id="btn-save-workspace" class="ide-btn" data-i18n="app.toolbar.saveWorkspace">保存工作区</button>
+          <button id="btn-open-settings" class="ide-btn" data-i18n="app.toolbar.settings">设置</button>
+          <button id="btn-theme-toggle" class="ide-btn" data-i18n="app.toolbar.appearance">外观</button>
+        </div>
+        <input id="input-import-ontology" type="file" class="hidden-file-input" accept=".owl,.rdf,.ttl,.jsonld,.xml" multiple />
+        <input id="input-import-files" type="file" class="hidden-file-input" accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.json,.jsonl,.rdf,.owl,.ttl,.xml" multiple />
+      </header>
+
+      <section class="ide-body">
+        <aside class="left-sidebar">
+          <div class="sidebar-module-switch" id="sidebar-module-switch">
+            <button class="view-btn active" data-main-tab="tab-overview" data-i18n="app.tabs.overview">概览</button>
+            <button class="view-btn" data-main-tab="tab-ontology" data-i18n="app.tabs.ontology">本体规则</button>
+            <button class="view-btn" data-main-tab="tab-files" data-i18n="app.tabs.files">文件中心</button>
+            <button class="view-btn" data-main-tab="tab-extraction" data-i18n="app.tabs.extraction">提取工作区</button>
+            <button class="view-btn" data-main-tab="tab-graph" data-i18n="app.tabs.graph">图谱预览</button>
+            <button class="view-btn" data-main-tab="tab-review" data-i18n="app.tabs.review">校验评审</button>
+            <button class="view-btn" data-main-tab="tab-crawler" data-i18n="app.tabs.crawler">爬虫区域</button>
+            <button class="view-btn" data-main-tab="tab-console" data-i18n="app.tabs.console">控制台</button>
+            <button class="view-btn" data-main-tab="tab-settings" data-i18n="app.tabs.settings">设置</button>
+          </div>
+
+          <section class="sidebar-section">
+            <button class="section-toggle" data-target="section-project-explorer" data-i18n="app.sidebar.projectExplorer">Project Explorer</button>
+            <div id="section-project-explorer" class="section-content open">
+              <ul id="tree-project" class="tree-list"></ul>
+            </div>
+          </section>
+
+          <section class="sidebar-section">
+            <button class="section-toggle" data-target="section-ontology-rules" data-i18n="app.sidebar.ontologyRules">Ontology Rules</button>
+            <div id="section-ontology-rules" class="section-content open">
+              <ul id="tree-ontology-rules" class="tree-list"></ul>
+            </div>
+          </section>
+
+          <section class="sidebar-section">
+            <button class="section-toggle" data-target="section-data-sources" data-i18n="app.sidebar.dataSources">Data Sources</button>
+            <div id="section-data-sources" class="section-content open">
+              <ul id="tree-data-sources" class="tree-list"></ul>
+            </div>
+          </section>
+
+          <section class="sidebar-section">
+            <button class="section-toggle" data-target="section-sessions" data-i18n="app.sidebar.workspaceSessions">Workspace Sessions</button>
+            <div id="section-sessions" class="section-content open">
+              <ul id="tree-sessions" class="tree-list"></ul>
+            </div>
+          </section>
+        </aside>
+
+        <main class="center-workbench">
+          <nav id="main-tabbar" class="main-tabbar">
+            <button class="main-tab active" data-main-tab="tab-overview" data-i18n="app.mainTabs.overview">Welcome / Overview</button>
+            <button class="main-tab" data-main-tab="tab-ontology" data-i18n="app.mainTabs.ontology">Ontology Workspace</button>
+            <button class="main-tab" data-main-tab="tab-files" data-i18n="app.mainTabs.files">File Workspace</button>
+            <button class="main-tab" data-main-tab="tab-extraction" data-i18n="app.mainTabs.extraction">Extraction Workspace</button>
+            <button class="main-tab" data-main-tab="tab-graph" data-i18n="app.mainTabs.graph">Graph Preview</button>
+            <button class="main-tab" data-main-tab="tab-review" data-i18n="app.mainTabs.review">Validation / Review</button>
+            <button class="main-tab" data-main-tab="tab-crawler" data-i18n="app.mainTabs.crawler">Crawler Workspace</button>
+            <button class="main-tab" data-main-tab="tab-console" data-i18n="app.mainTabs.console">Console / Logs</button>
+            <button class="main-tab" data-main-tab="tab-settings" data-i18n="app.mainTabs.settings">Settings</button>
+          </nav>
+
+          <div class="workbench-content">
+            <section id="tab-overview" class="workbench-tab active">
+              <div class="panel-grid two-cols">
+                <article class="panel">
+                  <h3 data-i18n="overview.title">工作区概览</h3>
+                  <div id="overview-cards" class="overview-cards"></div>
+                </article>
+                <article class="panel">
+                  <h3 data-i18n="overview.currentSelection">当前选中对象</h3>
+                  <pre id="overview-selection" class="code-block"></pre>
+                </article>
+              </div>
+            </section>
+
+            <section id="tab-ontology" class="workbench-tab">
+              <div class="panel-grid two-cols">
+                <article class="panel">
+                  <h3 data-i18n="ontology.treeTitle">Ontology 树</h3>
+                  <div class="inline-row">
+                    <input id="ontology-filter-input" type="text" placeholder="搜索 label / iri" />
+                  </div>
+                  <ul id="ontology-entity-tree" class="tree-list"></ul>
+                  <div class="inline-row">
+                    <button id="btn-refresh-ontology" class="ide-btn" data-i18n="ontology.refresh">刷新本体工作区</button>
+                  </div>
+                </article>
+                <article class="panel">
+                  <h3 data-i18n="ontology.detailTitle">Ontology 详情</h3>
+                  <div id="ontology-summary" class="kv-grid"></div>
+                  <h4 data-i18n="ontology.loadLog">Load Log</h4>
+                  <pre id="ontology-load-log" class="code-block"></pre>
+                </article>
+              </div>
+            </section>
+
+            <section id="tab-files" class="workbench-tab">
+              <div class="panel-grid two-cols">
+                <article class="panel">
+                  <h3 data-i18n="files.listTitle">导入文件列表</h3>
+                  <table id="file-table" class="ide-table"></table>
+                </article>
+                <article class="panel">
+                  <h3 data-i18n="files.previewTitle">文件预览</h3>
+                  <div class="inline-row">
+                    <button id="btn-file-preview-prev" class="ide-btn" data-i18n="files.prevPage">上一页</button>
+                    <button id="btn-file-preview-next" class="ide-btn" data-i18n="files.nextPage">下一页</button>
+                    <span id="file-preview-meta" class="meta-text"></span>
+                  </div>
+                  <div id="file-preview-embed-wrap" class="embed-wrap hidden">
+                    <iframe id="file-preview-embed" title="file preview"></iframe>
+                  </div>
+                  <div id="file-preview-table-wrap" class="table-wrap hidden">
+                    <table id="file-preview-table" class="ide-table"></table>
+                  </div>
+                  <pre id="file-preview-content" class="code-block"></pre>
+                  <div id="file-check-panel" class="file-check-panel">
+                    <h4 data-i18n="files.check.title">粗检验过程</h4>
+                    <div class="file-check-kv">
+                      <div id="file-check-state-line" class="meta-text"></div>
+                      <div id="file-check-file-line" class="meta-text mono"></div>
+                      <div id="file-check-deepseek-line" class="meta-text"></div>
+                      <div id="file-check-result-line" class="meta-text"></div>
+                    </div>
+                    <pre id="file-check-log" class="code-block file-check-log"></pre>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section id="tab-extraction" class="workbench-tab">
+              <div id="extraction-workbench-root" class="extraction-two-row-grid" data-layout-mode="top-two-bottom-one">
+                <article id="extraction-input-panel" class="panel extraction-top-left">
+                  <h3 data-i18n="extraction.inputsTitle">输入资源</h3>
+                  <div class="form-grid">
+                    <label for="extract-ontology-select" data-i18n="extraction.activeOntology">当前本体</label>
+                    <select id="extract-ontology-select"></select>
+                    <label data-i18n="extraction.targets">抽取目标</label>
+                    <div id="extract-targets" class="checkbox-row">
+                      <label><input type="checkbox" value="region" checked /> <span data-i18n="extraction.target.region">脑区</span></label>
+                      <label><input type="checkbox" value="circuit" checked /> <span data-i18n="extraction.target.circuit">回路</span></label>
+                      <label><input type="checkbox" value="connection" checked /> <span data-i18n="extraction.target.connection">连接</span></label>
+                    </div>
+                  </div>
+                  <h4 data-i18n="extraction.selectedFiles">参与文件</h4>
+                  <ul id="extract-file-list" class="check-list"></ul>
+                </article>
+
+                <article id="extraction-task-summary-panel" class="panel extraction-top-right">
+                  <div class="extraction-top-right-block">
+                    <h3 data-i18n="extraction.jobConfig">任务配置</h3>
+                    <div id="extraction-toolbar-host"></div>
+                  </div>
+                  <div class="extraction-top-right-block extraction-job-block extraction-job-block-compact extraction-job-status-block">
+                    <h4 data-i18n="extraction.jobStatus">任务状态</h4>
+                    <div class="extraction-job-table-wrap">
+                      <table id="extraction-job-table" class="ide-table"></table>
+                    </div>
+                  </div>
+                </article>
+
+                <article id="deepseek-bottom-workbench-panel" class="panel extraction-bottom-full">
+                  <h3 data-i18n="extraction.deepseek.configTitle">DeepSeek 配置</h3>
+                  <div id="deepseek-workbench-host"></div>
+                </article>
+              </div>
+            </section>
+
+            <section id="tab-graph" class="workbench-tab">
+              <div class="panel-grid two-cols">
+                <article class="panel">
+                  <h3 data-i18n="graph.title">Graph Preview</h3>
+                  <div class="inline-row">
+                    <button id="btn-graph-fit" class="ide-btn" data-i18n="graph.fitView">Fit View</button>
+                    <button id="btn-graph-reset" class="ide-btn" data-i18n="graph.reset">Reset</button>
+                    <label for="graph-filter-type" data-i18n="graph.filter">Filter</label>
+                    <select id="graph-filter-type">
+                      <option value="all">all</option>
+                      <option value="entity">entity</option>
+                      <option value="relation">relation</option>
+                      <option value="circuit">circuit</option>
+                    </select>
+                  </div>
+                  <div id="graph-canvas" class="graph-canvas">图谱画布占位（后续可接 Cytoscape / React Flow / ECharts）</div>
+                </article>
+                <article class="panel">
+                  <h3 data-i18n="graph.elements">Graph Elements</h3>
+                  <h4 data-i18n="graph.nodes">Nodes</h4>
+                  <table id="graph-node-table" class="ide-table"></table>
+                  <h4 data-i18n="graph.edges">Edges</h4>
+                  <table id="graph-edge-table" class="ide-table"></table>
+                </article>
+              </div>
+            </section>
+
+            <section id="tab-review" class="workbench-tab">
+              <div class="panel-grid three-cols">
+                <article class="panel">
+                  <h3 data-i18n="review.entities">候选实体</h3>
+                  <table id="review-entity-table" class="ide-table"></table>
+                </article>
+                <article class="panel">
+                  <h3 data-i18n="review.relations">候选关系</h3>
+                  <table id="review-relation-table" class="ide-table"></table>
+                </article>
+                <article class="panel">
+                  <h3 data-i18n="review.circuits">候选回路</h3>
+                  <table id="review-circuit-table" class="ide-table"></table>
+                </article>
+              </div>
+            </section>
+
+            <section id="tab-crawler" class="workbench-tab">
+              <div class="panel-grid two-cols">
+                <article class="panel">
+                  <h3 data-i18n="crawler.title">爬虫任务（占位）</h3>
+                  <div class="form-grid">
+                    <label for="crawler-source-type" data-i18n="crawler.sourceType">来源类型</label>
+                    <select id="crawler-source-type">
+                      <option value="url">URL</option>
+                      <option value="keyword">Keyword</option>
+                      <option value="doi">DOI</option>
+                    </select>
+                    <label for="crawler-source-input" data-i18n="crawler.sourceInput">来源输入</label>
+                    <textarea id="crawler-source-input" rows="10" placeholder="每行一个来源"></textarea>
+                  </div>
+                  <div class="inline-row">
+                    <button id="btn-crawler-create-job" class="ide-btn" data-i18n="crawler.createJob">创建爬虫任务（占位）</button>
+                  </div>
+                </article>
+                <article class="panel">
+                  <h3 data-i18n="crawler.status">Crawler 状态</h3>
+                  <pre id="crawler-status" class="code-block"></pre>
+                </article>
+              </div>
+            </section>
+
+            <section id="tab-console" class="workbench-tab">
+              <article class="panel">
+                <h3 data-i18n="console.mainTitle">主控制台</h3>
+                <pre id="main-console-log" class="code-block"></pre>
+              </article>
+            </section>
+
+            <section id="tab-settings" class="workbench-tab">
+              <article class="panel">
+                <h3 data-i18n="settings.title">Settings</h3>
+                <div id="settings-panel-host"></div>
+              </article>
+            </section>
+          </div>
+        </main>
+
+        <aside class="right-inspector">
+          <h3 data-i18n="inspector.title">Inspector</h3>
+          <div id="inspector-mode" class="meta-text">mode: none</div>
+          <pre id="inspector-content" class="code-block"></pre>
+          <h4 data-i18n="inspector.actionGuide">Action Guide</h4>
+          <pre id="inspector-action-help" class="code-block"></pre>
+        </aside>
+      </section>
+
+      <footer class="bottom-panel">
+        <nav class="bottom-tabbar">
+          <button class="bottom-tab active" data-bottom-tab="logs" data-i18n="bottom.logs">Logs</button>
+          <button class="bottom-tab" data-bottom-tab="tasks" data-i18n="bottom.tasks">Tasks</button>
+          <button class="bottom-tab" data-bottom-tab="problems" data-i18n="bottom.problems">Problems</button>
+          <button class="bottom-tab" data-bottom-tab="trace" data-i18n="bottom.trace">Extraction Trace</button>
+        </nav>
+        <section class="bottom-content">
+          <pre id="bottom-logs" class="bottom-view active"></pre>
+          <pre id="bottom-tasks" class="bottom-view"></pre>
+          <pre id="bottom-problems" class="bottom-view"></pre>
+          <pre id="bottom-trace" class="bottom-view"></pre>
+        </section>
+      </footer>
+    </div>
+
+    <script type="module" src="{{ url_for('static', filename='workbench/main.js') }}"></script>
+  </body>
+</html>

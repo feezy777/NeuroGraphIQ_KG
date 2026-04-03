@@ -1,0 +1,4 @@
+﻿validation:
+  hierarchy_checks: true
+  fk_checks: true
+  evidence_link_checks: true

@@ -1,0 +1,8 @@
+﻿environment: test
+database:
+  host: localhost
+  port: 5432
+  name: NeuroKG_Project_test
+  user: postgres
+  password_env: PGPASSWORD
+  schema: neurokg
