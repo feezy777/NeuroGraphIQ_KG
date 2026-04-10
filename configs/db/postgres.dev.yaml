@@ -1,8 +1,0 @@
-environment: dev
-database:
-  host: localhost
-  port: 5432
-  name: neurographiq_kg_v2
-  user: postgres
-  password_env: PGPASSWORD
-  schema: neurokg
