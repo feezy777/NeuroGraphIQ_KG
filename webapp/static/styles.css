@@ -320,3 +320,331 @@ textarea {
   max-height: none;
   background: var(--console);
 }
+
+.pipeline-intro {
+  margin-bottom: 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.pipeline-intro code {
+  font-size: 12px;
+}
+
+.tab-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.file-meta-pre {
+  max-height: 220px;
+  overflow: auto;
+}
+
+.region-progress-wrap {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.region-progress-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: #e2e8f0;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.region-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #60a5fa, #3b82f6);
+  border-radius: 4px;
+  transition: width 0.15s ease;
+}
+
+.region-progress-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.region-mode-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.region-mode-btn.active {
+  border-color: #8fb1f3;
+  background: #eaf1ff;
+}
+
+.region-panel {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.region-panel h4 {
+  margin-top: 0;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+.block-label {
+  display: block;
+  font-size: 0.85rem;
+  margin: 8px 0 4px;
+}
+
+.region-textarea {
+  width: 100%;
+  max-width: 900px;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: vertical;
+}
+
+.region-direct-fields {
+  flex-wrap: wrap;
+}
+
+.region-direct-fields input[type="text"] {
+  min-width: 120px;
+}
+
+.region-version-row {
+  margin: 12px 0;
+}
+
+.region-result-scroll {
+  max-height: 420px;
+  margin-bottom: 12px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.data-table th,
+.data-table td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.data-table th {
+  background: #f0f4fa;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(31, 42, 60, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+/* [hidden] 默认会被 .modal-backdrop 的 display:flex 盖掉，导致一进入页面弹层仍可见 */
+.modal-backdrop[hidden] {
+  display: none !important;
+}
+
+.modal-dialog {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+  max-width: 560px;
+  width: 100%;
+  max-height: 92vh;
+  overflow: auto;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+}
+
+.modal-dialog-wide {
+  max-width: 720px;
+}
+
+.modal-dialog h3 {
+  margin: 0 0 6px;
+  font-size: 1.1rem;
+}
+
+.modal-ds-kind-hint {
+  margin: 0 0 12px;
+}
+
+.modal-fieldset {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+}
+
+.modal-fieldset legend {
+  font-size: 0.85rem;
+  padding: 0 6px;
+}
+
+/* ── Modal Header ───────────────────────── */
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.modal-header h3 { margin: 0; font-size: 1.1rem; }
+
+.modal-subtitle {
+  margin: 2px 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+/* ── Status Badge ───────────────────────── */
+.ds-status-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ds-status-ok    { background: #dcfce7; color: #166534; }
+.ds-status-warn  { background: #fef9c3; color: #854d0e; }
+.ds-status-error { background: #fee2e2; color: #991b1b; }
+.ds-status-unknown { background: #f1f5f9; color: #64748b; }
+
+/* ── Connection field grid ──────────────── */
+.ds-conn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  margin-bottom: 8px;
+}
+
+.ds-field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.88rem;
+}
+
+.ds-check-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+  padding-bottom: 2px;
+}
+
+.ds-input {
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+.ds-input:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+
+.ds-input-wide  { min-width: 240px; flex: 1; }
+.ds-input-sm    { width: 80px; }
+
+/* ── Toolbar ────────────────────────────── */
+.ds-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.btn-sm {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.btn-primary:hover { background: #2563eb; border-color: #2563eb; }
+
+/* ── Prompt section ─────────────────────── */
+.ds-select {
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+
+.ds-prompt-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+.ds-custom-toggle {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.ds-textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: vertical;
+}
+
+/* ── Profile row ────────────────────────── */
+.ds-profile-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ── Details/summary collapsible ────────── */
+.modal-details > summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--muted);
+  user-select: none;
+  padding: 4px 0;
+}
+
+/* ── Actions row ────────────────────────── */
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}

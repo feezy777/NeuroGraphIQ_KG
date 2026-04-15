@@ -1,10 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
 
 import psycopg
 from psycopg.rows import dict_row
@@ -106,6 +106,7 @@ class StateStore:
             "tasks": {},
             "task_logs": [],
             "workspace_snapshot": {},
+            "region_result_versions": [],
         }
 
     def _load_json(self) -> Dict[str, Any]:
@@ -235,6 +236,12 @@ class StateStore:
             f"create index if not exists idx_candidate_circuit_node_circuit on {self._schema}.candidate_circuit_node(candidate_circuit_id, node_order)",
             f"create index if not exists idx_candidate_connection_file on {self._schema}.candidate_connection(file_id, status)",
             f"create table if not exists {self._schema}.workspace_snapshot (snapshot_id text primary key, payload_json jsonb not null default '{{}}'::jsonb, updated_at timestamptz not null default now())",
+            f"alter table {self._schema}.candidate_region add column if not exists lane text not null default 'local'",
+            f"alter table {self._schema}.candidate_circuit add column if not exists lane text not null default 'local'",
+            f"alter table {self._schema}.candidate_connection add column if not exists lane text not null default 'local'",
+            f"create index if not exists idx_candidate_region_file_lane on {self._schema}.candidate_region(file_id, lane)",
+            f"create index if not exists idx_candidate_circuit_file_lane on {self._schema}.candidate_circuit(file_id, lane)",
+            f"create index if not exists idx_candidate_connection_file_lane on {self._schema}.candidate_connection(file_id, lane)",
         ]
         with self._conn() as conn:
             with conn.cursor() as cur:
@@ -547,6 +554,8 @@ class StateStore:
 
     def get_parsed_document(self, file_id: str) -> Dict[str, Any]:
         if self._pg_enabled:
+            doc_row = None
+            chunk_rows: List[Any] = []
             try:
                 with self._conn() as conn:
                     with conn.cursor() as cur:
@@ -557,50 +566,63 @@ class StateStore:
                             (file_id,),
                         )
                         chunk_rows = cur.fetchall()
-                if not doc_row:
-                    return {"document": {}, "chunks": []}
-                document_json = self._as_dict(doc_row.get("document_json"))
-                document = {
-                    "parsed_document_id": document_json.get("parsed_document_id", f"pd_{file_id}"),
-                    "file_id": file_id,
-                    "parse_status": document_json.get("parse_status", "parsed_success"),
-                    "file_type": doc_row.get("file_type", ""),
-                    "title": doc_row.get("title", ""),
-                    "source": doc_row.get("source", ""),
-                    "authors": self._as_list(doc_row.get("authors_json")),
-                    "year": doc_row.get("year"),
-                    "doi": doc_row.get("doi", ""),
-                    "page_range": doc_row.get("page_range", ""),
-                    "raw_text": document_json.get("raw_text", ""),
-                    "metadata_json": self._as_dict(document_json.get("metadata_json", {})),
-                    "paragraphs": self._as_list(document_json.get("paragraphs", [])),
-                    "sentences": self._as_list(document_json.get("sentences", [])),
-                    "table_cells": self._as_list(document_json.get("table_cells", [])),
-                    "figure_captions": self._as_list(document_json.get("figure_captions", [])),
-                    "heading_levels": self._as_list(document_json.get("heading_levels", [])),
-                    "ocr_blocks": self._as_list(document_json.get("ocr_blocks", [])),
-                    "parser_name": doc_row.get("parser_name", ""),
-                    "parser_version": doc_row.get("parser_version", ""),
-                    "created_at": self._ts(doc_row.get("created_at")),
-                }
-                chunks = []
-                for row in chunk_rows:
-                    loc = self._as_dict(row.get("source_location_json"))
-                    chunks.append(
-                        {
-                            "chunk_id": row.get("chunk_id", ""),
-                            "file_id": row.get("file_id", ""),
-                            "chunk_type": row.get("chunk_type", "paragraph"),
-                            "chunk_index": loc.get("chunk_index", 0),
-                            "text_content": row.get("chunk_text", ""),
-                            "page_no": loc.get("page_no"),
-                            "source_ref": loc.get("source_ref", ""),
-                            "extra_json": self._as_dict(row.get("metadata_json")),
-                        }
-                    )
-                return {"document": document, "chunks": chunks}
             except Exception as exc:
-                self._event("pg_read_failed", f"get_parsed_document fallback: {exc}", "warning")
+                # Real DB connectivity / query error – fall back to JSON and log as warning.
+                self._event("pg_read_failed", f"get_parsed_document pg_error: {exc}", "warning")
+                return self._load_json().get("parsed_documents", {}).get(file_id, {"document": {}, "chunks": []})
+
+            if not doc_row:
+                # PG has no row for this file_id yet. This is expected when:
+                #   (a) _put_parsed_pg failed and wrote to JSON instead, or
+                #   (b) the file was parsed before PG was enabled.
+                # Fall through silently to JSON store – this is NOT a database error.
+                json_result = self._load_json().get("parsed_documents", {}).get(file_id)
+                if json_result:
+                    return json_result
+                return {"document": {}, "chunks": []}
+
+            document_json = self._as_dict(doc_row.get("document_json"))
+            document = {
+                "parsed_document_id": document_json.get("parsed_document_id", f"pd_{file_id}"),
+                "file_id": file_id,
+                "parse_status": document_json.get("parse_status", "parsed_success"),
+                "file_type": doc_row.get("file_type", ""),
+                "title": doc_row.get("title", ""),
+                "source": doc_row.get("source", ""),
+                "authors": self._as_list(doc_row.get("authors_json")),
+                "year": doc_row.get("year"),
+                "doi": doc_row.get("doi", ""),
+                "page_range": doc_row.get("page_range", ""),
+                "raw_text": document_json.get("raw_text", ""),
+                "metadata_json": self._as_dict(document_json.get("metadata_json", {})),
+                "paragraphs": self._as_list(document_json.get("paragraphs", [])),
+                "sentences": self._as_list(document_json.get("sentences", [])),
+                "table_cells": self._as_list(document_json.get("table_cells", [])),
+                "table_rows": self._as_list(document_json.get("table_rows", [])),
+                "figure_captions": self._as_list(document_json.get("figure_captions", [])),
+                "heading_levels": self._as_list(document_json.get("heading_levels", [])),
+                "ocr_blocks": self._as_list(document_json.get("ocr_blocks", [])),
+                "parser_name": doc_row.get("parser_name", ""),
+                "parser_version": doc_row.get("parser_version", ""),
+                "created_at": self._ts(doc_row.get("created_at")),
+            }
+            chunks = []
+            for row in chunk_rows:
+                loc = self._as_dict(row.get("source_location_json"))
+                chunks.append(
+                    {
+                        "chunk_id": row.get("chunk_id", ""),
+                        "file_id": row.get("file_id", ""),
+                        "chunk_type": row.get("chunk_type", "paragraph"),
+                        "chunk_index": loc.get("chunk_index", 0),
+                        "text_content": row.get("chunk_text", ""),
+                        "page_no": loc.get("page_no"),
+                        "source_ref": loc.get("source_ref", ""),
+                        "extra_json": self._as_dict(row.get("metadata_json")),
+                    }
+                )
+            return {"document": document, "chunks": chunks}
+
         return self._load_json().get("parsed_documents", {}).get(file_id, {"document": {}, "chunks": []})
 
     def _put_parsed_pg(self, doc: Dict[str, Any], chunks: List[Dict[str, Any]]) -> None:
@@ -613,6 +635,7 @@ class StateStore:
             "paragraphs": doc.get("paragraphs", []),
             "sentences": doc.get("sentences", []),
             "table_cells": doc.get("table_cells", []),
+            "table_rows": doc.get("table_rows", []),
             "figure_captions": doc.get("figure_captions", []),
             "heading_levels": doc.get("heading_levels", []),
             "ocr_blocks": doc.get("ocr_blocks", []),
@@ -693,26 +716,39 @@ class StateStore:
             conn.commit()
 
     # candidate region + review record
-    def put_region_candidates(self, file_id: str, rows: Iterable[Any]) -> None:
+    def put_region_candidates(self, file_id: str, rows: Iterable[Any], lane: str = "local") -> None:
         items = [self._to_dict(r) for r in rows]
+        for it in items:
+            it["lane"] = lane
         if self._pg_enabled:
             try:
-                self._put_region_candidates_pg(file_id, items)
+                self._put_region_candidates_pg(file_id, items, lane=lane)
                 return
             except Exception as exc:
                 self._event("pg_write_failed", f"put_region_candidates fallback: {exc}", "warning")
         state = self._load_json()
-        state["candidate_regions"] = [r for r in state.get("candidate_regions", []) if r.get("file_id") != file_id] + items
+        kept = [
+            r
+            for r in state.get("candidate_regions", [])
+            if not (r.get("file_id") == file_id and r.get("lane", "local") == lane)
+        ]
+        state["candidate_regions"] = kept + items
         self._save_json(state)
 
-    def list_region_candidates(self, file_id: str = "") -> List[Dict[str, Any]]:
+    def list_region_candidates(self, file_id: str = "", lane: Optional[str] = "local") -> List[Dict[str, Any]]:
         if self._pg_enabled:
             try:
                 sql = f"select * from {self._schema}.candidate_region"
-                params = []
+                params: List[Any] = []
+                conds: List[str] = []
                 if file_id:
-                    sql += " where file_id=%s"
+                    conds.append("file_id=%s")
                     params.append(file_id)
+                if lane is not None:
+                    conds.append("lane=%s")
+                    params.append(lane)
+                if conds:
+                    sql += " where " + " and ".join(conds)
                 sql += " order by created_at desc"
                 with self._conn() as conn:
                     with conn.cursor() as cur:
@@ -722,10 +758,13 @@ class StateStore:
             except Exception as exc:
                 self._event("pg_read_failed", f"list_region_candidates fallback: {exc}", "warning")
         rows = self._load_json().get("candidate_regions", [])
-        return [r for r in rows if (not file_id or r.get("file_id") == file_id)]
+        out = [r for r in rows if (not file_id or r.get("file_id") == file_id)]
+        if lane is not None:
+            out = [r for r in out if r.get("lane", "local") == lane]
+        return out
 
-    def get_region_candidates(self, file_id: str) -> List[Dict[str, Any]]:
-        return self.list_region_candidates(file_id)
+    def get_region_candidates(self, file_id: str, lane: Optional[str] = "local") -> List[Dict[str, Any]]:
+        return self.list_region_candidates(file_id, lane=lane)
 
     def get_region_candidate(self, candidate_id: str) -> Dict[str, Any] | None:
         if self._pg_enabled:
@@ -797,10 +836,13 @@ class StateStore:
                 self._event("pg_read_failed", f"list_review_records fallback: {exc}", "warning")
         return self._load_json().get("review_records", [])
 
-    def _put_region_candidates_pg(self, file_id: str, rows: List[Dict[str, Any]]) -> None:
+    def _put_region_candidates_pg(self, file_id: str, rows: List[Dict[str, Any]], lane: str = "local") -> None:
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"delete from {self._schema}.candidate_region where file_id=%s", (file_id,))
+                cur.execute(
+                    f"delete from {self._schema}.candidate_region where file_id=%s and lane=%s",
+                    (file_id, lane),
+                )
                 for r in rows:
                     cur.execute(
                         f"""
@@ -810,14 +852,14 @@ class StateStore:
                           laterality_candidate, region_category_candidate, granularity_candidate,
                           parent_region_candidate, ontology_source_candidate,
                           confidence, extraction_method, llm_model,
-                          status, review_note, created_at, updated_at
+                          status, review_note, created_at, updated_at, lane
                         ) values (
                           %(id)s, %(file_id)s, %(parsed_document_id)s, %(chunk_id)s, %(source_text)s,
                           %(en_name_candidate)s, %(cn_name_candidate)s, %(alias_candidates)s::jsonb,
                           %(laterality_candidate)s, %(region_category_candidate)s, %(granularity_candidate)s,
                           %(parent_region_candidate)s, %(ontology_source_candidate)s,
                           %(confidence)s, %(extraction_method)s, %(llm_model)s,
-                          %(status)s, %(review_note)s, %(created_at)s, %(updated_at)s
+                          %(status)s, %(review_note)s, %(created_at)s, %(updated_at)s, %(lane)s
                         )
                         """,
                         {
@@ -841,6 +883,7 @@ class StateStore:
                             "review_note": r.get("review_note", ""),
                             "created_at": r.get("created_at") or utc_now_iso(),
                             "updated_at": r.get("updated_at") or utc_now_iso(),
+                            "lane": r.get("lane", lane),
                         },
                     )
             conn.commit()
@@ -915,6 +958,7 @@ class StateStore:
             "id": row.get("id", ""),
             "file_id": row.get("file_id", ""),
             "parsed_document_id": row.get("parsed_document_id", ""),
+            "lane": row.get("lane", "local"),
             "chunk_id": row.get("chunk_id", ""),
             "source_text": row.get("source_text", ""),
             "en_name_candidate": row.get("en_name_candidate", ""),
@@ -935,26 +979,39 @@ class StateStore:
         }
 
     # connection candidates
-    def put_connection_candidates(self, file_id: str, rows: Iterable[Any]) -> None:
+    def put_connection_candidates(self, file_id: str, rows: Iterable[Any], lane: str = "local") -> None:
         items = [self._to_dict(x) for x in rows]
+        for it in items:
+            it["lane"] = lane
         if self._pg_enabled:
             try:
-                self._put_connection_candidates_pg(file_id, items)
+                self._put_connection_candidates_pg(file_id, items, lane=lane)
                 return
             except Exception as exc:
                 self._event("pg_write_failed", f"put_connection_candidates fallback: {exc}", "warning")
         state = self._load_json()
-        state["candidate_connections"] = [r for r in state.get("candidate_connections", []) if r.get("file_id") != file_id] + items
+        kept = [
+            r
+            for r in state.get("candidate_connections", [])
+            if not (r.get("file_id") == file_id and r.get("lane", "local") == lane)
+        ]
+        state["candidate_connections"] = kept + items
         self._save_json(state)
 
-    def list_connection_candidates(self, file_id: str = "") -> List[Dict[str, Any]]:
+    def list_connection_candidates(self, file_id: str = "", lane: Optional[str] = "local") -> List[Dict[str, Any]]:
         if self._pg_enabled:
             try:
                 sql = f"select * from {self._schema}.candidate_connection"
-                params = []
+                params: List[Any] = []
+                conds: List[str] = []
                 if file_id:
-                    sql += " where file_id=%s"
+                    conds.append("file_id=%s")
                     params.append(file_id)
+                if lane is not None:
+                    conds.append("lane=%s")
+                    params.append(lane)
+                if conds:
+                    sql += " where " + " and ".join(conds)
                 sql += " order by updated_at desc"
                 with self._conn() as conn:
                     with conn.cursor() as cur:
@@ -966,10 +1023,12 @@ class StateStore:
         rows = self._load_json().get("candidate_connections", [])
         if file_id:
             rows = [r for r in rows if r.get("file_id") == file_id]
+        if lane is not None:
+            rows = [r for r in rows if r.get("lane", "local") == lane]
         return rows
 
-    def get_connection_candidates(self, file_id: str) -> List[Dict[str, Any]]:
-        return self.list_connection_candidates(file_id)
+    def get_connection_candidates(self, file_id: str, lane: Optional[str] = "local") -> List[Dict[str, Any]]:
+        return self.list_connection_candidates(file_id, lane=lane)
 
     def get_connection_candidate(self, connection_id: str) -> Dict[str, Any] | None:
         if self._pg_enabled:
@@ -1005,10 +1064,13 @@ class StateStore:
         self._save_json(state)
         return out
 
-    def _put_connection_candidates_pg(self, file_id: str, rows: List[Dict[str, Any]]) -> None:
+    def _put_connection_candidates_pg(self, file_id: str, rows: List[Dict[str, Any]], lane: str = "local") -> None:
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"delete from {self._schema}.candidate_connection where file_id=%s", (file_id,))
+                cur.execute(
+                    f"delete from {self._schema}.candidate_connection where file_id=%s and lane=%s",
+                    (file_id, lane),
+                )
                 for r in rows:
                     connection_id = r.get("id", "") or r.get("connection_id", "")
                     cur.execute(
@@ -1017,12 +1079,12 @@ class StateStore:
                           connection_id, file_id, source_region, target_region, directionality, confidence, evidence_chunk_ids,
                           parsed_document_id, source_text, en_name_candidate, cn_name_candidate, alias_candidates, description_candidate,
                           granularity_candidate, connection_modality_candidate, source_region_ref_candidate, target_region_ref_candidate,
-                          direction_label, extraction_method, llm_model, status, review_note, created_at, updated_at
+                          direction_label, extraction_method, llm_model, status, review_note, created_at, updated_at, lane
                         ) values (
                           %(connection_id)s, %(file_id)s, %(source_region)s, %(target_region)s, %(directionality)s, %(confidence)s, %(evidence_chunk_ids)s::jsonb,
                           %(parsed_document_id)s, %(source_text)s, %(en_name_candidate)s, %(cn_name_candidate)s, %(alias_candidates)s::jsonb, %(description_candidate)s,
                           %(granularity_candidate)s, %(connection_modality_candidate)s, %(source_region_ref_candidate)s, %(target_region_ref_candidate)s,
-                          %(direction_label)s, %(extraction_method)s, %(llm_model)s, %(status)s, %(review_note)s, %(created_at)s, %(updated_at)s
+                          %(direction_label)s, %(extraction_method)s, %(llm_model)s, %(status)s, %(review_note)s, %(created_at)s, %(updated_at)s, %(lane)s
                         )
                         """,
                         {
@@ -1050,6 +1112,7 @@ class StateStore:
                             "review_note": r.get("review_note", ""),
                             "created_at": r.get("created_at") or utc_now_iso(),
                             "updated_at": r.get("updated_at") or utc_now_iso(),
+                            "lane": r.get("lane", lane),
                         },
                     )
             conn.commit()
@@ -1100,6 +1163,7 @@ class StateStore:
             "id": row.get("connection_id", ""),
             "file_id": row.get("file_id", ""),
             "parsed_document_id": row.get("parsed_document_id", ""),
+            "lane": row.get("lane", "local"),
             "source_text": row.get("source_text", ""),
             "en_name_candidate": row.get("en_name_candidate", ""),
             "cn_name_candidate": row.get("cn_name_candidate", ""),
@@ -1120,26 +1184,39 @@ class StateStore:
         }
 
     # circuit candidates
-    def put_circuit_candidates(self, file_id: str, rows: Iterable[Any]) -> None:
+    def put_circuit_candidates(self, file_id: str, rows: Iterable[Any], lane: str = "local") -> None:
         items = [self._to_dict(x) for x in rows]
+        for it in items:
+            it["lane"] = lane
         if self._pg_enabled:
             try:
-                self._put_circuit_candidates_pg(file_id, items)
+                self._put_circuit_candidates_pg(file_id, items, lane=lane)
                 return
             except Exception as exc:
                 self._event("pg_write_failed", f"put_circuit_candidates fallback: {exc}", "warning")
         state = self._load_json()
-        state["candidate_circuits"] = [r for r in state.get("candidate_circuits", []) if r.get("file_id") != file_id] + items
+        kept = [
+            r
+            for r in state.get("candidate_circuits", [])
+            if not (r.get("file_id") == file_id and r.get("lane", "local") == lane)
+        ]
+        state["candidate_circuits"] = kept + items
         self._save_json(state)
 
-    def list_circuit_candidates(self, file_id: str = "") -> List[Dict[str, Any]]:
+    def list_circuit_candidates(self, file_id: str = "", lane: Optional[str] = "local") -> List[Dict[str, Any]]:
         if self._pg_enabled:
             try:
                 sql = f"select * from {self._schema}.candidate_circuit"
-                params = []
+                params: List[Any] = []
+                conds: List[str] = []
                 if file_id:
-                    sql += " where file_id=%s"
+                    conds.append("file_id=%s")
                     params.append(file_id)
+                if lane is not None:
+                    conds.append("lane=%s")
+                    params.append(lane)
+                if conds:
+                    sql += " where " + " and ".join(conds)
                 sql += " order by updated_at desc"
                 with self._conn() as conn:
                     with conn.cursor() as cur:
@@ -1160,10 +1237,12 @@ class StateStore:
         rows = self._load_json().get("candidate_circuits", [])
         if file_id:
             rows = [r for r in rows if r.get("file_id") == file_id]
+        if lane is not None:
+            rows = [r for r in rows if r.get("lane", "local") == lane]
         return rows
 
-    def get_circuit_candidates(self, file_id: str) -> List[Dict[str, Any]]:
-        return self.list_circuit_candidates(file_id)
+    def get_circuit_candidates(self, file_id: str, lane: Optional[str] = "local") -> List[Dict[str, Any]]:
+        return self.list_circuit_candidates(file_id, lane=lane)
 
     def get_circuit_candidate(self, circuit_id: str) -> Dict[str, Any] | None:
         if self._pg_enabled:
@@ -1206,7 +1285,7 @@ class StateStore:
         self._save_json(state)
         return out
 
-    def _put_circuit_candidates_pg(self, file_id: str, rows: List[Dict[str, Any]]) -> None:
+    def _put_circuit_candidates_pg(self, file_id: str, rows: List[Dict[str, Any]], lane: str = "local") -> None:
         def _node_order(value: Any) -> int:
             if value is None or value == "":
                 return 1
@@ -1217,14 +1296,20 @@ class StateStore:
 
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"select circuit_id from {self._schema}.candidate_circuit where file_id=%s", (file_id,))
+                cur.execute(
+                    f"select circuit_id from {self._schema}.candidate_circuit where file_id=%s and lane=%s",
+                    (file_id, lane),
+                )
                 existing = [r.get("circuit_id", "") for r in cur.fetchall()]
                 if existing:
                     cur.execute(
                         f"delete from {self._schema}.candidate_circuit_node where candidate_circuit_id = any(%s::text[])",
                         (existing,),
                     )
-                cur.execute(f"delete from {self._schema}.candidate_circuit where file_id=%s", (file_id,))
+                cur.execute(
+                    f"delete from {self._schema}.candidate_circuit where file_id=%s and lane=%s",
+                    (file_id, lane),
+                )
                 for r in rows:
                     circuit_id = r.get("id", "") or r.get("circuit_id", "")
                     nodes = r.get("nodes", []) or []
@@ -1236,14 +1321,14 @@ class StateStore:
                           en_name_candidate, cn_name_candidate, alias_candidates, description_candidate,
                           circuit_kind_candidate, loop_type_candidate, cycle_verified_candidate,
                           confidence_circuit, granularity_candidate, extraction_method, llm_model,
-                          status, review_note, nodes, created_at, updated_at
+                          status, review_note, nodes, created_at, updated_at, lane
                         ) values (
                           %(circuit_id)s, %(circuit_name)s, %(circuit_family)s, %(confidence)s, %(evidence_chunk_ids)s::jsonb,
                           %(file_id)s, %(parsed_document_id)s, %(source_text)s,
                           %(en_name_candidate)s, %(cn_name_candidate)s, %(alias_candidates)s::jsonb, %(description_candidate)s,
                           %(circuit_kind_candidate)s, %(loop_type_candidate)s, %(cycle_verified_candidate)s,
                           %(confidence_circuit)s, %(granularity_candidate)s, %(extraction_method)s, %(llm_model)s,
-                          %(status)s, %(review_note)s, %(nodes_json)s::jsonb, %(created_at)s, %(updated_at)s
+                          %(status)s, %(review_note)s, %(nodes_json)s::jsonb, %(created_at)s, %(updated_at)s, %(lane)s
                         )
                         """,
                         {
@@ -1271,6 +1356,7 @@ class StateStore:
                             "nodes_json": self._to_json(nodes, []),
                             "created_at": r.get("created_at") or utc_now_iso(),
                             "updated_at": r.get("updated_at") or utc_now_iso(),
+                            "lane": r.get("lane", lane),
                         },
                     )
                     for n in nodes:
@@ -1384,6 +1470,7 @@ class StateStore:
             "id": row.get("circuit_id", ""),
             "file_id": row.get("file_id", ""),
             "parsed_document_id": row.get("parsed_document_id", ""),
+            "lane": row.get("lane", "local"),
             "source_text": row.get("source_text", ""),
             "en_name_candidate": row.get("en_name_candidate", ""),
             "cn_name_candidate": row.get("cn_name_candidate", ""),
@@ -1459,11 +1546,15 @@ class StateStore:
 
     def _put_task_pg(self, task: Dict[str, Any]) -> None:
         input_objects = task.get("input_objects", {}) or {}
+        # 把进度字段一起放进 parameters_json，不增加 DB 列
         params_json = {
             "parameters": task.get("parameters", {}),
             "trigger_source": task.get("trigger_source", "ui"),
             "model_name": task.get("model_name", ""),
             "created_at": task.get("created_at") or utc_now_iso(),
+            "progress_percent": task.get("progress_percent", 0),
+            "progress_stage": task.get("progress_stage", ""),
+            "progress_message": task.get("progress_message", ""),
         }
         with self._conn() as conn:
             with conn.cursor() as cur:
@@ -1668,4 +1759,55 @@ class StateStore:
             "error_reason": row.get("error_reason", ""),
             "output_summary": self._as_dict(row.get("output_summary_json")),
             "created_at": self._ts(row.get("created_at")),
+            # 进度字段从 parameters_json 读回
+            "progress_percent": params_json.get("progress_percent", 0),
+            "progress_stage": params_json.get("progress_stage", ""),
+            "progress_message": params_json.get("progress_message", ""),
         }
+
+    # ---- RegionResultVersion (JSON-only, no DB migration needed) ----
+
+    def put_region_result_version(self, version: Dict[str, Any]) -> None:
+        """Save or overwrite a RegionResultVersion by version_id (JSON store only)."""
+        state = self._load_json()
+        versions: List[Dict[str, Any]] = state.get("region_result_versions", [])
+        vid = version.get("version_id", "")
+        versions = [v for v in versions if v.get("version_id") != vid]
+        versions.insert(0, version)  # newest first
+        # Keep at most 50 versions total to prevent unbounded growth
+        state["region_result_versions"] = versions[:50]
+        self._save_json(state)
+
+    def list_region_result_versions(self, file_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Return all versions, optionally filtered by file_id. Items list is omitted for performance.
+
+        When file_id is provided, returns versions for that file PLUS any versions with empty
+        file_id (e.g. direct_generate versions), so the version bar always includes all methods.
+        """
+        state = self._load_json()
+        versions = state.get("region_result_versions", [])
+        if file_id:
+            versions = [v for v in versions if v.get("file_id") == file_id or not v.get("file_id")]
+        # Strip items array for list view (can be large); caller uses get_region_result_version to load full data
+        return [
+            {k: v for k, v in ver.items() if k != "items"}
+            for ver in versions
+        ]
+
+    def get_region_result_version(self, version_id: str) -> Optional[Dict[str, Any]]:
+        """Return the full version including items, or None if not found."""
+        state = self._load_json()
+        for v in state.get("region_result_versions", []):
+            if v.get("version_id") == version_id:
+                return v
+        return None
+
+    def delete_region_result_version(self, version_id: str) -> bool:
+        state = self._load_json()
+        versions = state.get("region_result_versions", [])
+        new_versions = [v for v in versions if v.get("version_id") != version_id]
+        if len(new_versions) == len(versions):
+            return False
+        state["region_result_versions"] = new_versions
+        self._save_json(state)
+        return True

@@ -1,4 +1,4 @@
-﻿const state = {
+const state = {
   activeTab: "tab-files",
   files: [],
   selectedFileId: "",
@@ -12,7 +12,6 @@
   tasks: [],
   logs: [],
   runtime: null,
-  lastExtractSummary: {},
   lastCircuitExtractSummary: {},
   lastConnectionExtractSummary: {},
   lastCommitResult: {},
@@ -24,7 +23,12 @@
   selectedUnverifiedCircuitId: "",
   unverifiedConnections: [],
   selectedUnverifiedConnectionId: "",
+  regionVersionsList: [],
+  regionSelectedVersionId: "",
+  regionExtractSubMode: "file",
 };
+
+let regionProgressTimer = null;
 
 function qs(id) {
   return document.getElementById(id);
@@ -53,6 +57,15 @@ function setActiveTab(tabId) {
   document.querySelectorAll(".tab-content").forEach((el) => el.classList.toggle("active", el.id === tabId));
   document.querySelectorAll(".tab-btn").forEach((el) => el.classList.toggle("active", el.dataset.tab === tabId));
   document.querySelectorAll(".nav-item").forEach((el) => el.classList.toggle("active", el.dataset.tab === tabId));
+  if (tabId === "tab-review-region") {
+    refreshCandidates().catch(() => {});
+  } else if (tabId === "tab-review-circuit") {
+    refreshCircuitCandidates().catch(() => {});
+  } else if (tabId === "tab-review-connection") {
+    refreshConnectionCandidates().catch(() => {});
+  } else if (tabId === "tab-extract-region") {
+    refreshRegionVersions().catch(() => {});
+  }
 }
 
 function pretty(obj) {
@@ -78,9 +91,9 @@ function renderConsole() {
 
 function fileActionButtons(file) {
   return `
-    <button class="btn mini" data-action="reparse" data-file-id="${file.file_id}">閲嶆柊瑙ｆ瀽</button>
-    <button class="btn mini" data-action="extract" data-file-id="${file.file_id}">鎶藉彇鑴戝尯</button>
-    <button class="btn mini" data-action="remove" data-file-id="${file.file_id}">绉婚櫎</button>
+    <button class="btn mini" data-action="reparse" data-file-id="${file.file_id}">重新解析</button>
+    <button class="btn mini" data-action="extract" data-file-id="${file.file_id}">脑区抽取</button>
+    <button class="btn mini" data-action="remove" data-file-id="${file.file_id}">移除</button>
   `;
 }
 
@@ -115,12 +128,395 @@ function renderFileDetail() {
   qs("file-meta-parse-task").textContent = file.latest_parse_task_id || "-";
 
   const previewText = doc.raw_text || (parsed.chunks || []).map((it) => it.text_content || "").join("\n").slice(0, 5000);
-  qs("file-preview-content").textContent = previewText || "鏆傛棤棰勮";
+  qs("file-preview-content").textContent = previewText || "暂无预览";
   qs("file-normalized-content").textContent = pretty(bundle.normalized || {});
+
+  const metaEl = qs("file-parsed-meta");
+  if (metaEl) {
+    if (!state.selectedBundle) {
+      metaEl.textContent = "（未选择文件）";
+    } else {
+      const norm = bundle.normalized || {};
+      const ccl = norm.content_chunk_layer || {};
+      metaEl.textContent = pretty({
+        parse_status: doc.parse_status,
+        parser_name: doc.parser_name,
+        chunk_count: (parsed.chunks || []).length,
+        table_rows_in_document: Array.isArray(doc.table_rows) ? doc.table_rows.length : 0,
+        content_chunk_layer: {
+          row_count: ccl.row_count,
+          sheet_names: ccl.sheet_names,
+          chunk_count: ccl.chunk_count,
+          has_raw_text: ccl.has_raw_text,
+          paragraph_count: ccl.paragraph_count,
+          table_cell_count: ccl.table_cell_count,
+        },
+      });
+    }
+  }
 }
 
-function renderExtractionSummary() {
-  qs("extract-summary").textContent = pretty(state.lastExtractSummary || {});
+function startRegionProgress(label) {
+  const wrap = qs("region-progress-wrap");
+  const fill = qs("region-progress-fill");
+  const lab = qs("region-progress-label");
+  if (!wrap || !fill) return;
+  wrap.hidden = false;
+  if (lab) lab.textContent = label || "执行中…";
+  let p = 0;
+  fill.style.width = "0%";
+  if (regionProgressTimer) clearInterval(regionProgressTimer);
+  regionProgressTimer = setInterval(() => {
+    p = Math.min(90, p + 2);
+    fill.style.width = `${p}%`;
+  }, 180);
+}
+
+function stopRegionProgress(success, label) {
+  if (regionProgressTimer) {
+    clearInterval(regionProgressTimer);
+    regionProgressTimer = null;
+  }
+  const wrap = qs("region-progress-wrap");
+  const fill = qs("region-progress-fill");
+  const lab = qs("region-progress-label");
+  if (fill) fill.style.width = success ? "100%" : "0%";
+  if (lab) lab.textContent = label || (success ? "完成" : "失败");
+  if (wrap) {
+    setTimeout(
+      () => {
+        wrap.hidden = true;
+      },
+      success ? 500 : 1200,
+    );
+  }
+}
+
+async function withRegionProgress(label, fn) {
+  startRegionProgress(label);
+  try {
+    const res = await fn();
+    stopRegionProgress(true, "完成");
+    return res;
+  } catch (e) {
+    stopRegionProgress(false, e.message || "失败");
+    throw e;
+  }
+}
+
+const DS_MODAL_STORAGE_KEY = "workbench_region_deepseek_modal_v1";
+
+const DS_FILE_PRESET_OPTIONS = [
+  { id: "default", label: "默认（结构化字段）" },
+  { id: "detailed", label: "详尽（穷尽候选）" },
+  { id: "minimal", label: "精简（单行指令）" },
+];
+
+const DS_DIRECT_PRESET_OPTIONS = [
+  { id: "default", label: "默认（与内置 build 一致）" },
+  { id: "detailed", label: "详尽" },
+  { id: "minimal", label: "精简" },
+];
+
+let deepseekModalResolver = null;
+
+function dsModalLoadStash() {
+  try {
+    const raw = localStorage.getItem(DS_MODAL_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function dsModalSaveStash(obj) {
+  try {
+    localStorage.setItem(DS_MODAL_STORAGE_KEY, JSON.stringify(obj));
+  } catch {
+    /* ignore */
+  }
+}
+
+function fillDeepseekModalFromRuntime() {
+  const r = state.runtime?.deepseek || {};
+  const en = qs("ds-deepseek-enabled");
+  const key = qs("ds-deepseek-key");
+  const base = qs("ds-deepseek-base");
+  const model = qs("ds-deepseek-model");
+  const temp = qs("ds-deepseek-temperature");
+  if (en) en.checked = !!r.enabled;
+  if (key) key.value = r.api_key || "";
+  if (base) base.value = r.base_url || "";
+  if (model) model.value = r.model || "";
+  if (temp) temp.value = r.temperature ?? 0.2;
+}
+
+function readDsModalConnectionFields() {
+  return {
+    enabled: !!(qs("ds-deepseek-enabled") && qs("ds-deepseek-enabled").checked),
+    api_key: (qs("ds-deepseek-key")?.value || "").trim(),
+    base_url: (qs("ds-deepseek-base")?.value || "").trim(),
+    model: (qs("ds-deepseek-model")?.value || "").trim(),
+    temperature: Number(qs("ds-deepseek-temperature")?.value ?? 0.2),
+  };
+}
+
+function updateDsStatusBadge() {
+  const badge = qs("ds-status-badge");
+  if (!badge) return;
+  const enabled = !!(qs("ds-deepseek-enabled")?.checked);
+  const key = (qs("ds-deepseek-key")?.value || "").trim();
+  if (!enabled) {
+    badge.textContent = "未启用";
+    badge.className = "ds-status-badge ds-status-warn";
+  } else if (!key) {
+    badge.textContent = "缺少 API Key";
+    badge.className = "ds-status-badge ds-status-error";
+  } else {
+    badge.textContent = "已配置";
+    badge.className = "ds-status-badge ds-status-ok";
+  }
+}
+
+function populateDeepseekPresetSelects() {
+  const fs = qs("ds-file-preset-select");
+  const ds = qs("ds-direct-preset-select");
+  if (fs) {
+    fs.innerHTML = "";
+    DS_FILE_PRESET_OPTIONS.forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.label;
+      fs.appendChild(opt);
+    });
+  }
+  if (ds) {
+    ds.innerHTML = "";
+    DS_DIRECT_PRESET_OPTIONS.forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.label;
+      ds.appendChild(opt);
+    });
+  }
+}
+
+async function refreshDeepseekProfileSelect() {
+  const sel = qs("ds-profile-select");
+  if (!sel) return;
+  const data = await api("/api/config/deepseek-profiles");
+  const profiles = data.profiles || {};
+  sel.innerHTML = "";
+  const names = Object.keys(profiles).sort();
+  names.forEach((name) => {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  });
+  return data;
+}
+
+function applyDeepseekModalStash(kind) {
+  const stash = dsModalLoadStash();
+  if (qs("ds-file-preset-select") && stash.filePreset) qs("ds-file-preset-select").value = stash.filePreset;
+  if (qs("ds-direct-preset-select") && stash.directPreset) qs("ds-direct-preset-select").value = stash.directPreset;
+  const fileCustomMode = qs("ds-file-custom-mode");
+  if (fileCustomMode) {
+    fileCustomMode.checked = !!stash.fileCustomMode;
+    const wrap = qs("ds-file-custom-wrap");
+    if (wrap) wrap.hidden = !fileCustomMode.checked;
+  }
+  const directCustomMode = qs("ds-direct-custom-mode");
+  if (directCustomMode) {
+    directCustomMode.checked = !!stash.directCustomMode;
+    const wrap = qs("ds-direct-custom-wrap");
+    if (wrap) wrap.hidden = !directCustomMode.checked;
+  }
+  if (qs("ds-file-custom-template")) qs("ds-file-custom-template").value = stash.fileCustom || "";
+  if (qs("ds-direct-custom-template")) qs("ds-direct-custom-template").value = stash.directCustom || "";
+  if (qs("ds-system-prompt")) qs("ds-system-prompt").value = stash.system || "";
+  if (qs("ds-save-profile-name")) qs("ds-save-profile-name").value = stash.saveName || "";
+  if (stash.profileName && qs("ds-profile-select")) {
+    const opt = Array.from(qs("ds-profile-select").options).find((o) => o.value === stash.profileName);
+    if (opt) qs("ds-profile-select").value = stash.profileName;
+  }
+}
+
+function stashFromDeepseekModal(kind) {
+  dsModalSaveStash({
+    filePreset: qs("ds-file-preset-select")?.value || "default",
+    directPreset: qs("ds-direct-preset-select")?.value || "default",
+    fileCustomMode: !!(qs("ds-file-custom-mode")?.checked),
+    directCustomMode: !!(qs("ds-direct-custom-mode")?.checked),
+    fileCustom: qs("ds-file-custom-template")?.value || "",
+    directCustom: qs("ds-direct-custom-template")?.value || "",
+    system: qs("ds-system-prompt")?.value || "",
+    saveName: qs("ds-save-profile-name")?.value || "",
+    profileName: qs("ds-profile-select")?.value || "",
+    lastKind: kind,
+  });
+}
+
+function buildDeepseekOverrideFromModal(kind) {
+  const o = {};
+  const sys = (qs("ds-system-prompt")?.value || "").trim();
+  if (sys) o.system_prompt = sys;
+
+  if (kind === "direct") {
+    const customMode = !!(qs("ds-direct-custom-mode")?.checked);
+    if (customMode) {
+      const t = (qs("ds-direct-custom-template")?.value || "").trim();
+      if (!t) {
+        throw new Error("请填写「直接生成」自定义 User 模板，或关闭自定义模板开关");
+      }
+      o.direct_region_user_prompt_template = t;
+    } else {
+      o.direct_region_prompt_preset = qs("ds-direct-preset-select")?.value || "default";
+    }
+  } else {
+    const customMode = !!(qs("ds-file-custom-mode")?.checked);
+    if (customMode) {
+      const t = (qs("ds-file-custom-template")?.value || "").trim();
+      if (!t) {
+        throw new Error("请填写「文件/文本」自定义 User 模板，或关闭自定义模板开关");
+      }
+      if (!t.includes("{TEXT}")) {
+        throw new Error("文件/文本自定义模板须包含占位符 {TEXT}");
+      }
+      o.region_user_prompt_template = t;
+    } else {
+      o.region_prompt_preset = qs("ds-file-preset-select")?.value || "default";
+    }
+  }
+  return o;
+}
+
+function openDeepseekRegionModal(kind) {
+  return new Promise((resolve) => {
+    deepseekModalResolver = resolve;
+    const modal = qs("modal-deepseek-region");
+    if (!modal) {
+      resolve({ profile_key: "", deepseek_override: undefined });
+      return;
+    }
+    (async () => {
+      try {
+        await refreshStatus();
+      } catch (_) {
+        /* 使用已有 state.runtime */
+      }
+      modal.dataset.kind = kind;
+      const hint = qs("ds-modal-kind-hint");
+      if (hint) {
+        hint.textContent =
+          kind === "direct" ? "③ DeepSeek 直接生成" : kind === "text" ? "② 文本抽取（粘贴文本）" : "① 文件抽取（已解析内容）";
+      }
+      const secFile = qs("ds-section-file-prompt");
+      const secDir = qs("ds-section-direct-prompt");
+      if (secFile) secFile.hidden = kind === "direct";
+      if (secDir) secDir.hidden = kind !== "direct";
+
+      fillDeepseekModalFromRuntime();
+      updateDsStatusBadge();
+
+      try {
+        await refreshDeepseekProfileSelect();
+      } catch (_) {
+        /* 忽略 */
+      }
+      applyDeepseekModalStash(kind);
+      modal.hidden = false;
+    })();
+  });
+}
+
+function closeDeepseekModal(result) {
+  const modal = qs("modal-deepseek-region");
+  if (modal) modal.hidden = true;
+  if (deepseekModalResolver) {
+    deepseekModalResolver(result);
+    deepseekModalResolver = null;
+  }
+}
+
+async function refreshRegionVersions() {
+  const fid = state.selectedFileId || (qs("extract-file-select") && qs("extract-file-select").value) || "";
+  const sel = qs("region-version-select");
+  if (!fid) {
+    state.regionVersionsList = [];
+    if (sel) sel.innerHTML = "";
+    renderRegionExtractTable([]);
+    return;
+  }
+  const payload = await api(`/api/region-result-versions?file_id=${encodeURIComponent(fid)}`);
+  state.regionVersionsList = payload.versions || [];
+  if (!sel) return;
+  sel.innerHTML = "";
+  state.regionVersionsList.forEach((v) => {
+    const opt = document.createElement("option");
+    opt.value = v.version_id;
+    const title = v.title || v.method || "版本";
+    opt.textContent = `${title} · ${v.item_count ?? 0}条`;
+    sel.appendChild(opt);
+  });
+  if (state.regionVersionsList.length) {
+    const keep = state.regionSelectedVersionId && state.regionVersionsList.some((x) => x.version_id === state.regionSelectedVersionId);
+    if (!keep) state.regionSelectedVersionId = state.regionVersionsList[0].version_id;
+    sel.value = state.regionSelectedVersionId;
+    await loadRegionVersionTable(state.regionSelectedVersionId);
+  } else {
+    state.regionSelectedVersionId = "";
+    renderRegionExtractTable([]);
+  }
+}
+
+async function loadRegionVersionTable(versionId) {
+  if (!versionId) {
+    renderRegionExtractTable([]);
+    return;
+  }
+  const payload = await api(`/api/region-result-versions/${encodeURIComponent(versionId)}`);
+  const ver = payload.version || {};
+  renderRegionExtractTable(ver.items || []);
+}
+
+function renderRegionExtractTable(items) {
+  const tbody = document.querySelector("#region-extract-result-table tbody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  (items || []).forEach((it) => {
+    const tr = document.createElement("tr");
+    const cells = [
+      it.id || "-",
+      it.en_name_candidate || "",
+      it.cn_name_candidate || "",
+      it.granularity_candidate || "",
+      it.lane || "",
+      it.extraction_method || "",
+      it.confidence != null ? String(it.confidence) : "",
+      String(it.source_text || "").slice(0, 200),
+    ];
+    cells.forEach((text) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+}
+
+function setRegionExtractMode(mode) {
+  state.regionExtractSubMode = mode;
+  document.querySelectorAll(".region-mode-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.regionMode === mode);
+  });
+  const pf = qs("region-panel-file");
+  const pt = qs("region-panel-text");
+  const pd = qs("region-panel-direct");
+  if (pf) pf.hidden = mode !== "file";
+  if (pt) pt.hidden = mode !== "text";
+  if (pd) pd.hidden = mode !== "direct";
 }
 
 function renderCircuitExtractionSummary() {
@@ -527,7 +923,7 @@ async function refreshCandidates() {
     fillCandidateEditor(null);
     return;
   }
-  const payload = await api(`/api/files/${state.selectedFileId}/region-candidates`);
+  const payload = await api(`/api/files/${state.selectedFileId}/region-candidates?lane=all`);
   state.candidates = payload.items || [];
   if (state.selectedCandidateId && !state.candidates.some((it) => it.id === state.selectedCandidateId)) {
     state.selectedCandidateId = "";
@@ -575,6 +971,17 @@ async function refreshConnectionCandidates() {
   }
   renderConnectionCandidateTable();
   fillConnectionEditor(state.connectionCandidates.find((it) => it.id === state.selectedConnectionCandidateId));
+}
+
+async function refreshReviewDataForActiveTab() {
+  const t = state.activeTab;
+  if (t === "tab-review-region") {
+    await refreshCandidates();
+  } else if (t === "tab-review-circuit") {
+    await refreshCircuitCandidates();
+  } else if (t === "tab-review-connection") {
+    await refreshConnectionCandidates();
+  }
 }
 
 async function refreshUnverified(sourceFileId = "") {
@@ -627,12 +1034,11 @@ async function selectFile(fileId) {
   state.selectedBundle = payload.bundle;
   renderFileDetail();
   syncExtractSelectors();
-  await refreshCandidates();
-  await refreshCircuitCandidates();
-  await refreshConnectionCandidates();
+  await refreshReviewDataForActiveTab();
   await refreshUnverified(fileId);
   await refreshUnverifiedCircuits(fileId);
   await refreshUnverifiedConnections(fileId);
+  await refreshRegionVersions();
   renderInspector();
 }
 
@@ -651,13 +1057,24 @@ async function runFileAction(action, fileId) {
       appendClientLog(`[PARSING] reparse triggered file_id=${fileId}`);
     } else if (action === "extract") {
       const mode = qs("extract-mode-select").value || "local";
-      await api(`/api/files/${fileId}/extract-regions`, { method: "POST", body: JSON.stringify({ mode }) });
+      let profileKey = "";
+      let deepseekOverride = undefined;
+      if (mode === "deepseek") {
+        const cfg = await openDeepseekRegionModal("file");
+        if (!cfg) return;
+        profileKey = cfg.profile_key || "";
+        deepseekOverride = cfg.deepseek_override;
+      }
+      const body = { mode };
+      if (profileKey) body.profile_key = profileKey;
+      if (deepseekOverride && Object.keys(deepseekOverride).length) body.deepseek_override = deepseekOverride;
+      await api(`/api/files/${fileId}/extract-regions`, { method: "POST", body: JSON.stringify(body) });
       appendClientLog(`[EXTRACT] region_extract triggered file_id=${fileId} mode=${mode}`);
     }
     await bootstrap();
   } catch (err) {
     appendClientLog(`[ERROR] action=${action} file_id=${fileId} reason=${err.message}`, "error");
-    alert(`鎿嶄綔澶辫触: ${err.message}`);
+    alert(`操作失败: ${err.message}`);
   }
 }
 
@@ -784,21 +1201,104 @@ async function reviewCircuitCandidate(action) {
   await bootstrap();
 }
 
-async function runRegionExtraction() {
+async function runRegionExtractFile() {
   const fileId = qs("extract-file-select").value || state.selectedFileId;
   const mode = qs("extract-mode-select").value || "local";
   if (!fileId) {
-    alert("璇峰厛閫夋嫨鏂囦欢");
+    alert("请先选择文件");
     return;
   }
-  const res = await api(`/api/files/${fileId}/extract-regions`, {
-    method: "POST",
-    body: JSON.stringify({ mode }),
-  });
-  state.lastExtractSummary = res;
-  renderExtractionSummary();
-  appendClientLog(`[EXTRACT] run file_id=${fileId} mode=${mode}`);
+  let profileKey = "";
+  let deepseekOverride = undefined;
+  if (mode === "deepseek") {
+    const cfg = await openDeepseekRegionModal("file");
+    if (!cfg) return;
+    profileKey = cfg.profile_key || "";
+    deepseekOverride = cfg.deepseek_override;
+  }
+  const body = { mode };
+  if (profileKey) body.profile_key = profileKey;
+  if (deepseekOverride && Object.keys(deepseekOverride).length) body.deepseek_override = deepseekOverride;
+
+  const res = await withRegionProgress(`文件抽取 · ${mode}`, () =>
+    api(`/api/files/${fileId}/extract-regions`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+  if (res.version_id) state.regionSelectedVersionId = res.version_id;
+  appendClientLog(`[EXTRACT] file file_id=${fileId} mode=${mode} version=${res.version_id || "-"}`);
   await bootstrap();
+  await refreshRegionVersions();
+}
+
+async function runRegionExtractText() {
+  const fileId = qs("extract-file-select").value || state.selectedFileId;
+  const mode = qs("region-text-mode-select").value || "local";
+  const text = (qs("region-text-input").value || "").trim();
+  if (!fileId) {
+    alert("请先选择文件");
+    return;
+  }
+  if (!text) {
+    alert("请输入文本");
+    return;
+  }
+  let profileKey = "";
+  let deepseekOverride = undefined;
+  if (mode === "deepseek") {
+    const cfg = await openDeepseekRegionModal("text");
+    if (!cfg) return;
+    profileKey = cfg.profile_key || "";
+    deepseekOverride = cfg.deepseek_override;
+  }
+  const body = { text, mode, file_id: fileId };
+  if (profileKey) body.profile_key = profileKey;
+  if (deepseekOverride && Object.keys(deepseekOverride).length) body.deepseek_override = deepseekOverride;
+
+  const res = await withRegionProgress(`文本抽取 · ${mode}`, () =>
+    api("/api/generate/regions", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+  if (res.version_id) state.regionSelectedVersionId = res.version_id;
+  appendClientLog(`[EXTRACT] text file_id=${fileId} mode=${mode}`);
+  await bootstrap();
+  await refreshRegionVersions();
+}
+
+async function runRegionExtractDirect() {
+  const fileId = qs("extract-file-select").value || state.selectedFileId;
+  if (!fileId) {
+    alert("请先选择文件");
+    return;
+  }
+  const cfg = await openDeepseekRegionModal("direct");
+  if (!cfg) return;
+  const profileKey = cfg.profile_key || "";
+  const deepseekOverride = cfg.deepseek_override;
+
+  const params = {
+    topic: (qs("region-direct-topic").value || "脑区").trim(),
+    species: (qs("region-direct-species").value || "小鼠").trim(),
+    granularity: (qs("region-direct-granularity").value || "major").trim(),
+    extra_instructions: (qs("region-direct-extra").value || "").trim(),
+  };
+  const body = { params, file_id: fileId };
+  if (profileKey) body.profile_key = profileKey;
+  if (deepseekOverride && Object.keys(deepseekOverride).length) body.deepseek_override = deepseekOverride;
+
+  const res = await withRegionProgress("DeepSeek 直接生成", () =>
+    api("/api/generate/regions-direct", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+  if (res.version_id) state.regionSelectedVersionId = res.version_id;
+  appendClientLog(`[EXTRACT] direct file_id=${fileId}`);
+  await bootstrap();
+  await refreshRegionVersions();
 }
 
 async function runCircuitExtraction() {
@@ -1120,11 +1620,17 @@ async function batchPromoteUnverifiedConnections() {
   await bootstrap();
 }
 
+function migrateSnapshotTabId(tabId) {
+  if (tabId === "tab-extraction") return "tab-extract-region";
+  if (tabId === "tab-review") return "tab-review-region";
+  return tabId;
+}
+
 async function restoreSnapshot() {
   try {
     const payload = await api("/api/workbench/snapshot");
     const ss = payload.snapshot || {};
-    if (ss.active_tab) setActiveTab(ss.active_tab);
+    if (ss.active_tab) setActiveTab(migrateSnapshotTabId(ss.active_tab));
     if (ss.selected_file_id) state.selectedFileId = ss.selected_file_id;
     if (ss.selected_candidate_id) state.selectedCandidateId = ss.selected_candidate_id;
     if (ss.selected_circuit_candidate_id) state.selectedCircuitCandidateId = ss.selected_circuit_candidate_id;
@@ -1177,7 +1683,7 @@ function bindEvents() {
       await uploadFile(evt.target);
     } catch (err) {
       appendClientLog(`[ERROR] upload failed reason=${err.message}`, "error");
-      alert(`涓婁紶澶辫触: ${err.message}`);
+      alert(`上传失败: ${err.message}`);
     }
   });
 
@@ -1199,11 +1705,6 @@ function bindEvents() {
     await runFileAction("reparse", state.selectedFileId);
   });
 
-  qs("btn-extract-selected").addEventListener("click", async () => {
-    if (!state.selectedFileId) return;
-    await runFileAction("extract", state.selectedFileId);
-  });
-
   qs("extract-file-select").addEventListener("change", async (evt) => {
     const fileId = evt.target.value;
     if (fileId) {
@@ -1211,14 +1712,70 @@ function bindEvents() {
     }
   });
 
-  qs("btn-run-region-extract").addEventListener("click", async () => {
-    try {
-      await runRegionExtraction();
-    } catch (err) {
-      appendClientLog(`[ERROR] extract failed reason=${err.message}`, "error");
-      alert(`鎶藉彇澶辫触: ${err.message}`);
-    }
+  document.querySelectorAll(".region-mode-btn").forEach((btn) => {
+    btn.addEventListener("click", () => setRegionExtractMode(btn.dataset.regionMode));
   });
+
+  const brf = qs("btn-region-run-file");
+  if (brf) {
+    brf.addEventListener("click", async () => {
+      try {
+        await runRegionExtractFile();
+      } catch (err) {
+        appendClientLog(`[ERROR] extract failed reason=${err.message}`, "error");
+        alert(`抽取失败: ${err.message}`);
+      }
+    });
+  }
+
+  const brt = qs("btn-region-run-text");
+  if (brt) {
+    brt.addEventListener("click", async () => {
+      try {
+        await runRegionExtractText();
+      } catch (err) {
+        appendClientLog(`[ERROR] text extract failed reason=${err.message}`, "error");
+        alert(`文本抽取失败: ${err.message}`);
+      }
+    });
+  }
+
+  const brd = qs("btn-region-run-direct");
+  if (brd) {
+    brd.addEventListener("click", async () => {
+      try {
+        await runRegionExtractDirect();
+      } catch (err) {
+        appendClientLog(`[ERROR] direct generate failed reason=${err.message}`, "error");
+        alert(`直接生成失败: ${err.message}`);
+      }
+    });
+  }
+
+  const brv = qs("btn-region-version-refresh");
+  if (brv) {
+    brv.addEventListener("click", async () => {
+      try {
+        await refreshRegionVersions();
+      } catch (err) {
+        appendClientLog(`[ERROR] version list failed reason=${err.message}`, "error");
+      }
+    });
+  }
+
+  const regionVerSel = qs("region-version-select");
+  if (regionVerSel) {
+    regionVerSel.addEventListener("change", async (evt) => {
+      state.regionSelectedVersionId = evt.target.value;
+      try {
+        await loadRegionVersionTable(state.regionSelectedVersionId);
+      } catch (err) {
+        appendClientLog(`[ERROR] load version failed reason=${err.message}`, "error");
+      }
+    });
+  }
+
+  setRegionExtractMode(state.regionExtractSubMode || "file");
 
   qs("circuit-extract-file-select").addEventListener("change", async (evt) => {
     const fileId = evt.target.value;
@@ -1284,7 +1841,7 @@ function bindEvents() {
       await saveCandidateEdit();
     } catch (err) {
       appendClientLog(`[ERROR] candidate save failed reason=${err.message}`, "error");
-      alert(`淇濆瓨澶辫触: ${err.message}`);
+      alert(`保存失败: ${err.message}`);
     }
   });
 
@@ -1294,7 +1851,7 @@ function bindEvents() {
       await reviewCandidate("approve");
     } catch (err) {
       appendClientLog(`[ERROR] approve failed reason=${err.message}`, "error");
-      alert(`瀹℃牳閫氳繃澶辫触: ${err.message}`);
+      alert(`审核通过失败: ${err.message}`);
     }
   });
 
@@ -1304,7 +1861,7 @@ function bindEvents() {
       await reviewCandidate("reject");
     } catch (err) {
       appendClientLog(`[ERROR] reject failed reason=${err.message}`, "error");
-      alert(`瀹℃牳椹冲洖澶辫触: ${err.message}`);
+      alert(`审核驳回失败: ${err.message}`);
     }
   });
 
@@ -1371,7 +1928,7 @@ function bindEvents() {
       await commitApprovedRegions();
     } catch (err) {
       appendClientLog(`[ERROR] stage to unverified failed reason=${err.message}`, "error");
-      alert(`鍏ユ湭楠岃瘉搴撳け璐? ${err.message}`);
+      alert(`入未验证库失败: ${err.message}`);
     }
   });
 
@@ -1389,7 +1946,7 @@ function bindEvents() {
       await validateSelectedUnverified();
     } catch (err) {
       appendClientLog(`[ERROR] validation failed reason=${err.message}`, "error");
-      alert(`鏈獙璇佹潯鐩獙璇佸け璐? ${err.message}`);
+      alert(`未验证条目验证失败: ${err.message}`);
     }
   });
 
@@ -1398,7 +1955,7 @@ function bindEvents() {
       await promoteSelectedUnverified();
     } catch (err) {
       appendClientLog(`[ERROR] promote failed reason=${err.message}`, "error");
-      alert(`鎻愬崌鍒版渶缁堝簱澶辫触: ${err.message}`);
+      alert(`提升到最终库失败: ${err.message}`);
     }
   });
 
@@ -1541,7 +2098,7 @@ function bindEvents() {
       await refreshLogs();
     } catch (err) {
       appendClientLog(`[ERROR] config save failed reason=${err.message}`, "error");
-      alert(`閰嶇疆淇濆瓨澶辫触: ${err.message}`);
+      alert(`配置保存失败: ${err.message}`);
     }
   });
 
@@ -1552,6 +2109,169 @@ function bindEvents() {
     const payload = await api(`/api/runs/${taskId}`);
     qs("task-detail").textContent = pretty(payload);
   });
+
+  populateDeepseekPresetSelects();
+
+  const modalDs = qs("modal-deepseek-region");
+  if (modalDs) {
+    modalDs.addEventListener("click", (evt) => {
+      if (evt.target === modalDs) closeDeepseekModal(null);
+    });
+  }
+  const btnDsCancel = qs("btn-ds-cancel");
+  if (btnDsCancel) btnDsCancel.addEventListener("click", () => closeDeepseekModal(null));
+  const btnDsConfirm = qs("btn-ds-confirm");
+  if (btnDsConfirm) {
+    btnDsConfirm.addEventListener("click", () => {
+      const modal = qs("modal-deepseek-region");
+      const kind = modal?.dataset?.kind || "file";
+      try {
+        const connOv = readDsModalConnectionFields();   // always include full connection params
+        const promptOv = buildDeepseekOverrideFromModal(kind);
+        const merged = { ...connOv, ...promptOv };
+        stashFromDeepseekModal(kind);
+        const profileKey = (qs("ds-profile-select")?.value || "").trim();
+        closeDeepseekModal({
+          profile_key: profileKey,
+          deepseek_override: merged,
+        });
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    });
+  }
+  const btnDsLoad = qs("btn-ds-load-profile");
+  if (btnDsLoad) {
+    btnDsLoad.addEventListener("click", async () => {
+      const pk = (qs("ds-profile-select")?.value || "").trim();
+      if (!pk) {
+        alert("请先在下拉框中选择配置名");
+        return;
+      }
+      try {
+        const data = await api("/api/config/deepseek-profiles");
+        const profiles = data.profiles || {};
+        const p = profiles[pk];
+        if (!p) {
+          alert("未找到该配置");
+          return;
+        }
+        if (p.enabled != null && qs("ds-deepseek-enabled")) qs("ds-deepseek-enabled").checked = !!p.enabled;
+        if (p.api_key != null && p.api_key !== "***" && qs("ds-deepseek-key")) qs("ds-deepseek-key").value = p.api_key;
+        if (p.base_url != null && qs("ds-deepseek-base")) qs("ds-deepseek-base").value = p.base_url;
+        if (p.model != null && qs("ds-deepseek-model")) qs("ds-deepseek-model").value = p.model;
+        if (p.temperature != null && qs("ds-deepseek-temperature")) qs("ds-deepseek-temperature").value = p.temperature;
+        if (p.system_prompt != null && qs("ds-system-prompt")) qs("ds-system-prompt").value = p.system_prompt;
+        if (p.region_prompt_preset && qs("ds-file-preset-select")) qs("ds-file-preset-select").value = p.region_prompt_preset;
+        if (p.region_user_prompt_template != null && qs("ds-file-custom-template")) {
+          qs("ds-file-custom-template").value = p.region_user_prompt_template;
+          if (p.region_user_prompt_template && qs("ds-file-custom-mode")) {
+            qs("ds-file-custom-mode").checked = true;
+            const w = qs("ds-file-custom-wrap"); if (w) w.hidden = false;
+          }
+        }
+        if (p.direct_region_prompt_preset && qs("ds-direct-preset-select")) qs("ds-direct-preset-select").value = p.direct_region_prompt_preset;
+        if (p.direct_region_user_prompt_template != null && qs("ds-direct-custom-template")) {
+          qs("ds-direct-custom-template").value = p.direct_region_user_prompt_template;
+          if (p.direct_region_user_prompt_template && qs("ds-direct-custom-mode")) {
+            qs("ds-direct-custom-mode").checked = true;
+            const w = qs("ds-direct-custom-wrap"); if (w) w.hidden = false;
+          }
+        }
+        updateDsStatusBadge();
+        appendClientLog(`[CONFIG] loaded deepseek profile ${pk}`);
+      } catch (err) {
+        alert(`加载失败: ${err.message}`);
+      }
+    });
+  }
+  const btnDsSave = qs("btn-ds-save-profile");
+  if (btnDsSave) {
+    btnDsSave.addEventListener("click", async () => {
+      const name = (qs("ds-save-profile-name")?.value || "").trim();
+      if (!name) {
+        alert("请填写要保存的配置名");
+        return;
+      }
+      try {
+        const profile = {
+          ...readDsModalConnectionFields(),
+          system_prompt: (qs("ds-system-prompt")?.value || "").trim(),
+          region_prompt_preset: qs("ds-file-preset-select")?.value || "default",
+          region_user_prompt_template: (qs("ds-file-custom-mode")?.checked ? (qs("ds-file-custom-template")?.value || "").trim() : ""),
+          direct_region_prompt_preset: qs("ds-direct-preset-select")?.value || "default",
+          direct_region_user_prompt_template: (qs("ds-direct-custom-mode")?.checked ? (qs("ds-direct-custom-template")?.value || "").trim() : ""),
+        };
+        await api("/api/config/deepseek-profiles", {
+          method: "POST",
+          body: JSON.stringify({ profile_key: name, profile }),
+        });
+        stashFromDeepseekModal(qs("modal-deepseek-region")?.dataset?.kind || "file");
+        await refreshDeepseekProfileSelect();
+        if (qs("ds-profile-select")) qs("ds-profile-select").value = name;
+        appendClientLog(`[CONFIG] saved deepseek profile ${name}`);
+        alert("配置已保存");
+      } catch (err) {
+        alert(`保存失败: ${err.message}`);
+      }
+    });
+  }
+
+  const btnDsSync = qs("btn-ds-sync-settings");
+  if (btnDsSync) {
+    btnDsSync.addEventListener("click", async () => {
+      try {
+        await refreshStatus();
+        fillDeepseekModalFromRuntime();
+        updateDsStatusBadge();
+        appendClientLog("[CONFIG] DeepSeek 弹窗已从全局设置重新载入");
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    });
+  }
+
+  const btnDsSaveGlobal = qs("btn-ds-save-global");
+  if (btnDsSaveGlobal) {
+    btnDsSaveGlobal.addEventListener("click", async () => {
+      try {
+        const conn = readDsModalConnectionFields();
+        const runtime = state.runtime || {};
+        const merged = Object.assign({}, runtime.deepseek || {}, conn);
+        await api("/api/config", {
+          method: "POST",
+          body: JSON.stringify({ deepseek: merged }),
+        });
+        await refreshStatus();
+        appendClientLog("[CONFIG] DeepSeek 参数已写回全局设置");
+        alert("全局设置已保存");
+      } catch (err) {
+        alert(`保存失败: ${err.message}`);
+      }
+    });
+  }
+
+  // Custom template toggle handlers
+  const fileCustomToggle = qs("ds-file-custom-mode");
+  if (fileCustomToggle) {
+    fileCustomToggle.addEventListener("change", () => {
+      const wrap = qs("ds-file-custom-wrap");
+      if (wrap) wrap.hidden = !fileCustomToggle.checked;
+    });
+  }
+  const directCustomToggle = qs("ds-direct-custom-mode");
+  if (directCustomToggle) {
+    directCustomToggle.addEventListener("change", () => {
+      const wrap = qs("ds-direct-custom-wrap");
+      if (wrap) wrap.hidden = !directCustomToggle.checked;
+    });
+  }
+
+  // Update status badge when connection fields change
+  ["ds-deepseek-enabled", "ds-deepseek-key"].forEach((id) => {
+    const el = qs(id);
+    if (el) el.addEventListener("change", updateDsStatusBadge);
+  });
 }
 
 async function bootstrap() {
@@ -1561,16 +2281,13 @@ async function bootstrap() {
     await selectFile(state.selectedFileId);
   } else {
     renderFileDetail();
-    await refreshCandidates();
-    await refreshCircuitCandidates();
-    await refreshConnectionCandidates();
+    await refreshReviewDataForActiveTab();
     await refreshUnverified();
     await refreshUnverifiedCircuits();
     await refreshUnverifiedConnections();
   }
   await refreshTasks();
   await refreshLogs();
-  renderExtractionSummary();
   renderCircuitExtractionSummary();
   renderConnectionExtractionSummary();
   renderUnverifiedTable();

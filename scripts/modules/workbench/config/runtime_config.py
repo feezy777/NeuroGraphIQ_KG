@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import yaml
 
@@ -47,7 +47,21 @@ DEFAULT_RUNTIME: Dict[str, Any] = {
         "base_url": "https://api.deepseek.com",
         "model": "deepseek-chat",
         "temperature": 0.2,
+        # Custom prompts: empty string means "use built-in default"
+        "system_prompt": "",
+        "user_prompt_prefix": "",
+        # 脑区抽取（文件/文本）：预设 id 见 ExtractionService；空则走默认预设
+        "region_prompt_preset": "default",
+        # 非空则完全覆盖预设 user 内容，需含 {TEXT} 占位符
+        "region_user_prompt_template": "",
+        # 脑区直接生成：预设 id；空模板则走内置默认/direct 预设
+        "direct_region_prompt_preset": "default",
+        "direct_region_user_prompt_template": "",
     },
+    # Persisted per-center DeepSeek profile overrides.
+    # Key is a profile name (e.g. "region_center", "circuit_center", "connection_center",
+    # or any user-chosen name). Each value is a partial deepseek dict merged over global.
+    "deepseek_profiles": {},
     "pipeline": {
         "auto_parse_on_upload": True,
         "auto_extract_on_parse": False,
@@ -87,6 +101,60 @@ def save_runtime(root_dir: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         encoding="utf-8",
     )
     return merged
+
+
+def resolve_deepseek_config(
+    global_runtime: Dict[str, Any],
+    profile_key: Optional[str] = None,
+    inline_override: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Resolve effective DeepSeek config with priority: inline_override > profile > global.
+
+    Args:
+        global_runtime: Full runtime dict (from load_runtime).
+        profile_key: Name of a persisted profile in runtime['deepseek_profiles'].
+        inline_override: A partial deepseek dict passed directly (e.g. from a single request).
+
+    Returns:
+        Flat deepseek config dict ready for ExtractionService.
+    """
+    global_deepseek = dict(global_runtime.get("deepseek", {}))
+
+    # Step 1: merge persisted profile over global (if any)
+    profiles = global_runtime.get("deepseek_profiles", {})
+    if profile_key and profile_key in profiles:
+        profile_cfg = profiles[profile_key] or {}
+        # Profile may omit api_key; if empty, inherit from global
+        merged = _deep_merge(global_deepseek, {k: v for k, v in profile_cfg.items() if v != ""})
+        config_source = f"profile:{profile_key}"
+    else:
+        merged = global_deepseek
+        config_source = "global"
+
+    # Step 2: merge inline one-shot override on top (highest priority)
+    if inline_override:
+        merged = _deep_merge(merged, {k: v for k, v in inline_override.items() if v != ""})
+        config_source = "inline_override"
+        # 若本次请求只指定了「预设 id」而未带自定义模板，则不应沿用 profile 里旧的整段模板
+        if "region_prompt_preset" in inline_override and "region_user_prompt_template" not in inline_override:
+            merged.pop("region_user_prompt_template", None)
+        if "direct_region_prompt_preset" in inline_override and "direct_region_user_prompt_template" not in inline_override:
+            merged.pop("direct_region_user_prompt_template", None)
+
+    return {
+        "enabled": bool(merged.get("enabled")),
+        "api_key": merged.get("api_key", ""),
+        "base_url": merged.get("base_url", "https://api.deepseek.com"),
+        "model": merged.get("model", "deepseek-chat"),
+        "temperature": float(merged.get("temperature", 0.2)),
+        "system_prompt": merged.get("system_prompt", ""),
+        "user_prompt_prefix": merged.get("user_prompt_prefix", ""),
+        "region_prompt_preset": merged.get("region_prompt_preset", "default"),
+        "region_user_prompt_template": merged.get("region_user_prompt_template", ""),
+        "direct_region_prompt_preset": merged.get("direct_region_prompt_preset", "default"),
+        "direct_region_user_prompt_template": merged.get("direct_region_user_prompt_template", ""),
+        "_config_source": config_source,
+    }
 
 
 def resolve_model_config(global_runtime: Dict[str, Any], task_override: Dict[str, Any] | None = None) -> Dict[str, Any]:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .common.id_utils import make_id
 from .common.log_bus import LogBus
@@ -145,8 +145,43 @@ class WorkbenchService:
         self.log_bus.emit(task["task_id"], "NORMALIZE", f"finish file_id={file_id}", event_type="normalize_succeeded")
         return {"success": True, "task_id": task["task_id"], "normalized_payload": normalized_payload}
 
+    def _persist_region_version_and_store(
+        self,
+        file_id: str,
+        method: str,
+        lane: str,
+        rows: List[Any],
+        *,
+        prompt_text: str = "",
+        prompt_meta: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        items = [self.store._to_dict(r) for r in rows]
+        version_id = make_id("rrv")
+        version = {
+            "version_id": version_id,
+            "file_id": file_id,
+            "method": method,
+            "lane": lane,
+            "title": f"{method} · {utc_now_iso()[:19]}",
+            "prompt_text": (prompt_text or "")[:20000],
+            "prompt_meta": prompt_meta or {},
+            "items": items,
+            "item_count": len(items),
+            "created_at": utc_now_iso(),
+        }
+        self.store.put_region_result_version(version)
+        self.store.put_region_candidates(file_id, rows, lane=lane)
+        return {"version_id": version_id, "item_count": len(items)}
+
     # region extraction
-    def trigger_extract_regions(self, file_id: str, mode: str = "local", initiator: str = "user") -> Dict[str, Any]:
+    def trigger_extract_regions(
+        self,
+        file_id: str,
+        mode: str = "local",
+        initiator: str = "user",
+        profile_key: str = "",
+        inline_deepseek_override: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         file_payload = self.file_service.get_file(file_id)
         parsed = self.store.get_parsed_document(file_id)
         if not parsed.get("document"):
@@ -172,14 +207,24 @@ class WorkbenchService:
             event_type="extract_region_started",
         )
 
-        runtime = self.config_service.get_runtime()
-        deepseek_cfg = runtime.get("deepseek", {})
+        deepseek_cfg = self.config_service.resolve_effective_deepseek(
+            profile_key=profile_key or None,
+            inline_override=inline_deepseek_override,
+        )
         try:
             if mode == "deepseek":
                 self.log_bus.emit(task["task_id"], "EXTRACT", "[DEEPSEEK] request_start", event_type="deepseek_request_started")
             result = self.extraction_service.run_region_extraction(file_payload, parsed, mode, deepseek_cfg)
             rows = result["candidates"]
-            self.store.put_region_candidates(file_id, rows)
+            lane = "deepseek" if mode == "deepseek" else "local"
+            rmethod = "file_deepseek" if mode == "deepseek" else "file_local"
+            ver = self._persist_region_version_and_store(
+                file_id,
+                rmethod,
+                lane,
+                rows,
+                prompt_meta={"mode": mode, "source": "file"},
+            )
             self.store.update_file(file_id, status=FileStatus.EXTRACTION_SUCCESS.value, updated_at=utc_now_iso())
             self.task_service.finish_task(task["task_id"], {"candidate_regions": len(rows), "mode": mode})
             if mode == "deepseek":
@@ -195,7 +240,7 @@ class WorkbenchService:
                 f"finish file_id={file_id} regions={len(rows)}",
                 event_type="extract_region_succeeded",
             )
-            return {"success": True, "task_id": task["task_id"], "count": len(rows)}
+            return {"success": True, "task_id": task["task_id"], "count": len(rows), **ver}
         except Exception as exc:
             self.store.update_file(file_id, status=FileStatus.EXTRACTION_FAILED.value, updated_at=utc_now_iso())
             self.task_service.fail_task(task["task_id"], str(exc))
@@ -208,7 +253,131 @@ class WorkbenchService:
             )
             return {"success": False, "task_id": task["task_id"], "error": str(exc)}
 
-    def trigger_extract_circuits(self, file_id: str, mode: str = "local", initiator: str = "user") -> Dict[str, Any]:
+    def generate_regions_from_text(
+        self,
+        text: str,
+        mode: str,
+        file_id: str,
+        profile_key: str = "",
+        inline_deepseek_override: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        file_payload = self.file_service.get_file(file_id)
+        if not file_payload:
+            return {"success": False, "error": "file_not_found"}
+        text = (text or "").strip()
+        if not text:
+            return {"success": False, "error": "text_required"}
+        deepseek_cfg = self.config_service.resolve_effective_deepseek(
+            profile_key=profile_key or None,
+            inline_override=inline_deepseek_override,
+        )
+        parsed = self.extraction_service.build_synthetic_parsed_from_text(text, file_id)
+        result = self.extraction_service.run_region_extraction(file_payload, parsed, mode, deepseek_cfg)
+        rows = result["candidates"]
+        lane = "deepseek" if mode == "deepseek" else "local"
+        rmethod = "text_deepseek" if mode == "deepseek" else "text_local"
+        ver = self._persist_region_version_and_store(
+            file_id,
+            rmethod,
+            lane,
+            rows,
+            prompt_text=text[:12000],
+            prompt_meta={"mode": mode, "input_kind": "text"},
+        )
+        self.store.update_file(file_id, status=FileStatus.EXTRACTION_SUCCESS.value, updated_at=utc_now_iso())
+        return {"success": True, "count": len(rows), **ver, "method": result.get("method")}
+
+    def generate_regions_direct(
+        self,
+        params: Dict[str, Any],
+        profile_key: str = "",
+        inline_deepseek_override: Optional[Dict[str, Any]] = None,
+        file_id: str = "",
+    ) -> Dict[str, Any]:
+        if not file_id:
+            return {"success": False, "error": "file_id_required"}
+        file_payload = self.file_service.get_file(file_id)
+        if not file_payload:
+            return {"success": False, "error": "file_not_found"}
+        p = dict(params or {})
+        if not p.get("topic"):
+            p["topic"] = "脑区"
+        deepseek_cfg = self.config_service.resolve_effective_deepseek(
+            profile_key=profile_key or None,
+            inline_override=inline_deepseek_override,
+        )
+        parsed = self.extraction_service.build_synthetic_parsed_from_text(f"[direct] topic={p.get('topic')}", file_id)
+        pd_id = parsed["document"]["parsed_document_id"]
+        rows = self.extraction_service.run_direct_deepseek_regions(file_payload, pd_id, p, deepseek_cfg)
+        prompt = self.extraction_service.build_region_prompt("direct_generate", p)
+        ver = self._persist_region_version_and_store(
+            file_id,
+            "direct_deepseek",
+            "deepseek",
+            rows,
+            prompt_text=prompt,
+            prompt_meta=p,
+        )
+        self.store.update_file(file_id, status=FileStatus.EXTRACTION_SUCCESS.value, updated_at=utc_now_iso())
+        return {"success": True, "count": len(rows), **ver, "method": "direct_deepseek"}
+
+    def list_region_result_versions(self, file_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        return self.store.list_region_result_versions(file_id=file_id)
+
+    def get_region_result_version(self, version_id: str) -> Optional[Dict[str, Any]]:
+        return self.store.get_region_result_version(version_id)
+
+    def delete_region_result_version(self, version_id: str) -> bool:
+        return self.store.delete_region_result_version(version_id)
+
+    def save_generated_candidates(
+        self,
+        entity_type: str,
+        file_id: str,
+        candidates: List[Dict[str, Any]],
+        lane: str = "local",
+    ) -> Dict[str, Any]:
+        if entity_type == "region":
+            self.store.put_region_candidates(file_id, candidates, lane=lane)
+            return {"success": True, "count": len(candidates)}
+        if entity_type == "circuit":
+            self.store.put_circuit_candidates(file_id, candidates, lane=lane)
+            return {"success": True, "count": len(candidates)}
+        if entity_type == "connection":
+            self.store.put_connection_candidates(file_id, candidates, lane=lane)
+            return {"success": True, "count": len(candidates)}
+        return {"success": False, "error": "invalid_type"}
+
+    def generate_circuits_from_text(
+        self,
+        text: str,
+        mode: str,
+        file_id: str,
+        profile_key: str = "",
+        inline_deepseek_override: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        _ = (text, mode, file_id, profile_key, inline_deepseek_override)
+        return {"success": False, "error": "circuit_text_generate_not_implemented"}
+
+    def generate_connections_from_text(
+        self,
+        text: str,
+        mode: str,
+        file_id: str,
+        profile_key: str = "",
+        inline_deepseek_override: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        _ = (text, mode, file_id, profile_key, inline_deepseek_override)
+        return {"success": False, "error": "connection_text_generate_not_implemented"}
+
+    def trigger_extract_circuits(
+        self,
+        file_id: str,
+        mode: str = "local",
+        initiator: str = "user",
+        profile_key: str = "",
+        inline_deepseek_override: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         file_payload = self.file_service.get_file(file_id)
         parsed = self.store.get_parsed_document(file_id)
         if not parsed.get("document"):
@@ -227,10 +396,12 @@ class WorkbenchService:
             f"start circuit_extract file_id={file_id} mode={mode}",
             event_type="extract_circuit_started",
         )
-        runtime = self.config_service.get_runtime()
-        deepseek_cfg = runtime.get("deepseek", {})
+        deepseek_cfg = self.config_service.resolve_effective_deepseek(
+            profile_key=profile_key or None,
+            inline_override=inline_deepseek_override,
+        )
         try:
-            region_candidates = self.store.get_region_candidates(file_id)
+            region_candidates = self.store.list_region_candidates(file_id, lane=None)
             result = self.extraction_service.run_circuit_extraction(file_payload, parsed, mode, deepseek_cfg, region_candidates)
             rows = result["candidates"]
             self.store.put_circuit_candidates(file_id, rows)
@@ -253,7 +424,14 @@ class WorkbenchService:
             )
             return {"success": False, "task_id": task["task_id"], "error": str(exc)}
 
-    def trigger_extract_connections(self, file_id: str, mode: str = "local", initiator: str = "user") -> Dict[str, Any]:
+    def trigger_extract_connections(
+        self,
+        file_id: str,
+        mode: str = "local",
+        initiator: str = "user",
+        profile_key: str = "",
+        inline_deepseek_override: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         file_payload = self.file_service.get_file(file_id)
         parsed = self.store.get_parsed_document(file_id)
         if not parsed.get("document"):
@@ -272,10 +450,12 @@ class WorkbenchService:
             f"start connection_extract file_id={file_id} mode={mode}",
             event_type="extract_connection_started",
         )
-        runtime = self.config_service.get_runtime()
-        deepseek_cfg = runtime.get("deepseek", {})
+        deepseek_cfg = self.config_service.resolve_effective_deepseek(
+            profile_key=profile_key or None,
+            inline_override=inline_deepseek_override,
+        )
         try:
-            region_candidates = self.store.get_region_candidates(file_id)
+            region_candidates = self.store.list_region_candidates(file_id, lane=None)
             result = self.extraction_service.run_connection_extraction(file_payload, parsed, mode, deepseek_cfg, region_candidates)
             rows = result["candidates"]
             self.store.put_connection_candidates(file_id, rows)

@@ -1,6 +1,8 @@
 .idea/
 .venv/
-artifacts/
+artifacts/*
+!artifacts/neo4j/
+!artifacts/neo4j/*.cypher
 logs/
 __pycache__/
 *.pyc

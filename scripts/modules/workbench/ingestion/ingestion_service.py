@@ -17,6 +17,7 @@ CIRCUIT_KIND_ALLOWED = {"structural", "functional", "inferred", "unknown"}
 LOOP_TYPE_ALLOWED = {"strict", "inferred", "functional"}
 CONNECTION_MODALITY_ALLOWED = {"structural", "functional", "effective", "unknown"}
 EVIDENCE_TYPE_ALLOWED = {"paper", "abstract", "database_record", "review", "manual_note"}
+LOW_CONFIDENCE_THRESHOLD = 0.60
 
 
 def _make_id(prefix: str) -> str:
@@ -638,6 +639,8 @@ class IngestionService:
                 warnings = check["warnings"]
                 failed_fields = check["failed_fields"]
                 rule_checks = check["rule_checks"]
+                rule_summary = check.get("rule_summary", {})
+                low_confidence = bool(check.get("low_confidence", False))
                 passed = len(errors) == 0
                 score = max(0.0, min(1.0, 1.0 - (0.2 * len(errors)) - (0.05 * len(warnings))))
                 status = "validation_passed" if passed else "validation_failed"
@@ -648,6 +651,8 @@ class IngestionService:
                     "warnings": warnings,
                     "failed_fields": failed_fields,
                     "rule_checks": rule_checks,
+                    "rule_summary": rule_summary,
+                    "low_confidence": low_confidence,
                 }
                 validation_id = _make_id("uvconval")
                 cur.execute(
@@ -683,6 +688,8 @@ class IngestionService:
             "warnings": warnings,
             "failed_fields": failed_fields,
             "rule_checks": rule_checks,
+            "rule_summary": rule_summary,
+            "low_confidence": low_confidence,
         }
 
     def promote_unverified_connection(
@@ -716,6 +723,7 @@ class IngestionService:
                             "warnings": precheck["warnings"],
                             "failed_fields": precheck["failed_fields"],
                             "rule_checks": precheck["rule_checks"],
+                            "rule_summary": precheck.get("rule_summary", {}),
                         },
                     }
                 ucur.execute(
@@ -765,6 +773,7 @@ class IngestionService:
                         "unverified_connection_id": unverified_connection_id,
                         "source_candidate_connection_id": row.get("source_candidate_connection_id", ""),
                         "promotion": insert_res,
+                        "rule_summary": precheck.get("rule_summary", {}),
                     }
                 except ValueError as exc:
                     reason = str(exc)
@@ -783,7 +792,11 @@ class IngestionService:
                         (unverified_connection_id,),
                     )
                     uconn.commit()
-                    return {"success": False, "error": "promote_connection_precheck_failed", "detail": detail}
+                    return {
+                        "success": False,
+                        "error": "promote_connection_precheck_failed",
+                        "detail": {**detail, "rule_summary": precheck.get("rule_summary", {})},
+                    }
                 except Exception as exc:
                     reason = str(exc)
                     promo_id = _make_id("conpromo")
@@ -800,7 +813,11 @@ class IngestionService:
                         (unverified_connection_id,),
                     )
                     uconn.commit()
-                    return {"success": False, "error": "promote_connection_failed", "detail": {"message": reason}}
+                    return {
+                        "success": False,
+                        "error": "promote_connection_failed",
+                        "detail": {"message": reason, "rule_summary": precheck.get("rule_summary", {})},
+                    }
 
     def validate_unverified_circuit(
         self,
@@ -834,6 +851,8 @@ class IngestionService:
                 warnings = check["warnings"]
                 failed_fields = check["failed_fields"]
                 rule_checks = check["rule_checks"]
+                rule_summary = check.get("rule_summary", {})
+                low_confidence = bool(check.get("low_confidence", False))
                 passed = len(errors) == 0
                 score = max(0.0, min(1.0, 1.0 - (0.2 * len(errors)) - (0.05 * len(warnings))))
                 status = "validation_passed" if passed else "validation_failed"
@@ -844,6 +863,8 @@ class IngestionService:
                     "warnings": warnings,
                     "failed_fields": failed_fields,
                     "rule_checks": rule_checks,
+                    "rule_summary": rule_summary,
+                    "low_confidence": low_confidence,
                 }
                 validation_id = _make_id("uvcval")
                 cur.execute(
@@ -879,6 +900,8 @@ class IngestionService:
             "warnings": warnings,
             "failed_fields": failed_fields,
             "rule_checks": rule_checks,
+            "rule_summary": rule_summary,
+            "low_confidence": low_confidence,
         }
 
     def promote_unverified_circuit(
@@ -917,6 +940,7 @@ class IngestionService:
                             "warnings": precheck["warnings"],
                             "failed_fields": precheck["failed_fields"],
                             "rule_checks": precheck["rule_checks"],
+                            "rule_summary": precheck.get("rule_summary", {}),
                         },
                     }
                 ucur.execute(
@@ -966,6 +990,7 @@ class IngestionService:
                         "unverified_circuit_id": unverified_circuit_id,
                         "source_candidate_circuit_id": circuit.get("source_candidate_circuit_id", ""),
                         "promotion": insert_res,
+                        "rule_summary": precheck.get("rule_summary", {}),
                     }
                 except ValueError as exc:
                     reason = str(exc)
@@ -984,7 +1009,11 @@ class IngestionService:
                         (unverified_circuit_id,),
                     )
                     uconn.commit()
-                    return {"success": False, "error": "promote_circuit_precheck_failed", "detail": detail}
+                    return {
+                        "success": False,
+                        "error": "promote_circuit_precheck_failed",
+                        "detail": {**detail, "rule_summary": precheck.get("rule_summary", {})},
+                    }
                 except Exception as exc:
                     reason = str(exc)
                     promo_id = _make_id("cpromo")
@@ -1001,12 +1030,17 @@ class IngestionService:
                         (unverified_circuit_id,),
                     )
                     uconn.commit()
-                    return {"success": False, "error": "promote_circuit_failed", "detail": {"message": reason}}
+                    return {
+                        "success": False,
+                        "error": "promote_circuit_failed",
+                        "detail": {"message": reason, "rule_summary": precheck.get("rule_summary", {})},
+                    }
 
     def validate_unverified_region(
         self,
         unverified_region_id: str,
         unverified_cfg: Dict[str, Any],
+        production_cfg: Dict[str, Any] | None = None,
         validator_name: str = "rule_basic_validator",
         validation_type: str = "rule",
     ) -> Dict[str, Any]:
@@ -1024,11 +1058,18 @@ class IngestionService:
                     (unverified_region_id,),
                 )
 
-                check_result = self._validate_unverified_row(row, cur=cur, schema=schema)
+                check_result = self._validate_unverified_row(
+                    row,
+                    cur=cur,
+                    schema=schema,
+                    production_cfg=production_cfg or {},
+                )
                 errors = check_result["errors"]
                 warnings = check_result["warnings"]
                 failed_fields = check_result["failed_fields"]
                 rule_checks = check_result["rule_checks"]
+                rule_summary = check_result.get("rule_summary", {})
+                low_confidence = bool(check_result.get("low_confidence", False))
                 passed = len(errors) == 0
                 score = max(0.0, min(1.0, 1.0 - (0.2 * len(errors)) - (0.05 * len(warnings))))
                 status = "validation_passed" if passed else "validation_failed"
@@ -1042,6 +1083,8 @@ class IngestionService:
                     "warnings": warnings,
                     "failed_fields": failed_fields,
                     "rule_checks": rule_checks,
+                    "rule_summary": rule_summary,
+                    "low_confidence": low_confidence,
                     "granularity": row.get("granularity", ""),
                     "laterality": row.get("laterality", ""),
                 }
@@ -1080,6 +1123,8 @@ class IngestionService:
             "warnings": warnings,
             "failed_fields": failed_fields,
             "rule_checks": rule_checks,
+            "rule_summary": rule_summary,
+            "low_confidence": low_confidence,
         }
 
     def promote_unverified_region(
@@ -1103,7 +1148,7 @@ class IngestionService:
                         "error": "validation_not_passed",
                         "detail": {"validation_status": row.get("validation_status"), "promotion_status": row.get("promotion_status")},
                     }
-                precheck = self._validate_unverified_row(row)
+                precheck = self._validate_unverified_row(row, production_cfg=production_cfg)
                 if precheck["errors"]:
                     return {
                         "success": False,
@@ -1113,6 +1158,7 @@ class IngestionService:
                             "warnings": precheck["warnings"],
                             "failed_fields": precheck["failed_fields"],
                             "rule_checks": precheck["rule_checks"],
+                            "rule_summary": precheck.get("rule_summary", {}),
                         },
                     }
                 ucur.execute(
@@ -1169,6 +1215,7 @@ class IngestionService:
                         "unverified_region_id": unverified_region_id,
                         "source_candidate_region_id": row.get("source_candidate_region_id", ""),
                         "promotion": insert_res,
+                        "rule_summary": precheck.get("rule_summary", {}),
                     }
                 except ValueError as exc:
                     reason = str(exc)
@@ -1187,7 +1234,11 @@ class IngestionService:
                         (unverified_region_id,),
                     )
                     uconn.commit()
-                    return {"success": False, "error": "promote_precheck_failed", "detail": detail}
+                    return {
+                        "success": False,
+                        "error": "promote_precheck_failed",
+                        "detail": {**detail, "rule_summary": precheck.get("rule_summary", {})},
+                    }
                 except Exception as exc:
                     reason = str(exc)
                     promo_id = _make_id("promo")
@@ -1211,6 +1262,7 @@ class IngestionService:
                             "message": reason,
                             "failed_fields": [],
                             "rule_checks": {},
+                            "rule_summary": precheck.get("rule_summary", {}),
                         },
                     }
 
@@ -1219,6 +1271,7 @@ class IngestionService:
         row: Dict[str, Any],
         cur: psycopg.Cursor | None = None,
         schema: str = "neurokg_unverified",
+        production_cfg: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         errors: List[str] = []
         warnings: List[str] = []
@@ -1283,13 +1336,36 @@ class IngestionService:
 
         if cur is not None:
             warnings.extend(self._find_unverified_duplicate_warnings(cur, schema, row))
+        if production_cfg:
+            try:
+                prod_db = self._db_cfg(production_cfg)
+                prod_schema = production_cfg.get("schema", "neurokg")
+                with psycopg.connect(**prod_db, row_factory=dict_row) as pconn:
+                    with pconn.cursor() as pcur:
+                        warnings.extend(self._find_final_duplicate_warnings(pcur, prod_schema, row))
+            except Exception as exc:
+                warnings.append(f"final_duplicate_check_failed:{exc}")
+
+        confidence_raw = row.get("confidence")
+        try:
+            confidence = float(confidence_raw if confidence_raw is not None else 0.0)
+        except Exception:
+            confidence = -1.0
+        low_confidence = self._is_low_confidence(confidence)
+        if low_confidence:
+            warnings.append(f"low_confidence:{confidence_raw}")
+        rule_checks["confidence"] = {"ok": confidence >= 0, "value": confidence_raw, "low_confidence": low_confidence}
+
         if warnings:
             rule_checks["duplicates"] = {"ok": True, "warnings": warnings}
+        rule_summary = self._build_rule_summary(errors, warnings, rule_checks, failed_fields)
         return {
             "errors": errors,
             "warnings": warnings,
             "failed_fields": list(dict.fromkeys(failed_fields)),
             "rule_checks": rule_checks,
+            "rule_summary": rule_summary,
+            "low_confidence": low_confidence,
         }
 
     def _find_unverified_duplicate_warnings(self, cur: psycopg.Cursor, schema: str, row: Dict[str, Any]) -> List[str]:
@@ -1400,6 +1476,7 @@ class IngestionService:
             "parent_region_candidate": row.get("parent_region_ref", ""),
             "ontology_source_candidate": row.get("ontology_source", "workbench"),
             "confidence": float(row.get("confidence") or 0.0),
+            "low_confidence": self._is_low_confidence(float(row.get("confidence") or 0.0)),
             "extraction_method": "unverified_promote",
         }
 
@@ -1615,6 +1692,7 @@ class IngestionService:
             "ontology_source": row.get("ontology_source", ""),
             "data_source": row.get("data_source", ""),
             "confidence": float(row.get("confidence") or 0.0),
+            "low_confidence": self._is_low_confidence(float(row.get("confidence") or 0.0)),
             "validation_status": row.get("validation_status", "validation_pending"),
             "promotion_status": row.get("promotion_status", "not_ready"),
             "review_status": row.get("review_status", "reviewed"),
@@ -1626,6 +1704,8 @@ class IngestionService:
             "latest_validation_score": float(row.get("latest_validation_score") or 0.0),
             "latest_validation_message": row.get("latest_validation_message", ""),
             "latest_validation_detail_json": row.get("latest_validation_detail_json") or {},
+            "rule_summary": (row.get("latest_validation_detail_json") or {}).get("rule_summary", {}),
+            "rule_summary": (row.get("latest_validation_detail_json") or {}).get("rule_summary", {}),
             "latest_validation_at": str(row.get("latest_validation_at")).replace("+00:00", "Z")
             if row.get("latest_validation_at")
             else "",
@@ -1657,6 +1737,7 @@ class IngestionService:
             "loop_type": row.get("loop_type", "inferred"),
             "cycle_verified": bool(row.get("cycle_verified", False)),
             "confidence_circuit": float(row.get("confidence_circuit") or 0.0),
+            "low_confidence": self._is_low_confidence(float(row.get("confidence_circuit") or 0.0)),
             "validation_status": row.get("validation_status", "validation_pending"),
             "promotion_status": row.get("promotion_status", "not_ready"),
             "review_status": row.get("review_status", "reviewed"),
@@ -1680,6 +1761,7 @@ class IngestionService:
             "latest_validation_score": float(row.get("latest_validation_score") or 0.0),
             "latest_validation_message": row.get("latest_validation_message", ""),
             "latest_validation_detail_json": row.get("latest_validation_detail_json") or {},
+            "rule_summary": (row.get("latest_validation_detail_json") or {}).get("rule_summary", {}),
             "latest_validation_at": str(row.get("latest_validation_at")).replace("+00:00", "Z")
             if row.get("latest_validation_at")
             else "",
@@ -1791,6 +1873,20 @@ class IngestionService:
             errors.append("source_target_same")
             failed_fields.extend(["source_region_ref", "target_region_ref"])
         rule_checks["source_target"] = {"ok": bool(source_ref and target_ref and source_ref != target_ref)}
+        expected_prefix = {"major": "REG_MAJ_", "sub": "REG_SUB_", "allen": "REG_ALL_"}.get(granularity, "")
+        if expected_prefix and source_ref and not source_ref.startswith(expected_prefix):
+            errors.append(f"source_granularity_mismatch:{source_ref}")
+            failed_fields.append("source_region_ref")
+        if expected_prefix and target_ref and not target_ref.startswith(expected_prefix):
+            errors.append(f"target_granularity_mismatch:{target_ref}")
+            failed_fields.append("target_region_ref")
+        if expected_prefix:
+            rule_checks["granularity_route"] = {
+                "ok": all(
+                    not value or value.startswith(expected_prefix) for value in (source_ref, target_ref)
+                ),
+                "expected_prefix": expected_prefix,
+            }
 
         if confidence < 0 or confidence > 1:
             errors.append(f"invalid_confidence:{confidence_raw}")
@@ -1798,6 +1894,10 @@ class IngestionService:
             rule_checks["confidence"] = {"ok": False, "value": confidence_raw}
         else:
             rule_checks["confidence"] = {"ok": True, "value": confidence}
+        low_confidence = self._is_low_confidence(confidence)
+        if low_confidence:
+            warnings.append(f"low_confidence:{confidence}")
+        rule_checks["confidence"]["low_confidence"] = low_confidence
 
         if not (en_name or cn_name):
             warnings.append("missing_connection_name")
@@ -1845,6 +1945,38 @@ class IngestionService:
                         if cur.fetchone():
                             warnings.append("duplicate_connection_alias_in_final")
 
+        uv_cfg = production_cfg.get("_unverified_ref", {})
+        if uv_cfg:
+            uv_schema = uv_cfg.get("schema", "neurokg_unverified")
+            uv_db = self._db_cfg(uv_cfg)
+            try:
+                with psycopg.connect(**uv_db, row_factory=dict_row) as uconn:
+                    with uconn.cursor() as ucur:
+                        ucur.execute(
+                            f"""
+                            select id, en_name, cn_name, alias
+                            from {uv_schema}.unverified_connection
+                            where id<>%s
+                              and granularity=%s
+                              and source_region_ref=%s
+                              and target_region_ref=%s
+                              and connection_modality=%s
+                            order by created_at desc
+                            limit 5
+                            """,
+                            (
+                                connection_row.get("id", ""),
+                                granularity,
+                                source_ref,
+                                target_ref,
+                                modality,
+                            ),
+                        )
+                        for other in ucur.fetchall():
+                            warnings.append(f"duplicate_connection_pattern_in_unverified:{other.get('id','')}")
+            except Exception as exc:
+                warnings.append(f"unverified_duplicate_check_failed:{exc}")
+
         evidence_check = self._validate_evidence_items(connection_row.get("evidence_json"), entity="connection")
         if evidence_check["errors"]:
             errors.extend(evidence_check["errors"])
@@ -1855,11 +1987,14 @@ class IngestionService:
 
         if warnings:
             rule_checks["duplicates"] = {"ok": True, "warnings": warnings}
+        rule_summary = self._build_rule_summary(errors, warnings, rule_checks, failed_fields)
         return {
             "errors": errors,
             "warnings": warnings,
             "failed_fields": list(dict.fromkeys(failed_fields)),
             "rule_checks": rule_checks,
+            "rule_summary": rule_summary,
+            "low_confidence": low_confidence,
         }
 
     def _validate_unverified_circuit(
@@ -1907,6 +2042,15 @@ class IngestionService:
             rule_checks["name"] = {"ok": False}
         else:
             rule_checks["name"] = {"ok": True}
+        confidence_raw = circuit_row.get("confidence_circuit")
+        try:
+            confidence = float(confidence_raw if confidence_raw is not None else 0.0)
+        except Exception:
+            confidence = -1.0
+        low_confidence = self._is_low_confidence(confidence)
+        if low_confidence:
+            warnings.append(f"low_confidence:{confidence}")
+        rule_checks["confidence_circuit"] = {"ok": confidence >= 0, "value": confidence_raw, "low_confidence": low_confidence}
 
         if not nodes:
             errors.append("missing_circuit_nodes")
@@ -1986,6 +2130,39 @@ class IngestionService:
                         if cur.fetchone():
                             warnings.append("duplicate_circuit_alias_in_final")
 
+        if granularity in GRANULARITY_ALLOWED and nodes:
+            uv_cfg = production_cfg.get("_unverified_ref", {})
+            if uv_cfg:
+                uv_schema = uv_cfg.get("schema", "neurokg_unverified")
+                uv_db = self._db_cfg(uv_cfg)
+                node_sig = "|".join(
+                    sorted(
+                        f"{(n.get('region_id_ref') or '').strip()}:{int(n.get('node_order') or 0)}"
+                        for n in nodes
+                    )
+                )
+                try:
+                    with psycopg.connect(**uv_db, row_factory=dict_row) as uconn:
+                        with uconn.cursor() as ucur:
+                            ucur.execute(
+                                f"""
+                                select c.id as circuit_id,
+                                       string_agg(n.region_id_ref || ':' || n.node_order::text, '|' order by n.region_id_ref, n.node_order) as node_sig
+                                from {uv_schema}.unverified_circuit c
+                                join {uv_schema}.unverified_circuit_node n on n.unverified_circuit_id=c.id
+                                where c.id<>%s and c.granularity=%s
+                                group by c.id
+                                order by c.created_at desc
+                                limit 30
+                                """,
+                                (circuit_row.get("id", ""), granularity),
+                            )
+                            for other in ucur.fetchall():
+                                if (other.get("node_sig") or "") == node_sig:
+                                    warnings.append(f"duplicate_circuit_nodes_in_unverified:{other.get('circuit_id','')}")
+                except Exception as exc:
+                    warnings.append(f"unverified_circuit_duplicate_check_failed:{exc}")
+
         evidence_check = self._validate_evidence_items(circuit_row.get("evidence_json"), entity="circuit")
         if evidence_check["errors"]:
             errors.extend(evidence_check["errors"])
@@ -1996,11 +2173,14 @@ class IngestionService:
 
         if warnings:
             rule_checks["duplicates"] = {"ok": True, "warnings": warnings}
+        rule_summary = self._build_rule_summary(errors, warnings, rule_checks, failed_fields)
         return {
             "errors": errors,
             "warnings": warnings,
             "failed_fields": list(dict.fromkeys(failed_fields)),
             "rule_checks": rule_checks,
+            "rule_summary": rule_summary,
+            "low_confidence": low_confidence,
         }
 
     @staticmethod
@@ -2362,6 +2542,35 @@ class IngestionService:
             rule_checks["items"].append(item_check)
         return {"errors": errors, "warnings": warnings, "rule_checks": rule_checks}
 
+    @staticmethod
+    def _is_low_confidence(value: float, threshold: float = LOW_CONFIDENCE_THRESHOLD) -> bool:
+        return value >= 0 and value < threshold
+
+    def _build_rule_summary(
+        self,
+        errors: List[str],
+        warnings: List[str],
+        rule_checks: Dict[str, Any],
+        failed_fields: List[str],
+    ) -> Dict[str, Any]:
+        duplicate_hits = [w for w in warnings if "duplicate" in w or "weak_match" in w]
+        conflict_tokens = ("mismatch", "conflict", "source_target_same", "parent", "not_found", "invalid_")
+        conflict_hits = [e for e in errors if any(token in e for token in conflict_tokens)]
+        failed_rules = [
+            key for key, value in rule_checks.items() if isinstance(value, dict) and value.get("ok") is False
+        ]
+        return {
+            "status": "failed" if errors else ("warning" if warnings else "passed"),
+            "blocking_errors": errors,
+            "warning_hits": warnings,
+            "duplicate_hits": duplicate_hits,
+            "conflict_hits": conflict_hits,
+            "failed_fields": list(dict.fromkeys(failed_fields)),
+            "failed_rules": failed_rules,
+            "has_conflict": bool(conflict_hits),
+            "has_duplicate_hint": bool(duplicate_hits),
+        }
+
     def _resolve_and_attach_evidence(
         self,
         cur: psycopg.Cursor,
@@ -2560,7 +2769,7 @@ class IngestionService:
             payload["evidence_id"] = evidence_id
         elif id_col == "id":
             evidence_id = ""
-        alias_is_array = self._is_array_column(cur, schema, table, "alias")
+        alias_is_array = self._is_array_column(cur, schema, "evidence", "alias")
         evidence_code = self._generate_evidence_code(cur, schema, "evidence") if "evidence_code" in cols else ""
         payload.update(
             {

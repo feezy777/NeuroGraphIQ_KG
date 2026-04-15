@@ -23,15 +23,19 @@ class NormalizationService:
             "normalized_at": utc_now_iso(),
         }
 
+        table_rows: List[Dict[str, Any]] = doc.get("table_rows") or []
+        # 只保留摘要字段在 normalized_payload 里，避免把完整 table_cells / chunks（可能数千条）
+        # 也写入 uploaded_file.metadata_json，导致 HTTP 响应过大、页面渲染卡顿。
+        # 完整数据可通过 /api/files/<id>/parsed 或 content_chunk 表单独获取。
         content_chunk_layer = {
-            "raw_text": doc.get("raw_text", ""),
-            "paragraphs": doc.get("paragraphs", []),
-            "sentences": doc.get("sentences", []),
-            "table_cells": doc.get("table_cells", []),
-            "figure_captions": doc.get("figure_captions", []),
-            "heading_levels": doc.get("heading_levels", []),
-            "ocr_blocks": doc.get("ocr_blocks", []),
-            "chunks": chunks,
+            # 表格型文件（xlsx/xls/csv）的逐行结构化数据，是抽取阶段的主要输入
+            "row_count": len(table_rows),
+            "sheet_names": list({r.get("sheet", "Sheet1") for r in table_rows}) if table_rows else [],
+            "preview_rows": table_rows[:20],      # 只存前 20 行作为预览
+            "chunk_count": len(chunks),           # 只记录 chunk 数量，不存完整列表
+            "has_raw_text": bool(doc.get("raw_text", "")),
+            "paragraph_count": len(doc.get("paragraphs", [])),
+            "table_cell_count": len(doc.get("table_cells", [])),
         }
 
         candidate_knowledge_unit_layer = {

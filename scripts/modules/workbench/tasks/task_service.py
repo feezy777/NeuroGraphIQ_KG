@@ -82,3 +82,14 @@ class TaskService:
         )
         self.log_bus.emit(task_id, "TASK", f"blocked reason={reason}", level="warning", event_type="task_blocked")
         return payload
+
+    # 作用：在长任务执行中途更新进度信息，供前端进度条展示。
+    # 步骤：把 percent/stage/message 写入 store（存在 parameters_json JSONB，无 DB 迁移）。
+    # 注意：不要替换 status，只更新进度三字段。
+    def set_progress(self, task_id: str, percent: int, stage: str, message: str = "") -> None:
+        self.store.update_task(
+            task_id,
+            progress_percent=percent,
+            progress_stage=stage,
+            progress_message=message,
+        )

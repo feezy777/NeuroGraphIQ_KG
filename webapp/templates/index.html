@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -27,24 +27,35 @@
     <section class="workspace-main">
       <aside class="left-nav">
         <button class="nav-item active" data-tab="tab-files">文件中心</button>
-        <button class="nav-item" data-tab="tab-extraction">脑区抽取中心</button>
-        <button class="nav-item" data-tab="tab-review">脑区候选审核中心</button>
-        <button class="nav-item" data-tab="tab-commit">验证与提升中心（脑区）</button>
+        <button class="nav-item" data-tab="tab-extract-region">脑区提取中心</button>
+        <button class="nav-item" data-tab="tab-extract-circuit">回路提取中心</button>
+        <button class="nav-item" data-tab="tab-extract-connection">连接提取中心</button>
+        <button class="nav-item" data-tab="tab-review-region">脑区候选审核</button>
+        <button class="nav-item" data-tab="tab-review-circuit">回路候选审核</button>
+        <button class="nav-item" data-tab="tab-review-connection">连接候选审核</button>
+        <button class="nav-item" data-tab="tab-commit">验证与提升中心</button>
         <button class="nav-item" data-tab="tab-config">设置 / 配置中心</button>
         <button class="nav-item" data-tab="tab-tasks">任务与日志中心</button>
       </aside>
 
       <main class="workbench-center">
-        <div class="tab-header">
+        <div class="tab-header tab-header-scroll">
           <button class="tab-btn active" data-tab="tab-files">文件中心</button>
-          <button class="tab-btn" data-tab="tab-extraction">脑区抽取中心</button>
-          <button class="tab-btn" data-tab="tab-review">脑区候选审核中心</button>
-          <button class="tab-btn" data-tab="tab-commit">验证与提升中心（脑区）</button>
-          <button class="tab-btn" data-tab="tab-config">设置 / 配置中心</button>
-          <button class="tab-btn" data-tab="tab-tasks">任务与日志中心</button>
+          <button class="tab-btn" data-tab="tab-extract-region">脑区提取</button>
+          <button class="tab-btn" data-tab="tab-extract-circuit">回路提取</button>
+          <button class="tab-btn" data-tab="tab-extract-connection">连接提取</button>
+          <button class="tab-btn" data-tab="tab-review-region">脑区审核</button>
+          <button class="tab-btn" data-tab="tab-review-circuit">回路审核</button>
+          <button class="tab-btn" data-tab="tab-review-connection">连接审核</button>
+          <button class="tab-btn" data-tab="tab-commit">验证与提升</button>
+          <button class="tab-btn" data-tab="tab-config">配置</button>
+          <button class="tab-btn" data-tab="tab-tasks">任务与日志</button>
         </div>
 
         <div class="tab-content active" id="tab-files">
+          <div class="panel pipeline-intro">
+            <p><strong>流程</strong>：导入文件 → 自动/手动解析 → 生成统一中间表示（ParsedDocument + 文本块 + 标准化层）。当前 Excel 等表格会解析为 <code>table_rows</code> 行级结构；后续其它格式（PDF 等）沿用同一套中间层，再分别进入各提取中心。</p>
+          </div>
           <div class="files-two-col">
             <div class="panel">
               <h3>文件列表</h3>
@@ -71,35 +82,113 @@
               </div>
               <div class="inline-actions">
                 <button class="btn" id="btn-reparse-selected">重新解析</button>
-                <button class="btn" id="btn-extract-selected">发起脑区抽取</button>
               </div>
+              <h4>解析摘要（中间层）</h4>
+              <pre id="file-parsed-meta" class="file-meta-pre"></pre>
               <h4>预览文本</h4>
               <pre id="file-preview-content"></pre>
-              <h4>标准化中间层（document + chunk + candidate unit）</h4>
+              <h4>标准化中间层（normalized_payload）</h4>
               <pre id="file-normalized-content"></pre>
             </div>
           </div>
         </div>
 
-        <div class="tab-content" id="tab-extraction">
+        <div class="tab-content" id="tab-extract-region">
           <div class="panel">
-            <h3>脑区抽取链</h3>
-            <div class="inline-fields">
-              <label>选中文件
-                <select id="extract-file-select"></select>
-              </label>
-              <label>抽取模式
-                <select id="extract-mode-select">
-                  <option value="local">local（规则/本地）</option>
-                  <option value="deepseek">deepseek（大模型）</option>
-                </select>
-              </label>
-              <button class="btn" id="btn-run-region-extract">开始抽取</button>
+            <p class="tab-hint">三种方式共用下方进度条与结果表。方式①基于已解析文件；方式②对粘贴文本抽取；方式③由 DeepSeek 按主题直接生成。结果写入当前文件的候选（local / deepseek 分轨），并保留可切换的历史版本。</p>
+
+            <div id="region-progress-wrap" class="region-progress-wrap" hidden>
+              <div class="region-progress-bar">
+                <div id="region-progress-fill" class="region-progress-fill"></div>
+              </div>
+              <span id="region-progress-label" class="region-progress-label">准备中</span>
             </div>
-            <h4>抽取结果摘要</h4>
-            <pre id="extract-summary"></pre>
-            <hr>
-            <h3>回路抽取链（仅回路 + circuit_node）</h3>
+
+            <div class="region-mode-switch">
+              <button type="button" class="btn region-mode-btn active" data-region-mode="file">① 文件抽取</button>
+              <button type="button" class="btn region-mode-btn" data-region-mode="text">② 文本抽取</button>
+              <button type="button" class="btn region-mode-btn" data-region-mode="direct">③ DeepSeek 直接生成</button>
+            </div>
+
+            <div id="region-panel-file" class="region-panel">
+              <h4>方式①：文件（解析后的中间层）</h4>
+              <div class="inline-fields">
+                <label>选中文件
+                  <select id="extract-file-select"></select>
+                </label>
+                <label>抽取模式
+                  <select id="extract-mode-select">
+                    <option value="local">本地规则</option>
+                    <option value="deepseek">DeepSeek</option>
+                  </select>
+                </label>
+                <button type="button" class="btn" id="btn-region-run-file">执行抽取</button>
+              </div>
+              <p class="field-hint">仅当本下拉框为 DeepSeek 且点击「执行」时弹出配置（密钥、温度等与设置页一致，默认用全局）。</p>
+            </div>
+
+            <div id="region-panel-text" class="region-panel" hidden>
+              <h4>方式②：文本</h4>
+              <p class="field-hint">请先选择上方「方式①」中的同一文件，用于保存候选与版本。</p>
+              <div class="inline-fields">
+                <label>抽取模式
+                  <select id="region-text-mode-select">
+                    <option value="local">本地规则</option>
+                    <option value="deepseek">DeepSeek</option>
+                  </select>
+                </label>
+                <button type="button" class="btn" id="btn-region-run-text">从文本抽取</button>
+              </div>
+              <p class="field-hint">选 DeepSeek 并点击「从文本抽取」时弹出配置。</p>
+              <label class="block-label">输入文本</label>
+              <textarea id="region-text-input" class="region-textarea" rows="10" placeholder="粘贴脑区相关文本…"></textarea>
+            </div>
+
+            <div id="region-panel-direct" class="region-panel" hidden>
+              <h4>方式③：DeepSeek 直接生成</h4>
+              <p class="field-hint">点击「直接生成」时弹出配置（与设置全局一致）。直接生成模板可用 <code>{TOPIC}</code> 等占位符。结果写入当前文件的 deepseek 轨。</p>
+              <div class="inline-fields region-direct-fields">
+                <label>主题 <input type="text" id="region-direct-topic" value="脑区" /></label>
+                <label>物种 <input type="text" id="region-direct-species" value="小鼠" /></label>
+                <label>粒度 <input type="text" id="region-direct-granularity" value="major" placeholder="major/sub/allen" /></label>
+                <button type="button" class="btn" id="btn-region-run-direct">直接生成</button>
+              </div>
+              <label class="block-label">补充说明（可选）</label>
+              <textarea id="region-direct-extra" class="region-textarea" rows="3" placeholder="额外指令…"></textarea>
+            </div>
+
+            <div class="region-version-row inline-fields">
+              <label>结果版本
+                <select id="region-version-select"></select>
+              </label>
+              <button type="button" class="btn" id="btn-region-version-refresh">刷新列表</button>
+            </div>
+
+            <h4>抽取结果（表格）</h4>
+            <div class="table-scroll region-result-scroll">
+              <table id="region-extract-result-table" class="data-table">
+                <thead>
+                  <tr>
+                    <th>id</th>
+                    <th>EN</th>
+                    <th>CN</th>
+                    <th>粒度</th>
+                    <th>lane</th>
+                    <th>方法</th>
+                    <th>置信度</th>
+                    <th>source（节选）</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-extract-circuit">
+          <div class="panel">
+            <p class="tab-hint">回路候选抽取（回路 + circuit_node）；完成后到「回路候选审核」。</p>
+            <h3>回路抽取链</h3>
             <div class="inline-fields">
               <label>选中文件
                 <select id="circuit-extract-file-select"></select>
@@ -114,8 +203,13 @@
             </div>
             <h4>回路抽取结果摘要</h4>
             <pre id="circuit-extract-summary"></pre>
-            <hr>
-            <h3>连接抽取链（仅主链，不含 evidence/ext）</h3>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-extract-connection">
+          <div class="panel">
+            <p class="tab-hint">连接候选抽取（主链）；完成后到「连接候选审核」。</p>
+            <h3>连接抽取链</h3>
             <div class="inline-fields">
               <label>选中文件
                 <select id="connection-extract-file-select"></select>
@@ -133,7 +227,7 @@
           </div>
         </div>
 
-        <div class="tab-content" id="tab-review">
+        <div class="tab-content" id="tab-review-region">
           <div class="panel">
             <h3>脑区候选审核中心</h3>
             <table id="candidate-table">
@@ -192,7 +286,11 @@
                 </div>
               </div>
             </div>
-            <hr>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-review-circuit">
+          <div class="panel">
             <h3>回路候选审核中心</h3>
             <table id="circuit-candidate-table">
               <thead>
@@ -260,7 +358,11 @@
                 </div>
               </div>
             </div>
-            <hr>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-review-connection">
+          <div class="panel">
             <h3>连接候选审核中心</h3>
             <table id="connection-candidate-table">
               <thead>
@@ -492,6 +594,101 @@
       </div>
       <pre id="console-content"></pre>
     </footer>
+  </div>
+
+  <div id="modal-deepseek-region" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="modal-ds-title">
+    <div class="modal-dialog modal-dialog-wide">
+
+      <div class="modal-header">
+        <div>
+          <h3 id="modal-ds-title">DeepSeek 配置</h3>
+          <p class="modal-subtitle" id="ds-modal-kind-hint">① 文件抽取</p>
+        </div>
+        <span id="ds-status-badge" class="ds-status-badge ds-status-unknown">未知</span>
+      </div>
+
+      <!-- ① 连接参数 -->
+      <fieldset class="modal-fieldset">
+        <legend>① 连接参数</legend>
+        <div class="ds-conn-row">
+          <label class="ds-check-label"><input type="checkbox" id="ds-deepseek-enabled" /> 启用</label>
+          <label class="ds-field-label">API Key
+            <input type="password" id="ds-deepseek-key" class="ds-input ds-input-wide" autocomplete="off" placeholder="sk-…" />
+          </label>
+        </div>
+        <div class="ds-conn-row">
+          <label class="ds-field-label">Base URL
+            <input type="text" id="ds-deepseek-base" class="ds-input ds-input-wide" placeholder="https://api.deepseek.com" />
+          </label>
+          <label class="ds-field-label">Model
+            <input type="text" id="ds-deepseek-model" class="ds-input" placeholder="deepseek-chat" />
+          </label>
+          <label class="ds-field-label">Temperature
+            <input type="number" id="ds-deepseek-temperature" class="ds-input ds-input-sm" step="0.1" min="0" max="2" />
+          </label>
+        </div>
+        <div class="ds-toolbar">
+          <button type="button" class="btn ghost btn-sm" id="btn-ds-sync-settings">↺ 从全局设置重新载入</button>
+          <button type="button" class="btn ghost btn-sm" id="btn-ds-save-global">💾 写回全局设置</button>
+        </div>
+      </fieldset>
+
+      <!-- ② Prompt -->
+      <fieldset class="modal-fieldset">
+        <legend>② Prompt 配置</legend>
+        <div id="ds-section-file-prompt">
+          <div class="ds-prompt-row">
+            <label>抽取预设
+              <select id="ds-file-preset-select" class="ds-select"></select>
+            </label>
+            <label class="ds-check-label ds-custom-toggle">
+              <input type="checkbox" id="ds-file-custom-mode" /> 使用自定义模板
+            </label>
+          </div>
+          <div id="ds-file-custom-wrap" hidden>
+            <p class="field-hint">模板须包含占位符 <code>{TEXT}</code>（替换为待抽取文本）。</p>
+            <textarea id="ds-file-custom-template" class="ds-textarea" rows="5" placeholder="自定义 User 模板，须包含 {TEXT}"></textarea>
+          </div>
+        </div>
+        <div id="ds-section-direct-prompt" hidden>
+          <div class="ds-prompt-row">
+            <label>生成预设
+              <select id="ds-direct-preset-select" class="ds-select"></select>
+            </label>
+            <label class="ds-check-label ds-custom-toggle">
+              <input type="checkbox" id="ds-direct-custom-mode" /> 使用自定义模板
+            </label>
+          </div>
+          <div id="ds-direct-custom-wrap" hidden>
+            <p class="field-hint">可用占位符：<code>{TOPIC}</code> <code>{SPECIES}</code> <code>{GRANULARITY}</code> <code>{EXTRA}</code></p>
+            <textarea id="ds-direct-custom-template" class="ds-textarea" rows="5" placeholder="自定义 User 模板"></textarea>
+          </div>
+        </div>
+        <div class="ds-conn-row" style="margin-top:8px">
+          <label class="ds-field-label" style="flex:1">System（空则用默认）
+            <textarea id="ds-system-prompt" class="ds-textarea" rows="2" placeholder="覆盖默认 system 消息（留空即可）"></textarea>
+          </label>
+        </div>
+      </fieldset>
+
+      <!-- ③ 配置管理 -->
+      <details class="modal-fieldset modal-details">
+        <summary>③ 保存 / 加载个性化配置（可选）</summary>
+        <div class="ds-profile-row">
+          <select id="ds-profile-select" class="ds-select"></select>
+          <button type="button" class="btn btn-sm" id="btn-ds-load-profile">加载到表单</button>
+        </div>
+        <div class="ds-profile-row" style="margin-top:8px">
+          <input type="text" id="ds-save-profile-name" class="ds-input" placeholder="配置名，如 region_strict" />
+          <button type="button" class="btn btn-sm" id="btn-ds-save-profile">保存为配置</button>
+        </div>
+      </details>
+
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="btn-ds-cancel">取消</button>
+        <button type="button" class="btn btn-primary" id="btn-ds-confirm">开始执行</button>
+      </div>
+    </div>
   </div>
 
   <script src="/static/workbench/main.js"></script>

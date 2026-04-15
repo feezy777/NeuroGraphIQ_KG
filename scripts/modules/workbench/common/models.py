@@ -97,6 +97,11 @@ class ParsedDocument:
     paragraphs: List[str] = field(default_factory=list)
     sentences: List[str] = field(default_factory=list)
     table_cells: List[Dict[str, Any]] = field(default_factory=list)
+    # Structured rows for spreadsheet/CSV files: each entry is
+    # {"sheet": str, "row": int, "values": [str, ...], "joined_text": str}
+    # This is the canonical row-level view used by extraction; it is populated
+    # during parsing and bypasses the chunk-storage path for table files.
+    table_rows: List[Dict[str, Any]] = field(default_factory=list)
     figure_captions: List[str] = field(default_factory=list)
     heading_levels: List[Dict[str, Any]] = field(default_factory=list)
     ocr_blocks: List[Dict[str, Any]] = field(default_factory=list)
@@ -131,6 +136,8 @@ class CandidateConnection:
     id: str
     file_id: str
     parsed_document_id: str
+    # local = 规则/本地 lane；deepseek = 大模型独立候选区（与本地互不覆盖）
+    lane: str = "local"
     source_text: str = ""
     en_name_candidate: str = ""
     cn_name_candidate: str = ""
@@ -155,6 +162,7 @@ class CandidateCircuit:
     id: str
     file_id: str
     parsed_document_id: str
+    lane: str = "local"
     source_text: str = ""
     en_name_candidate: str = ""
     cn_name_candidate: str = ""
@@ -230,6 +238,7 @@ class CandidateRegion:
     id: str
     file_id: str
     parsed_document_id: str
+    lane: str = "local"
     chunk_id: str = ""
     source_text: str = ""
     en_name_candidate: str = ""
@@ -276,6 +285,10 @@ class TaskRun:
     ended_at: str = ""
     error_reason: str = ""
     output_summary: Dict[str, Any] = field(default_factory=dict)
+    # 阶段型进度字段（存入 parameters_json JSONB，无需 DB 迁移）
+    progress_percent: int = 0
+    progress_stage: str = ""
+    progress_message: str = ""
 
 
 @dataclass
@@ -287,6 +300,33 @@ class TaskLog:
     message: str
     module: str
     detail_json: Dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=utc_now_iso)
+
+
+@dataclass
+class RegionResultVersion:
+    """一次脑区抽取/生成的完整结果快照，用于版本化管理。
+
+    version_id: 唯一标识
+    file_id: 来源文件 id；直接生成方式时为空
+    method: "file_local" | "file_deepseek" | "text_local" | "text_deepseek" | "direct_deepseek"
+    lane: "local" | "deepseek"
+    title: 用户可读版本名称（自动生成或自定义）
+    prompt_text: 本次使用的 DeepSeek 提示词全文
+    prompt_meta: 提示词生成参数（topic/species/granularity 等）
+    items: 候选脑区列表（序列化后的 dict 数组）
+    item_count: items 长度，便于快速展示
+    """
+
+    version_id: str
+    file_id: str
+    method: str
+    lane: str
+    title: str
+    prompt_text: str = ""
+    prompt_meta: Dict[str, Any] = field(default_factory=dict)
+    items: List[Dict[str, Any]] = field(default_factory=list)
+    item_count: int = 0
     created_at: str = field(default_factory=utc_now_iso)
 
 

@@ -3,12 +3,19 @@ from __future__ import annotations
 import hashlib
 import os
 import time
+import uuid
 from pathlib import Path
 
 
 def make_id(prefix: str) -> str:
+    """Generate a globally unique ID by combining a millisecond timestamp with a UUID4 fragment.
+
+    Using uuid4 instead of a SHA1 of the timestamp ensures that IDs created
+    within the same millisecond (e.g. inside a tight parse/chunk loop) are
+    always distinct, preventing ON CONFLICT overwrites in PostgreSQL.
+    """
     stamp = str(int(time.time() * 1000))
-    suffix = hashlib.sha1(stamp.encode("utf-8")).hexdigest()[:8]
+    suffix = uuid.uuid4().hex[:8]
     return f"{prefix}_{stamp}_{suffix}"
 
 

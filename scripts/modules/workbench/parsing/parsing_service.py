@@ -52,23 +52,56 @@ def _read_pdf_file(path: Path) -> Tuple[str, Dict[str, Any]]:
     return "\n".join(pages), {"parser": "pdf_reader", "page_count": len(reader.pages), "extracted_pages": len(pages)}
 
 
-def _read_xlsx_file(path: Path) -> Tuple[str, List[Dict[str, Any]], Dict[str, Any]]:
+def _read_xlsx_file(
+    path: Path,
+) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
+    """Read an xlsx/xls file and return (raw_text, table_cells, table_rows, metadata).
+
+    table_rows is the authoritative row-level view: each entry is a dict
+    {"sheet": str, "row": int, "values": [str, ...], "joined_text": str}.
+    It is used directly by extraction to iterate the whole table without going
+    through the chunk-storage path (which could lose rows due to ID collisions).
+    """
     if load_workbook is None:
-        return "", [], {"parser": "xlsx_reader", "warning": "openpyxl_not_installed"}
+        return "", [], [], {"parser": "xlsx_reader", "warning": "openpyxl_not_installed"}
     wb = load_workbook(str(path), read_only=True, data_only=True)
-    sheet = wb[wb.sheetnames[0]]
-    rows: List[str] = []
+    row_texts: List[str] = []
     table_cells: List[Dict[str, Any]] = []
-    max_rows = 80
-    for ridx, row in enumerate(sheet.iter_rows(min_row=1, max_row=max_rows, values_only=True), start=1):
-        values = [str(it).strip() for it in row if it is not None and str(it).strip()]
-        if not values:
-            continue
-        rows.append(" | ".join(values))
-        for cidx, val in enumerate(values, start=1):
-            table_cells.append({"sheet": sheet.title, "row": ridx, "col": cidx, "value": val})
+    table_rows: List[Dict[str, Any]] = []
+    sheets_read: List[str] = []
+    total_data_rows = 0
+    for sheet_name in wb.sheetnames:
+        sheet = wb[sheet_name]
+        sheets_read.append(sheet_name)
+        for ridx, row in enumerate(sheet.iter_rows(values_only=True), start=1):
+            values = [str(it).strip() for it in row if it is not None and str(it).strip()]
+            if not values:
+                continue
+            total_data_rows += 1
+            joined = " | ".join(values)
+            row_texts.append(joined)
+            table_rows.append(
+                {
+                    "sheet": sheet_name,
+                    "row": ridx,
+                    "values": values,
+                    "joined_text": joined,
+                }
+            )
+            for cidx, val in enumerate(values, start=1):
+                table_cells.append({"sheet": sheet_name, "row": ridx, "col": cidx, "value": val})
     wb.close()
-    return "\n".join(rows), table_cells, {"parser": "xlsx_reader", "sheet": sheet.title, "row_count": len(rows)}
+    return (
+        "\n".join(row_texts),
+        table_cells,
+        table_rows,
+        {
+            "parser": "xlsx_reader",
+            "sheets": sheets_read,
+            "data_rows": total_data_rows,
+            "cell_count": len(table_cells),
+        },
+    )
 
 
 class ParsingService:
@@ -79,6 +112,7 @@ class ParsingService:
 
         raw_text = ""
         table_cells: List[Dict[str, Any]] = []
+        table_rows: List[Dict[str, Any]] = []
         metadata: Dict[str, Any] = {}
 
         if file_type in {"txt", "md", "json", "jsonl", "csv", "tsv"}:
@@ -86,7 +120,7 @@ class ParsingService:
         elif file_type in {"pdf"}:
             raw_text, metadata = _read_pdf_file(path)
         elif file_type in {"xlsx", "xls"}:
-            raw_text, table_cells, metadata = _read_xlsx_file(path)
+            raw_text, table_cells, table_rows, metadata = _read_xlsx_file(path)
         else:
             raw_text, metadata = _read_text_file(path)
             metadata["warning"] = f"fallback_reader_for_{file_type}"
@@ -109,7 +143,8 @@ class ParsingService:
             metadata_json=metadata,
             paragraphs=paragraphs[:500],
             sentences=sentences,
-            table_cells=table_cells[:1000],
+            table_cells=table_cells[:10000],
+            table_rows=table_rows,
             figure_captions=[],
             heading_levels=[],
             ocr_blocks=[],
@@ -118,7 +153,7 @@ class ParsingService:
         )
 
         chunks: List[Dict[str, Any]] = []
-        for idx, para in enumerate(doc.paragraphs[:400], start=1):
+        for idx, para in enumerate(doc.paragraphs[:2000], start=1):
             chunk = ContentChunk(
                 chunk_id=make_id("chk"),
                 file_id=file_id,
@@ -142,7 +177,7 @@ class ParsingService:
                 }
             )
 
-        for idx, cell in enumerate(doc.table_cells[:200], start=1):
+        for idx, cell in enumerate(doc.table_cells[:5000], start=1):
             chunk = ContentChunk(
                 chunk_id=make_id("chk"),
                 file_id=file_id,
