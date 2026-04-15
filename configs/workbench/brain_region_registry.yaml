@@ -1,0 +1,30 @@
+# 脑区提取 registry 扩展（可维护；版本号用于追踪）
+# 核心词表仍由内置 KB 提供；此处覆盖：停用词、黑名单、列名模式、白名单补充
+version: "1.0.0"
+updated_at: "2026-04-15"
+
+# 明显非解剖/非脑区实体（命中则拒绝或降权）
+blacklist_terms:
+  - "western blot"
+  - "pcr"
+  - "rna-seq"
+  - "method"
+  - "control"
+  - "experiment"
+
+# 常见噪声词（清洗时剔除或标记）
+stopwords:
+  - "etc"
+  - "vs"
+  - "and/or"
+
+# 列名子串 → 语义（用于列级策略；小写匹配）
+column_semantics:
+  source_region: ["source", "from", "projection_from", "origin", "起点", "来源脑区"]
+  target_region: ["target", "to", "projection_to", "终点", "终止"]
+  circuit_pathway: ["circuit", "pathway", "loop", "回路", "通路"]
+  remark_note: ["remark", "note", "comment", "备注", "说明"]
+  method_assay: ["method", "assay", "protocol", "方法", "实验"]
+
+# 白名单：若命中则强制允许进入候选（即使短词）
+whitelist_terms: []

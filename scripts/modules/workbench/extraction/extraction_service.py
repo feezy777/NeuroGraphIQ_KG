@@ -2,11 +2,100 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional, Tuple
 from urllib import error, request
 
 from ..common.id_utils import make_id
 from ..common.models import CandidateCircuit, CandidateConnection, CandidateRegion, utc_now_iso
+from .region_postprocess_v2 import derive_region_extract_status
+
+
+# ---------------------------------------------------------------------------
+# DeepSeek「直接生成」粗颗粒度权威参考（major）——默认面向人类知识图谱
+# 以人类大体解剖与临床常用分区为主（额/顶/颞/枕叶、岛叶、扣带回、边缘系统、基底节、
+# 丘脑/下丘脑、脑干、小脑等，命名可对齐 Terminologia Anatomica 与本科教材）；
+# Allen / Paxinos 图谱作跨物种对照。granularity_candidate 应填 major。
+# ---------------------------------------------------------------------------
+_DIRECT_COARSE_MAJOR: List[Tuple[str, str, str]] = [
+    ("Frontal lobe", "额叶", "cortex"),
+    ("Parietal lobe", "顶叶", "cortex"),
+    ("Temporal lobe", "颞叶", "cortex"),
+    ("Occipital lobe", "枕叶", "cortex"),
+    ("Insular cortex", "岛叶皮层", "cortex"),
+    ("Cingulate gyrus", "扣带回", "cortex"),
+    ("Hippocampal formation", "海马结构", "hippocampal"),
+    ("Amygdala", "杏仁核", "amygdala"),
+    ("Dorsal striatum (caudate and putamen)", "背侧纹状体（尾状核与壳核）", "basal_ganglia"),
+    ("Nucleus accumbens", "伏隔核（腹侧纹状体）", "basal_ganglia"),
+    ("Globus pallidus", "苍白球", "basal_ganglia"),
+    ("Subthalamic nucleus", "丘脑底核", "basal_ganglia"),
+    ("Thalamus", "丘脑", "thalamus"),
+    ("Hypothalamus", "下丘脑", "hypothalamus"),
+    ("Epithalamus (habenula)", "上丘脑（缰核）", "thalamus"),
+    ("Substantia nigra", "黑质", "brainstem"),
+    ("Ventral tegmental area", "腹侧被盖区", "brainstem"),
+    ("Superior colliculus", "上丘", "brainstem"),
+    ("Inferior colliculus", "下丘", "brainstem"),
+    ("Periaqueductal gray", "中脑导水管周围灰质", "brainstem"),
+    ("Pons", "脑桥", "brainstem"),
+    ("Medulla oblongata", "延髓", "brainstem"),
+    ("Cerebellum", "小脑", "cerebellum"),
+    ("Main olfactory bulb", "主嗅球", "olfactory"),
+    ("Septal nuclei", "隔核", "septal"),
+    ("Mammillary bodies", "乳头体", "hypothalamus"),
+    ("Piriform cortex", "梨状皮层", "olfactory"),
+    ("Entorhinal cortex", "内嗅皮层", "hippocampal"),
+]
+
+
+def _is_rodent_species(species: str) -> bool:
+    s = (species or "").strip().lower()
+    return any(x in s for x in ("鼠", "mouse", "rat", "rodent", "hamster", "豚鼠"))
+
+
+def _direct_major_atlas_prompt_block(species: str) -> str:
+    """注入 user 消息：粗颗粒度权威清单 + 物种说明。"""
+    lines = [
+        f"{i}. {en} / {cn}（region_category_candidate 建议: {cat}）"
+        for i, (en, cn, cat) in enumerate(_DIRECT_COARSE_MAJOR, 1)
+    ]
+    rodent = _is_rodent_species(species)
+    species_note = ""
+    if rodent:
+        species_note = (
+            "【物种注·啮齿类】四叶划分在人类解剖中最常用；啮齿类新皮质在图谱中常统称 Isocortex。"
+            "若你认为四叶不便一一对应，可额外增加一条 en_name_candidate=Isocortex / 新皮质，"
+            "并在 alias_candidates 中注明与感觉/运动/视觉等粗功能模块相关的常用缩写，"
+            "但四叶条目仍应尽量给出（可作功能同源近似），不得整张表只输出皮层一条替代全部。\n\n"
+        )
+    else:
+        species_note = (
+            "【物种注·人类（默认）】本清单按人类大体脑区分区列出，适用于知识图谱顶层实体；"
+            "四叶模型与皮层下/脑干/小脑分区与临床及教材常用命名一致，请逐项给出中英文标准名。\n\n"
+        )
+    return (
+        "\n【粗颗粒度·权威大体分区】下列以人类神经解剖学常用「大分区」为主（中英文对照见下），"
+        "并辅以图谱学通用结构名；用于知识图谱时建议与顶层 ontology 节点对齐。\n"
+        "请**按清单逐项**各输出 **1 条** regions 元素（同一解剖实体不要重复两条）；"
+        "granularity_candidate 一律填 **major**；laterality_candidate 无侧化信息时填 unknown。\n"
+        "若某物种确缺某结构，可省略该条或输出最近似同源结构并在 confidence 中给较低分、source_text 简短说明。\n\n"
+        f"{species_note}"
+        + "\n".join(lines)
+        + f"\n\n【数量】regions 数组长度应 **≥ {max(24, len(_DIRECT_COARSE_MAJOR) - 4)}**（目标约 **{len(_DIRECT_COARSE_MAJOR)}** 条粗分区）；"
+        "明显偏少视为不完整输出。\n"
+    )
+
+
+def _should_inject_direct_major_atlas(granularity: str) -> bool:
+    g = (granularity or "").strip().lower()
+    if not g:
+        return True
+    if g in ("major", "coarse", "macro", "large", "rough"):
+        return True
+    if "粗" in granularity:
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -260,61 +349,387 @@ def _make_candidate(
     laterality: str,
     confidence: float,
 ) -> CandidateRegion:
+    lat = (laterality or "").strip() or "unknown"
+    gran = (granularity or "").strip().lower() or "unknown"
+    if gran not in {"major", "sub", "allen", "unknown"}:
+        gran = "unknown"
+    cat = (category or "").strip() or "brain_region"
+    _en = (en or "").strip()
+    _cn = (cn or "").strip()
+    _conf = float(confidence)
+    _estatus = derive_region_extract_status(
+        extraction_method="local_rule",
+        match_type="exact" if _conf >= 0.75 else "fuzzy",
+        confidence=_conf,
+        en_name=_en,
+        cn_name=_cn,
+    )
+    _note = json.dumps(
+        {"local_rule": {"extract_status": _estatus, "confidence": _conf}},
+        ensure_ascii=False,
+    )
     return CandidateRegion(
         id=make_id("cr"),
         file_id=file_id,
         parsed_document_id=parsed_document_id,
         chunk_id=chunk_id,
         source_text=(source_text or "")[:400],
-        en_name_candidate=en,
-        cn_name_candidate=cn,
+        en_name_candidate=_en,
+        cn_name_candidate=_cn,
         alias_candidates=[a for a in abbrevs if a],
-        laterality_candidate=laterality,
-        region_category_candidate=category or "brain_region",
-        granularity_candidate=granularity or "unknown",
-        parent_region_candidate=parent or "",
+        laterality_candidate=lat,
+        region_category_candidate=cat,
+        granularity_candidate=gran,
+        parent_region_candidate=(parent or "").strip(),
         ontology_source_candidate="local_rule_kb",
-        confidence=confidence,
+        confidence=_conf,
         extraction_method="local_rule",
         llm_model="",
         status="pending_review",
+        review_note=_note,
         created_at=utc_now_iso(),
         updated_at=utc_now_iso(),
     )
 
 
+def _enrich_names_from_kb(en: str, cn: str) -> tuple[str, str, list[str]]:
+    """若仅有一侧语言，尝试用内置 KB 补全另一侧与标准别名。"""
+    en = (en or "").strip()
+    cn = (cn or "").strip()
+    entry = _lookup_kb(en) or _lookup_kb(cn) or (_partial_kb_match(en) if en else None) or (_partial_kb_match(cn) if cn else None)
+    if not entry:
+        return en, cn, []
+    kb_en, kb_cn, kb_abbrevs, _, _, _ = entry
+    out_en = en or kb_en
+    out_cn = cn or kb_cn
+    return out_en, out_cn, list(kb_abbrevs)
+
+
+def _normalize_laterality(val: Any) -> str:
+    s = str(val or "").strip().lower()
+    if s in {"", "na", "n/a", "none"}:
+        return "unknown"
+    if s in {"left", "right", "bilateral", "midline", "unknown"}:
+        return s
+    if "左" in s or s in {"l", "lhs"}:
+        return "left"
+    if "右" in s or s in {"r", "rhs"}:
+        return "right"
+    if "双" in s or "两侧" in s:
+        return "bilateral"
+    if "中" in s and "线" in s:
+        return "midline"
+    return "unknown"
+
+
+def _normalize_granularity(val: Any) -> str:
+    s = str(val or "").strip().lower()
+    if s in {"major", "sub", "allen", "unknown"}:
+        return s
+    if s in {"", "na"}:
+        return "unknown"
+    return "unknown"
+
+
+def _coerce_alias_list(val: Any) -> List[str]:
+    if val is None:
+        return []
+    if isinstance(val, list):
+        return [str(x).strip() for x in val if str(x).strip()]
+    if isinstance(val, str):
+        parts = re.split(r"[,;，；\s]+", val)
+        return [p.strip() for p in parts if p.strip()]
+    return [str(val).strip()] if str(val).strip() else []
+
+
+def _extract_regions_array_objects(raw: str) -> List[Dict[str, Any]]:
+    """当模型输出被 max_tokens 截断导致整体 JSON 非法时，从 ``regions`` 数组中扫描**已闭合**的对象并逐个 json.loads。
+
+    忽略字符串字面量内的 ``{`` ``}``，避免误切分。
+    """
+    m = re.search(r'"regions"\s*:\s*\[', raw, re.IGNORECASE)
+    if not m:
+        return []
+    items: List[Dict[str, Any]] = []
+    depth = 0
+    start: Optional[int] = None
+    in_str = False
+    esc = False
+    j = m.end()
+    n = len(raw)
+    while j < n:
+        c = raw[j]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            j += 1
+            continue
+        if c == '"':
+            in_str = True
+            j += 1
+            continue
+        if c == "{":
+            if depth == 0:
+                start = j
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0 and start is not None:
+                chunk = raw[start : j + 1]
+                try:
+                    obj = json.loads(chunk)
+                    if isinstance(obj, dict):
+                        items.append(obj)
+                except json.JSONDecodeError:
+                    pass
+                start = None
+        elif c == "]" and depth == 0:
+            break
+        j += 1
+    return items
+
+
+def normalize_region_llm_row(
+    row: Dict[str, Any],
+    *,
+    ontology_default: str,
+    enrich_from_kb: bool = True,
+) -> Dict[str, Any]:
+    """将模型返回的任意键名归一为工作台统一中间态（与 CandidateRegion / 入库字段对应）。"""
+    r = {k: v for k, v in row.items() if isinstance(k, str)}
+    en = (
+        r.get("en_name_candidate")
+        or r.get("en_name")
+        or r.get("english_name")
+        or r.get("name_en")
+        or r.get("en")
+        or r.get("name_english")
+        or r.get("name")
+        or ""
+    )
+    cn = (
+        r.get("cn_name_candidate")
+        or r.get("cn_name")
+        or r.get("chinese_name")
+        or r.get("name_cn")
+        or r.get("cn")
+        or r.get("name_chinese")
+        or r.get("zh_name")
+        or r.get("name_zh")
+        or ""
+    )
+    en, cn = str(en).strip(), str(cn).strip()
+    aliases = _coerce_alias_list(
+        r.get("alias_candidates")
+        if r.get("alias_candidates") is not None
+        else r.get("aliases") or r.get("abbreviations") or r.get("abbr")
+    )
+    ab1 = r.get("abbreviation")
+    if isinstance(ab1, str) and ab1.strip():
+        aliases = list(dict.fromkeys(list(aliases) + [ab1.strip()]))
+    later = _normalize_laterality(
+        r.get("laterality_candidate") if r.get("laterality_candidate") is not None else r.get("laterality")
+    )
+    cat = str(
+        r.get("region_category_candidate")
+        if r.get("region_category_candidate") is not None
+        else r.get("region_category") or r.get("category") or "brain_region"
+    ).strip() or "brain_region"
+    gran = _normalize_granularity(
+        r.get("granularity_candidate") if r.get("granularity_candidate") is not None else r.get("granularity")
+    )
+    parent = str(
+        r.get("parent_region_candidate")
+        if r.get("parent_region_candidate") is not None
+        else r.get("parent_region") or r.get("parent") or ""
+    ).strip()
+    onto = str(
+        r.get("ontology_source_candidate")
+        if r.get("ontology_source_candidate") is not None
+        else r.get("ontology_source") or ontology_default
+    ).strip() or ontology_default
+    try:
+        conf = float(r.get("confidence", 0.7))
+    except (TypeError, ValueError):
+        conf = 0.7
+    conf = max(0.0, min(1.0, conf))
+    src = str(
+        r.get("source_text") if r.get("source_text") is not None else r.get("evidence") or r.get("quote") or ""
+    ).strip()
+    if enrich_from_kb:
+        en2, cn2, kb_aliases = _enrich_names_from_kb(en, cn)
+        merged_aliases = list(dict.fromkeys(aliases + kb_aliases))
+    else:
+        en2, cn2 = en, cn
+        merged_aliases = list(dict.fromkeys(aliases))
+    return {
+        "en_name_candidate": en2,
+        "cn_name_candidate": cn2,
+        "alias_candidates": merged_aliases,
+        "laterality_candidate": later,
+        "region_category_candidate": cat,
+        "granularity_candidate": gran,
+        "parent_region_candidate": parent,
+        "ontology_source_candidate": onto,
+        "confidence": conf,
+        "source_text": (src or "")[:400],
+    }
+
+
 # DeepSeek 脑区抽取：规划好的 user prompt（需含 {TEXT}）
+# 三种方式（文件/文本/直接生成）最终都落同一套 CandidateRegion 中间态字段。
 REGION_USER_PROMPT_PRESETS: Dict[str, str] = {
     "default": (
-        "你是脑区知识图谱抽取专家。请从以下文本中完整抽取所有脑区名称候选。\n"
-        "返回JSON数组，每项字段：\n"
-        "  en_name_candidate      （英文名，如无则空字符串）\n"
-        "  cn_name_candidate      （中文名，如无则空字符串）\n"
-        "  alias_candidates       （别名/缩写列表，如 [\"PFC\",\"mPFC\"]）\n"
-        "  laterality_candidate   （left/right/bilateral/midline/unknown）\n"
-        "  region_category_candidate （如 cortex/hippocampus/amygdala 等）\n"
-        "  granularity_candidate  （major/sub/allen/unknown）\n"
-        "  parent_region_candidate（父区名，如无则空字符串）\n"
-        "  confidence             （0-1 浮点数）\n"
-        "  source_text            （原文引用，不超过100字）\n"
-        "只返回JSON数组，不要有其他内容。\n\n"
+        "你是脑区知识图谱抽取专家。请从以下文本中**完整、穷尽**抽取所有脑区实体。\n"
+        "【表格/多行】若 TEXT 为带「行N:」前缀的表格行或多行列表：每一行对应**独立**解剖条目，"
+        "`regions` 中条目数应**不少于**本批有效行数（除非某行明确无脑区）；"
+        "禁止将不同行合并为一条；仅当**同一行内**出现同义重复才可合并。\n"
+        "【非表格】同一解剖结构的不同表述可合并为一条。\n"
+        "输出必须是 **一个 JSON 对象**，且**仅含一个键** `regions`，值为数组；数组元素对象**仅使用下列键名**"
+        "（与数据库候选/入库 staging 对齐，勿发明新键）：\n"
+        "  en_name_candidate       string  标准英文解剖名（拉丁/英文文献常用）；无则 \"\"\n"
+        "  cn_name_candidate       string  中文通用译名；无则 \"\"\n"
+        "  alias_candidates        array   缩写与其它别名，如 [\"PFC\",\"mPFC\"]\n"
+        "  laterality_candidate    string  仅允许: left | right | bilateral | midline | unknown\n"
+        "  region_category_candidate string 解剖大类/分区标签，如 cortex | hippocampal | amygdala | thalamus | brainstem | cerebellum | other | brain_region\n"
+        "  granularity_candidate   string  仅允许: major | sub | allen | unknown\n"
+        "  parent_region_candidate string  父级脑区英文名；无则 \"\"\n"
+        "  ontology_source_candidate string 固定填 \"deepseek_extract\"（除非文本另有明确本体来源可写简短标识）\n"
+        "  confidence              number  0~1\n"
+        "  source_text             string  支持该条目的原文短语（≤120字）\n"
+        "要求：在能确定时**同时给出中英文**；缩写放入 alias_candidates。\n"
+        "只输出 JSON 对象本身，形如 {\"regions\":[...]} ，不要 Markdown 代码围栏，不要解释文字。\n\n"
         "TEXT:\n{TEXT}"
     ),
     "detailed": (
-        "你是神经解剖与脑图谱专家。请从以下文本中「穷尽」抽取所有脑区候选（含缩写、别名、英文/中文）。\n"
-        "同一脑区多种写法合并为一条；尽量给出 laterality 与合理 confidence。\n"
-        "返回JSON数组，字段与 default 预设相同。\n\n"
+        "你是神经解剖与脑图谱专家。请从以下文本中「穷尽」抽取脑区候选：含中英文全称、常见缩写、层级（父区）与侧化。\n"
+        "合并同义重复项；对不确定侧化用 unknown。\n"
+        "输出格式：与 default 预设**完全相同**（`regions` 数组 + 相同键名与取值约束）。\n\n"
         "TEXT:\n{TEXT}"
     ),
     "minimal": (
-        "从下列文本抽取脑区名称，只输出 JSON 数组。"
-        "字段：en_name_candidate,cn_name_candidate,alias_candidates,laterality_candidate,"
-        "region_category_candidate,granularity_candidate,parent_region_candidate,confidence,source_text。"
-        "granularity_candidate ∈ major/sub/allen/unknown。\n\nTEXT:\n{TEXT}"
+        "从下列文本抽取脑区，只输出 JSON 对象，且仅含键 `regions`，值为数组；数组元素键名固定为："
+        "en_name_candidate,cn_name_candidate,alias_candidates,laterality_candidate,"
+        "region_category_candidate,granularity_candidate,parent_region_candidate,"
+        "ontology_source_candidate,confidence,source_text。"
+        "granularity_candidate ∈ major/sub/allen/unknown；laterality_candidate ∈ left/right/bilateral/midline/unknown；"
+        "ontology_source_candidate 填 deepseek_extract。\n\nTEXT:\n{TEXT}"
     ),
 }
 
-DEFAULT_DEEPSEEK_SYSTEM = "你是脑区知识图谱抽取助手，只返回 JSON 数组，不要 Markdown 代码围栏。"
+DEFAULT_DEEPSEEK_SYSTEM = (
+    "你是脑区知识图谱抽取助手。你必须只输出一个 JSON 对象，且仅含键 \"regions\"；"
+    "其值为数组，数组元素字段名固定为："
+    "en_name_candidate, cn_name_candidate, alias_candidates, laterality_candidate, "
+    "region_category_candidate, granularity_candidate, parent_region_candidate, "
+    "ontology_source_candidate, confidence, source_text。"
+    "不要输出 Markdown 代码围栏或任何非 JSON 内容。"
+)
+
+# 文件表格 DeepSeek：每批用户文本字符上限（与 deepseek_batch_max_chars 配置一致；默认可整表）
+DEEPSEEK_TABLE_BATCH_MAX_CHARS = 500000
+# 非表格 chunk 文本分批
+DEEPSEEK_CHUNK_BATCH_MAX_CHARS = 500000
+
+
+def _table_row_to_line(tr: Dict[str, Any]) -> str:
+    raw = tr.get("joined_text") or " | ".join(str(v) for v in (tr.get("values") or []))
+    return (raw or "").strip()
+
+
+def _batch_joined_lines(lines: List[str], max_chars: int) -> List[str]:
+    """按字符预算将多行文本切成若干批，顺序遍历整张表。"""
+    if not lines:
+        return []
+    if max_chars < 500:
+        max_chars = 500
+    batches: List[str] = []
+    cur: List[str] = []
+    cur_len = 0
+    for line in lines:
+        if len(line) > max_chars:
+            if cur:
+                batches.append("\n".join(cur))
+                cur = []
+                cur_len = 0
+            for i in range(0, len(line), max_chars):
+                batches.append(line[i : i + max_chars])
+            continue
+        add_len = len(line) if not cur else 1 + len(line)
+        if cur and cur_len + add_len > max_chars:
+            batches.append("\n".join(cur))
+            cur = [line]
+            cur_len = len(line)
+        else:
+            cur.append(line)
+            cur_len += add_len
+    if cur:
+        batches.append("\n".join(cur))
+    return batches
+
+
+def _batch_table_lines(lines: List[str], max_chars: int, rows_per_batch: int) -> List[str]:
+    """表格行分批：rows_per_batch>0 时先按固定行数切段，再对每段做字符预算切分（防单行超长）。"""
+    if not lines:
+        return []
+    if rows_per_batch <= 0:
+        return _batch_joined_lines(lines, max_chars)
+    if max_chars < 500:
+        max_chars = 500
+    batches: List[str] = []
+    for i in range(0, len(lines), rows_per_batch):
+        chunk = lines[i : i + rows_per_batch]
+        batches.extend(_batch_joined_lines(chunk, max_chars))
+    return batches
+
+
+def _merge_deepseek_region_candidates(dst: CandidateRegion, src: CandidateRegion) -> None:
+    """多批次合并去重时保留各批次的溯源与证据，不修改模型给出的中英文名。"""
+    def _loads(rn: str) -> Dict[str, Any]:
+        if not rn:
+            return {}
+        try:
+            return json.loads(rn) if isinstance(rn, str) else {}
+        except Exception:
+            return {"_unparsed_review_note": rn}
+
+    def _dumps(d: Dict[str, Any]) -> str:
+        return json.dumps(d, ensure_ascii=False)
+
+    a = _loads(dst.review_note)
+    b = _loads(src.review_note)
+    da = a.get("deepseek") if isinstance(a.get("deepseek"), dict) else {}
+    db = b.get("deepseek") if isinstance(b.get("deepseek"), dict) else {}
+    ba = da.get("batches", [])
+    bb = db.get("batches", [])
+    if not isinstance(ba, list):
+        ba = []
+    if not isinstance(bb, list):
+        bb = []
+    da["batches"] = ba + bb
+    a["deepseek"] = da
+    dst.review_note = _dumps(a)
+    s1 = (dst.source_text or "").strip()
+    s2 = (src.source_text or "").strip()
+    if s2 and s2 not in s1:
+        sep = " | " if s1 else ""
+        dst.source_text = (s1 + sep + s2)[:400]
+
+
+def _network_error_hint(exc: Exception) -> str:
+    msg = str(exc)
+    low = msg.lower()
+    if "unexpected_eof_while_reading" in low or "ssl" in low:
+        return "hint=ssl_handshake_or_proxy_issue"
+    if "timed out" in low or "timeout" in low:
+        return "hint=request_timeout"
+    if "name or service not known" in low or "nodename nor servname provided" in low:
+        return "hint=dns_resolution_failed"
+    return "hint=network_or_transport_error"
 
 
 def compose_region_file_user_prompt(sample_text: str, cfg: Dict[str, Any]) -> str:
@@ -322,6 +737,11 @@ def compose_region_file_user_prompt(sample_text: str, cfg: Dict[str, Any]) -> st
     custom = (cfg.get("region_user_prompt_template") or "").strip()
     if custom:
         body = custom.replace("{TEXT}", sample_text)
+        if cfg.get("force_json_output", True) and "regions" not in body:
+            body += (
+                "\n\n【输出约束】必须使用 JSON 对象，且仅含键 \"regions\"，值为脑区对象数组；"
+                "不要输出裸数组，不要 Markdown 围栏。"
+            )
     else:
         pid = (cfg.get("region_prompt_preset") or "default").strip()
         template = REGION_USER_PROMPT_PRESETS.get(pid, REGION_USER_PROMPT_PRESETS["default"])
@@ -333,43 +753,74 @@ def compose_region_file_user_prompt(sample_text: str, cfg: Dict[str, Any]) -> st
 
 
 def compose_direct_region_user_prompt(params: Dict[str, Any], cfg: Dict[str, Any]) -> str:
-    """根据配置组合「直接生成」脑区的 user 消息；模板可用占位符 TOPIC/SPECIES/GRANULARITY/EXTRA。"""
+    """根据配置组合「直接生成」脑区的 user 消息；模板可用占位符 TOPIC/SPECIES/GRANULARITY/EXTRA/ATLAS。"""
     topic = (params.get("topic") or "脑区").strip()
-    species = (params.get("species") or "小鼠").strip()
+    species = (params.get("species") or "人类").strip()
     granularity = (params.get("granularity") or "major").strip()
     extra = (params.get("extra_instructions") or "").strip()
+    atlas = _direct_major_atlas_prompt_block(species) if _should_inject_direct_major_atlas(granularity) else ""
     custom = (cfg.get("direct_region_user_prompt_template") or "").strip()
     if custom:
-        return (
+        body = (
             custom.replace("{TOPIC}", topic)
             .replace("{SPECIES}", species)
             .replace("{GRANULARITY}", granularity)
             .replace("{EXTRA}", extra)
+            .replace("{ATLAS}", atlas)
         )
+        if "{ATLAS}" not in custom and atlas:
+            body += atlas
+        if cfg.get("force_json_output", True) and "regions" not in body:
+            body += (
+                "\n\n【输出约束】必须使用 JSON 对象，且仅含键 \"regions\"，值为脑区对象数组；"
+                "不要输出裸数组，不要 Markdown 围栏。"
+            )
+        return body
     pid = (cfg.get("direct_region_prompt_preset") or "default").strip()
     if pid == "detailed":
-        return (
-            f"请系统、完整地列出{species}与「{topic}」相关的脑区名称（中英文），粒度参考为{granularity}。"
-            "需兼顾皮层、皮层下、脑干、小脑等常见分区；若有缩写请列入 alias_candidates。"
-            "返回JSON数组，每项字段："
+        body = (
+            f"请系统、完整地列出{species}与「{topic}」相关的脑区（中英文标准名），粒度参考为{granularity}。"
+            "需兼顾皮层、皮层下、脑干、小脑等常见分区；缩写放入 alias_candidates。"
+            "输出 JSON 对象，且仅含键 \"regions\"，值为数组；数组元素键名固定为："
             "en_name_candidate,cn_name_candidate,alias_candidates,laterality_candidate,"
-            "region_category_candidate,granularity_candidate,parent_region_candidate,confidence,source_text。"
-            "granularity_candidate只允许major/sub/allen/unknown。\n"
+            "region_category_candidate,granularity_candidate,parent_region_candidate,"
+            "ontology_source_candidate,confidence,source_text。"
+            "granularity_candidate 仅 major/sub/allen/unknown；laterality_candidate 仅 left/right/bilateral/midline/unknown；"
+            "ontology_source_candidate 填 direct_deepseek。\n"
             f"{extra}"
         )
+        return body + atlas if atlas else body
     if pid == "minimal":
-        return (
+        body = (
             f"列出{species}与「{topic}」相关的脑区（粒度 {granularity}）。"
-            "返回JSON数组，字段：en_name_candidate,cn_name_candidate,alias_candidates,laterality_candidate,"
-            "region_category_candidate,granularity_candidate,parent_region_candidate,confidence,source_text。\n"
+            "返回 JSON 对象，且仅含键 \"regions\"，值为数组；数组元素字段："
+            "en_name_candidate,cn_name_candidate,alias_candidates,laterality_candidate,"
+            "region_category_candidate,granularity_candidate,parent_region_candidate,"
+            "ontology_source_candidate,confidence,source_text。"
+            "ontology_source_candidate 填 direct_deepseek。\n"
             f"{extra}"
         )
-    return ExtractionService.build_region_prompt("direct_generate", params)
+        return body + atlas if atlas else body
+    base = ExtractionService.build_region_prompt("direct_generate", params)
+    return base + atlas if atlas else base
+
+
+_JSON_INSTRUCTION_SUFFIX = (
+    "\n\n【输出约束 / Output constraint】"
+    "你必须只输出一个合法的 JSON 对象，且仅含键 \"regions\"，值为脑区对象数组。"
+    "严禁输出任何 Markdown 代码围栏或非 JSON 内容。"
+    " You MUST output valid JSON only."
+)
 
 
 def deepseek_system_content(cfg: Dict[str, Any]) -> str:
+    """当 force_json_output 开启时，保证 system_prompt 中含有 'json' 关键字（DeepSeek API 强制要求）。"""
     s = (cfg.get("system_prompt") or "").strip()
-    return s if s else DEFAULT_DEEPSEEK_SYSTEM
+    base = s if s else DEFAULT_DEEPSEEK_SYSTEM
+    if cfg.get("force_json_output", True):
+        if "json" not in base.lower():
+            base = base + _JSON_INSTRUCTION_SUFFIX
+    return base
 
 
 def _detect_header_col_types(header_values: List[str]) -> Dict[int, str]:
@@ -395,6 +846,10 @@ class ExtractionService:
         parsed_payload: Dict[str, Any],
         mode: str,
         deepseek_cfg: Dict[str, Any],
+        *,
+        pipeline_config: Optional[Dict[str, Any]] = None,
+        root_dir: Optional[str] = None,
+        log_emit: Optional[Any] = None,
     ) -> Dict[str, Any]:
         chunks = parsed_payload.get("chunks", [])
         parsed_doc = parsed_payload.get("document", {})
@@ -408,9 +863,47 @@ class ExtractionService:
         fp_with_raw = dict(file_payload)
         fp_with_raw.setdefault("raw_text", parsed_doc.get("raw_text", "") if isinstance(parsed_doc, dict) else "")
 
+        pc = pipeline_config or {}
+        # v2 仅用于「本地高召回 + 规则/后处理」；若用户选择 DeepSeek，必须走下方 API 分批抽取，
+        # 否则会出现 extraction_method=region_v2_deepseek 但实际未调用 API、仅靠 KB 模糊匹配的假结果。
+        v2_on = bool(pc.get("region_extraction_v2", {}).get("enabled")) and bool(root_dir)
+        if v2_on and mode != "deepseek":
+            from .region_pipeline_v2 import run_region_extraction_v2
+
+            return run_region_extraction_v2(
+                fp_with_raw,
+                parsed_payload,
+                mode,
+                deepseek_cfg,
+                root_dir=root_dir,
+                pipeline_config=pc,
+                log_emit=log_emit,
+            )
+        if v2_on and mode == "deepseek" and log_emit:
+            try:
+                log_emit(
+                    "[REGION_V2] skipped_for_deepseek",
+                    {"reason": "region_extraction_v2 is local-only; DeepSeek mode uses batched API extraction"},
+                )
+            except Exception:
+                pass
+
         if mode == "deepseek":
-            candidates = self._extract_by_deepseek(file_payload, chunks, parsed_document_id, deepseek_cfg, table_rows=table_rows)
-            return {"method": "deepseek", "llm_model": deepseek_cfg.get("model", ""), "candidates": candidates}
+            # 原则：DeepSeek 失败时不降级本地规则，直接抛出明确失败原因。
+            candidates, batch_summary = self._extract_by_deepseek(
+                fp_with_raw,
+                chunks,
+                parsed_document_id,
+                deepseek_cfg,
+                table_rows=table_rows,
+                log_emit=log_emit,
+            )
+            return {
+                "method": "deepseek",
+                "llm_model": deepseek_cfg.get("model", ""),
+                "candidates": candidates,
+                "deepseek_batch_summary": batch_summary,
+            }
 
         candidates = self._extract_by_local_rules(fp_with_raw, chunks, parsed_document_id, table_rows=table_rows)
         return {"method": "local_rule", "llm_model": "", "candidates": candidates}
@@ -572,27 +1065,181 @@ class ExtractionService:
         parsed_document_id: str,
         deepseek_cfg: Dict[str, Any],
         table_rows: Optional[List[Dict[str, Any]]] = None,
-    ) -> List[CandidateRegion]:
-        # Prefer structured table rows as text (better signal for LLM)
+        log_emit: Optional[Any] = None,
+    ) -> Tuple[List[CandidateRegion], Dict[str, Any]]:
+        """整表遍历：按行顺序分批调用模型，合并去重，避免单次截断导致失败或漏抽。"""
+        max_chars = int(deepseek_cfg.get("deepseek_batch_max_chars", DEEPSEEK_TABLE_BATCH_MAX_CHARS) or DEEPSEEK_TABLE_BATCH_MAX_CHARS)
+        if max_chars < 800:
+            max_chars = 800
+        rows_per_batch = int(deepseek_cfg.get("deepseek_rows_per_batch", 0) or 0)
+
+        batches_text: List[str] = []
         if table_rows:
-            lines = [
-                tr.get("joined_text") or " | ".join(str(v) for v in (tr.get("values") or []))
-                for tr in table_rows[:200]
-            ]
-            sample = "\n".join(l for l in lines if l)[:8000]
-        else:
-            sample = "\n".join((ch.get("text_content") or "")[:300] for ch in chunks[:40])
-        if not sample:
-            sample = file_payload.get("filename", "")
-        prompt = compose_region_file_user_prompt(sample, deepseek_cfg)
-        return self._deepseek_prompt_to_regions(
-            prompt,
-            file_payload,
-            parsed_document_id,
-            deepseek_cfg,
-            extraction_method="deepseek",
-            ontology_source="deepseek_extract",
-        )
+            lines: List[str] = []
+            for ri, tr in enumerate(table_rows):
+                raw = _table_row_to_line(tr)
+                if not raw:
+                    continue
+                lines.append(f"行{ri + 1}\t{raw}")
+            batches_text = _batch_table_lines(lines, max_chars, rows_per_batch)
+        if not batches_text and chunks:
+            chunk_lines = []
+            for ch in chunks:
+                t = (ch.get("text_content") or "").strip()
+                if t:
+                    chunk_lines.append(t[:4000])
+            batches_text = _batch_joined_lines(chunk_lines, max_chars)
+        if not batches_text:
+            raw = (file_payload.get("raw_text") or "").strip()
+            if raw:
+                raw_lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+                batches_text = _batch_joined_lines(raw_lines, max_chars)
+        if not batches_text:
+            raise RuntimeError(
+                "deepseek_no_input_content: 无 table_rows、无 chunk 正文、无 raw_text，无法调用 DeepSeek 做真实抽取。"
+            )
+
+        merged: List[CandidateRegion] = []
+        merged_by_key: Dict[str, CandidateRegion] = {}
+        merge_order: List[str] = []
+        batch_errors: List[str] = []
+        total = len(batches_text)
+        empty_batches = 0
+        ok_batches = 0
+        if log_emit:
+            try:
+                log_emit(
+                    "[DEEPSEEK] batched_extract_start",
+                    {
+                        "total_batches": total,
+                        "source": "table_rows" if table_rows else "chunks_or_raw",
+                        "max_chars": max_chars,
+                        "rows_per_batch": rows_per_batch if table_rows else 0,
+                        "input_lines": len(lines) if table_rows else 0,
+                    },
+                )
+            except Exception:
+                pass
+        batch_delay = float(deepseek_cfg.get("batch_delay_sec", 0) or 0)
+
+        table_row_guard = ""
+        if table_rows:
+            table_row_guard = (
+                "【表格行级约束】以下文本每行以「行N:」开头，N 为原表行号；"
+                "每一行对应 Excel 中一行数据，须为该行输出 regions 中至少一条独立对象（该行无脑区时除外）；"
+                "禁止将多行合并为一条；禁止仅因共享词根将不同行误归为同一脑区；"
+                "每条 source_text 必须摘自该行原文。\n\n"
+            )
+
+        for bi, batch in enumerate(batches_text):
+            if bi > 0 and batch_delay > 0:
+                time.sleep(batch_delay)
+            prefix = table_row_guard
+            if total > 1:
+                prefix += (
+                    f"【表格/正文 第 {bi + 1}/{total} 批】以下片段按原始顺序给出，"
+                    f"请穷尽本批中出现的全部脑区实体（中英文、缩写进 alias_candidates），不要遗漏；"
+                    f"仅输出与本批内容相关的 JSON 对象 {{\"regions\":[...]}} 。\n\n"
+                )
+            sample = prefix + batch
+            prompt = compose_region_file_user_prompt(sample, deepseek_cfg)
+            try:
+                part = self._deepseek_prompt_to_regions(
+                    prompt,
+                    file_payload,
+                    parsed_document_id,
+                    deepseek_cfg,
+                    extraction_method="deepseek",
+                    ontology_source="deepseek_extract",
+                    allow_empty=True,
+                    batch_meta={"index": bi + 1, "total": total, "max_chars": max_chars},
+                )
+            except Exception as exc:
+                emsg = str(exc)
+                # 配置类/鉴权类错误直接失败，不进入“空结果”汇总，避免掩盖根因。
+                if emsg.startswith("deepseek_disabled") or emsg.startswith("deepseek_api_key_missing"):
+                    raise
+                if emsg.startswith("deepseek_http_401") or emsg.startswith("deepseek_http_403"):
+                    raise
+                batch_errors.append(f"batch_{bi + 1}:{emsg}")
+                if log_emit:
+                    try:
+                        log_emit(
+                            "[DEEPSEEK] batch_failed",
+                            {"batch_idx": bi + 1, "total_batches": total, "reason": str(exc)[:500]},
+                        )
+                    except Exception:
+                        pass
+                continue
+            if not part:
+                empty_batches += 1
+                if log_emit:
+                    try:
+                        log_emit(
+                            "[DEEPSEEK] batch_empty",
+                            {"batch_idx": bi + 1, "total_batches": total},
+                        )
+                    except Exception:
+                        pass
+                continue
+            ok_batches += 1
+            if log_emit:
+                try:
+                    log_emit(
+                        "[DEEPSEEK] batch_succeeded",
+                        {"batch_idx": bi + 1, "total_batches": total, "candidates": len(part)},
+                    )
+                except Exception:
+                    pass
+            for c in part:
+                en = (c.en_name_candidate or "").strip()
+                cn = (c.cn_name_candidate or "").strip()
+                if not en and not cn:
+                    continue
+                key = f"{en.lower()}|{cn}"
+                if key not in merged_by_key:
+                    merged_by_key[key] = c
+                    merge_order.append(key)
+                else:
+                    _merge_deepseek_region_candidates(merged_by_key[key], c)
+
+        merged = [merged_by_key[k] for k in merge_order]
+
+        if not merged:
+            err_tail = ("; ".join(batch_errors[:5])) if batch_errors else ""
+            if batch_errors and empty_batches == 0:
+                raise RuntimeError(
+                    "deepseek_all_batches_failed:"
+                    f" batch_total={total}, batch_failed={len(batch_errors)}, batch_empty={empty_batches}"
+                    + (f" details={err_tail}" if err_tail else "")
+                )
+            if empty_batches == total and not batch_errors:
+                raise RuntimeError(
+                    "deepseek_empty_result:"
+                    f" batch_total={total}, batch_empty={empty_batches}, batch_failed={len(batch_errors)}"
+                )
+            raise RuntimeError(
+                "deepseek_no_valid_candidates:"
+                f" batch_total={total}, batch_empty={empty_batches}, batch_failed={len(batch_errors)}"
+                + (f" details={err_tail}" if err_tail else "")
+            )
+        summary = {
+            "batched": True,
+            "total_batches": total,
+            "successful_batches": ok_batches,
+            "failed_batches": len(batch_errors),
+            "empty_batches": empty_batches,
+            "merged_candidate_count": len(merged),
+        }
+        if log_emit:
+            try:
+                log_emit(
+                    "[DEEPSEEK] batched_extract_done",
+                    {"merged_candidates": len(merged), "failed_batches": len(batch_errors), "empty_batches": empty_batches},
+                )
+            except Exception:
+                pass
+        return merged, summary
 
     def _deepseek_prompt_to_regions(
         self,
@@ -603,11 +1250,15 @@ class ExtractionService:
         *,
         extraction_method: str = "deepseek",
         ontology_source: str = "deepseek_extract",
+        allow_empty: bool = False,
+        batch_meta: Optional[Dict[str, Any]] = None,
     ) -> List[CandidateRegion]:
         if not deepseek_cfg.get("enabled"):
             raise RuntimeError("deepseek_disabled")
         if not deepseek_cfg.get("api_key"):
             raise RuntimeError("deepseek_api_key_missing")
+        prompt_version = str(deepseek_cfg.get("prompt_version") or "region_extract_v1")
+        enrich_from_kb = bool(deepseek_cfg.get("enrich_from_kb", False))
 
         url = deepseek_cfg.get("base_url", "https://api.deepseek.com").rstrip("/") + "/v1/chat/completions"
         payload = {
@@ -618,6 +1269,13 @@ class ExtractionService:
                 {"role": "user", "content": prompt},
             ],
         }
+        mt = int(deepseek_cfg.get("max_tokens") or 0)
+        if mt > 0:
+            payload["max_tokens"] = mt
+        if deepseek_cfg.get("top_p") is not None:
+            payload["top_p"] = float(deepseek_cfg.get("top_p"))
+        if deepseek_cfg.get("force_json_output", True):
+            payload["response_format"] = {"type": "json_object"}
         req = request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
@@ -627,59 +1285,161 @@ class ExtractionService:
             },
             method="POST",
         )
-        try:
-            with request.urlopen(req, timeout=120) as resp:
-                body = resp.read().decode("utf-8", errors="ignore")
-        except error.HTTPError as exc:  # pragma: no cover
-            detail = exc.read().decode("utf-8", errors="ignore")
-            raise RuntimeError(f"deepseek_http_{exc.code}:{detail[:300]}") from exc
-        except Exception as exc:  # pragma: no cover
-            raise RuntimeError(f"deepseek_request_failed:{exc}") from exc
+        retries = max(0, int(deepseek_cfg.get("request_retries", 2)))
+        timeout_sec = max(10, int(deepseek_cfg.get("request_timeout_sec", 120)))
+        backoff_sec = max(0.2, float(deepseek_cfg.get("retry_backoff_sec", 1.2)))
+        body = ""
+        last_exc: Optional[Exception] = None
+        for attempt in range(retries + 1):
+            try:
+                with request.urlopen(req, timeout=timeout_sec) as resp:
+                    body = resp.read().decode("utf-8", errors="ignore")
+                last_exc = None
+                break
+            except error.HTTPError as exc:  # pragma: no cover
+                detail = exc.read().decode("utf-8", errors="ignore")
+                last_exc = RuntimeError(f"deepseek_http_{exc.code}:{detail[:300]}")
+                if exc.code in (400, 401, 403, 404):
+                    break
+            except Exception as exc:  # pragma: no cover
+                last_exc = RuntimeError(f"deepseek_request_failed:{exc}; {_network_error_hint(exc)}")
+            if attempt < retries:
+                time.sleep(backoff_sec * (attempt + 1))
+        if last_exc is not None:
+            raise RuntimeError(
+                f"{last_exc}; retries={retries}; timeout_sec={timeout_sec}; prompt_version={prompt_version}"
+            ) from last_exc
 
         msg = self._parse_chat_text(body)
+        raw_msg = (msg or "").strip()
         parsed_rows = self._parse_json_rows(msg)
+        # 与 _parse_json_rows 内部补救一致：双保险（截断 JSON 时仅前几项闭合）
+        if not parsed_rows and raw_msg:
+            parsed_rows = _extract_regions_array_objects(raw_msg)
+        if not parsed_rows:
+            if not raw_msg:
+                if allow_empty:
+                    return []
+                raise RuntimeError("deepseek_empty_result")
+            probe: Any = None
+            try:
+                probe = json.loads(raw_msg)
+            except json.JSONDecodeError:
+                mbrace = re.search(r"\{[\s\S]*\}", raw_msg)
+                if not mbrace:
+                    parsed_rows = _extract_regions_array_objects(raw_msg)
+                    if not parsed_rows:
+                        raise RuntimeError(
+                            f"deepseek_json_parse_failed: prompt_version={prompt_version}; "
+                            f"hint=truncated_or_malformed_json_try_raise_max_tokens; raw_preview={raw_msg[:240]}"
+                        ) from None
+                else:
+                    try:
+                        probe = json.loads(mbrace.group(0))
+                    except json.JSONDecodeError as exc:
+                        parsed_rows = _extract_regions_array_objects(raw_msg)
+                        if not parsed_rows:
+                            raise RuntimeError(
+                                f"deepseek_json_parse_failed: prompt_version={prompt_version}; "
+                                f"hint=truncated_or_malformed_json_try_raise_max_tokens; raw_preview={raw_msg[:240]}"
+                            ) from exc
+            if not parsed_rows and probe is not None:
+                if isinstance(probe, dict) and isinstance(probe.get("regions"), list) and len(probe["regions"]) == 0:
+                    if allow_empty:
+                        return []
+                    raise RuntimeError("deepseek_empty_result")
+                if isinstance(probe, list) and len(probe) == 0:
+                    if allow_empty:
+                        return []
+                    raise RuntimeError("deepseek_empty_result")
+                if isinstance(probe, dict) and isinstance(probe.get("regions"), list):
+                    parsed_rows = probe["regions"]
+                elif isinstance(probe, list):
+                    parsed_rows = probe
+            if not parsed_rows:
+                raise RuntimeError(
+                    f"deepseek_json_unexpected_shape: prompt_version={prompt_version}; raw_preview={raw_msg[:240]}"
+                )
         out: List[CandidateRegion] = []
+        seen_keys: set[str] = set()
         for row in parsed_rows:
+            if not isinstance(row, dict):
+                continue
+            norm = normalize_region_llm_row(
+                row,
+                ontology_default=ontology_source,
+                enrich_from_kb=enrich_from_kb,
+            )
+            norm["ontology_source_candidate"] = ontology_source
+            en = norm["en_name_candidate"]
+            cn = norm["cn_name_candidate"]
+            if not en and not cn:
+                continue
+            dedupe = f"{en.strip().lower()}|{cn.strip()}"
+            if dedupe in seen_keys:
+                continue
+            seen_keys.add(dedupe)
+            _conf = float(norm["confidence"])
+            _estatus = derive_region_extract_status(
+                extraction_method="deepseek",
+                match_type="",
+                confidence=_conf,
+                en_name=en,
+                cn_name=cn,
+            )
+            note_obj: Dict[str, Any] = {
+                "extract_status": _estatus,
+                "deepseek": {
+                    "prompt_version": prompt_version,
+                    "batches": [batch_meta] if batch_meta else [],
+                },
+            }
             out.append(
                 CandidateRegion(
                     id=make_id("cr"),
                     file_id=file_payload.get("file_id", ""),
                     parsed_document_id=parsed_document_id,
                     chunk_id="",
-                    source_text=str(row.get("source_text", "")),
-                    en_name_candidate=str(row.get("en_name_candidate", "")),
-                    cn_name_candidate=str(row.get("cn_name_candidate", "")),
-                    alias_candidates=list(row.get("alias_candidates", [])),
-                    laterality_candidate=str(row.get("laterality_candidate", "unknown")),
-                    region_category_candidate=str(row.get("region_category_candidate", "brain_region")),
-                    granularity_candidate=str(row.get("granularity_candidate", "unknown")),
-                    parent_region_candidate=str(row.get("parent_region_candidate", "")),
-                    ontology_source_candidate=ontology_source,
-                    confidence=float(row.get("confidence", 0.7)),
+                    source_text=norm["source_text"],
+                    en_name_candidate=en,
+                    cn_name_candidate=cn,
+                    alias_candidates=norm["alias_candidates"],
+                    laterality_candidate=norm["laterality_candidate"],
+                    region_category_candidate=norm["region_category_candidate"],
+                    granularity_candidate=norm["granularity_candidate"],
+                    parent_region_candidate=norm["parent_region_candidate"],
+                    ontology_source_candidate=norm["ontology_source_candidate"],
+                    confidence=_conf,
                     extraction_method=extraction_method,
                     llm_model=deepseek_cfg.get("model", ""),
                     status="pending_review",
+                    review_note=json.dumps(note_obj, ensure_ascii=False),
                     created_at=utc_now_iso(),
                     updated_at=utc_now_iso(),
                 )
             )
         if not out:
+            if allow_empty:
+                return []
             raise RuntimeError("deepseek_empty_result")
         return out
 
     @staticmethod
     def build_region_prompt(mode: str, params: Dict[str, Any]) -> str:
         topic = (params.get("topic") or "脑区").strip()
-        species = (params.get("species") or "小鼠").strip()
+        species = (params.get("species") or "人类").strip()
         granularity = (params.get("granularity") or "major").strip()
         extra = (params.get("extra_instructions") or "").strip()
         _ = mode
         return (
-            f"请列出{species}与「{topic}」相关的脑区名称（中英文），粒度参考为{granularity}。"
-            "返回JSON数组，每项字段："
+            f"请列出{species}与「{topic}」相关的脑区（中英文标准名），**粒度为 {granularity}**；"
+            "若为 major/粗颗粒度，应覆盖大脑皮层主要叶区、边缘系统、基底节、丘脑/下丘脑、中脑/脑桥/延髓、小脑及嗅球等大体分区，条目数须充足，不得只给少数几条概括。"
+            "返回 JSON 对象，且仅含键 \"regions\"，值为数组；数组元素键名必须与文件/文本抽取一致："
             "en_name_candidate,cn_name_candidate,alias_candidates,laterality_candidate,"
-            "region_category_candidate,granularity_candidate,parent_region_candidate,confidence,source_text。"
-            "granularity_candidate只允许major/sub/allen/unknown。\n"
+            "region_category_candidate,granularity_candidate,parent_region_candidate,"
+            "ontology_source_candidate,confidence,source_text。"
+            "granularity_candidate 仅 major/sub/allen/unknown；laterality_candidate 仅 left/right/bilateral/midline/unknown；"
+            "ontology_source_candidate 填 direct_deepseek。\n"
             f"{extra}"
         )
 
@@ -729,15 +1489,53 @@ class ExtractionService:
 
     @staticmethod
     def _parse_json_rows(text: str) -> List[Dict[str, Any]]:
-        raw = text.strip()
-        if raw.startswith("```"):
-            raw = raw.strip("`")
-            raw = raw.replace("json", "", 1).strip()
+        raw = (text or "").strip()
+        if "```" in raw:
+            m = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw, re.IGNORECASE)
+            if m:
+                raw = m.group(1).strip()
         if not raw:
             return []
-        data = json.loads(raw)
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            # 截取首个 [...] 或 {...} 片段再试（模型偶发前后夹杂说明文字）
+            m2 = re.search(r"\[[\s\S]*\]", raw)
+            if m2:
+                try:
+                    data = json.loads(m2.group(0))
+                except json.JSONDecodeError:
+                    data = None
+            else:
+                data = None
+            if data is None:
+                m3 = re.search(r"\{[\s\S]*\}", raw)
+                if m3:
+                    try:
+                        data = json.loads(m3.group(0))
+                    except json.JSONDecodeError:
+                        data = None
+                else:
+                    data = None
+            if data is None:
+                # 响应被 max_tokens 截断：整段 JSON 非法，但前面若干 region 对象可能已完整闭合
+                partial = _extract_regions_array_objects(raw)
+                if partial:
+                    return partial
+                return []
         if isinstance(data, dict):
-            data = data.get("regions", [])
+            wrapped: Any = None
+            for k in ("regions", "items", "data", "candidates", "brain_regions", "results", "rows", "output", "result", "records"):
+                v = data.get(k)
+                if isinstance(v, list):
+                    wrapped = v
+                    break
+            if wrapped is not None:
+                data = wrapped
+            elif any(x in data for x in ("en_name_candidate", "cn_name_candidate", "en_name", "cn_name")):
+                data = [data]
+            else:
+                return []
         if not isinstance(data, list):
             return []
         out: List[Dict[str, Any]] = []

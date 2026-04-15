@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -14,6 +16,8 @@ from .ingestion.ingestion_service import IngestionService
 from .normalization.normalization_service import NormalizationService
 from .parsing.parsing_service import ParsingService
 from .tasks.task_service import TaskService
+from .validation.ontology_rules import engine_from_runtime, merge_candidate_ontology_note, refresh_engine
+from .validation.validation_service import ValidationService
 
 
 class WorkbenchService:
@@ -39,6 +43,143 @@ class WorkbenchService:
         self.normalization_service = NormalizationService()
         self.extraction_service = ExtractionService()
         self.ingestion_service = IngestionService()
+        self.ontology_rule_engine = engine_from_runtime(self.root_dir, self.config_service.get_runtime())
+        self.validation_service = ValidationService(self.ontology_rule_engine)
+
+    def ontology_rules_status(self) -> Dict[str, Any]:
+        rt = self.config_service.get_runtime()
+        cfg = (rt.get("pipeline") or {}).get("ontology_rules") or {}
+        eng = self.ontology_rule_engine
+        return {
+            "config_enabled": bool(cfg.get("enabled")),
+            "path": cfg.get("path", ""),
+            "loaded": bool(eng and eng.enabled),
+            "load_error": eng.load_error if eng else "",
+            "rules_version": eng.rules_version if eng else "",
+            "stage_policy": cfg.get("stage_policy", "warn"),
+        }
+
+    def refresh_ontology_rules(self) -> Dict[str, Any]:
+        refresh_engine(self.ontology_rule_engine, self.config_service.get_runtime())
+        self.validation_service.set_ontology_engine(self.ontology_rule_engine)
+        return self.ontology_rules_status()
+
+    def import_ontology_rules_from_upload(self, temp_path: str, original_filename: str) -> Dict[str, Any]:
+        """Parse OWL/RDF from a temp file, write to pipeline.ontology_rules.path, reload engine."""
+        from pathlib import Path
+
+        from .validation.owl_ruleset_convert import build_ruleset, load_graph_from_path, write_ruleset_json
+
+        src = Path(temp_path)
+        if not src.is_file():
+            return {"success": False, "error": "temp_file_missing"}
+
+        try:
+            g = load_graph_from_path(src)
+        except Exception as exc:
+            return {"success": False, "error": f"rdf_parse_failed:{exc}"}
+
+        hint = (original_filename or src.name).strip() or "upload.owl"
+        ruleset = build_ruleset(g, source_hint=hint)
+
+        rt = self.config_service.get_runtime()
+        rel = ((rt.get("pipeline") or {}).get("ontology_rules") or {}).get("path") or "artifacts/ontology/ruleset.json"
+        out_path = (Path(self.root_dir) / str(rel).replace("\\", "/")).resolve()
+        try:
+            write_ruleset_json(out_path, ruleset)
+        except Exception as exc:
+            return {"success": False, "error": f"write_failed:{exc}"}
+
+        self.refresh_ontology_rules()
+        try:
+            rel_out = str(out_path.relative_to(Path(self.root_dir)))
+        except ValueError:
+            rel_out = str(out_path)
+
+        self.log_bus.emit(
+            "-",
+            "CONFIG",
+            f"ontology_imported file={hint} -> {rel_out} terms={len(ruleset.get('termMap') or {})}",
+            event_type="ontology_rules_imported",
+            detail_json={"output_path": rel_out, "rules_version": ruleset.get("version", "")},
+        )
+
+        return {
+            "success": True,
+            "output_path": rel_out,
+            "term_map_count": len(ruleset.get("termMap") or {}),
+            "parent_rules_count": len(ruleset.get("parentRules") or {}),
+            "rules_version": ruleset.get("version", ""),
+            "ontology_rules": self.ontology_rules_status(),
+        }
+
+    def get_ontology_rules_bundle(self) -> Dict[str, Any]:
+        """Return resolved path, load status, and full ruleset dict for the rules center UI."""
+        rt = self.config_service.get_runtime()
+        rel = ((rt.get("pipeline") or {}).get("ontology_rules") or {}).get("path") or "artifacts/ontology/ruleset.json"
+        abs_path = (Path(self.root_dir) / str(rel).replace("\\", "/")).resolve()
+        status = self.ontology_rules_status()
+        ruleset: Dict[str, Any] = {}
+        load_source = "none"
+
+        eng = self.ontology_rule_engine
+        if eng.enabled and eng.raw:
+            ruleset = dict(eng.raw)
+            load_source = "engine"
+        elif abs_path.is_file():
+            try:
+                ruleset = json.loads(abs_path.read_text(encoding="utf-8"))
+                load_source = "file"
+            except Exception as exc:
+                ruleset = {"_parse_error": str(exc)}
+                load_source = "error"
+
+        try:
+            resolved_rel = str(abs_path.relative_to(Path(self.root_dir)))
+        except ValueError:
+            resolved_rel = str(abs_path)
+
+        return {
+            "status": status,
+            "resolved_path": resolved_rel,
+            "load_source": load_source,
+            "ruleset": ruleset,
+        }
+
+    def _ontology_stage_context(self) -> Optional[Dict[str, Any]]:
+        rt = self.config_service.get_runtime()
+        cfg = (rt.get("pipeline") or {}).get("ontology_rules") or {}
+        if not cfg.get("enabled") or not self.ontology_rule_engine.enabled:
+            return None
+        return {"engine": self.ontology_rule_engine, "stage_policy": cfg.get("stage_policy", "warn")}
+
+    def _apply_ontology_notes_after_extract(self, rows: List[Dict[str, Any]], entity: str) -> None:
+        rt = self.config_service.get_runtime()
+        if not rt.get("pipeline", {}).get("auto_validate_on_extract"):
+            return
+        eng = self.ontology_rule_engine
+        if not eng.enabled:
+            return
+        for row in rows:
+            if entity == "region":
+                ev = eng.evaluate_region(row)
+            elif entity == "circuit":
+                ev = eng.evaluate_circuit(row)
+            else:
+                ev = eng.evaluate_connection(row)
+            if not ev.get("issues"):
+                continue
+            oc = eng.ontology_check_payload(ev, entity)
+            note = merge_candidate_ontology_note(row.get("review_note", ""), oc)
+            cid = row.get("id", "")
+            if not cid:
+                continue
+            if entity == "region":
+                self.store.update_region_candidate(cid, review_note=note, updated_at=utc_now_iso())
+            elif entity == "circuit":
+                self.store.update_circuit_candidate(cid, review_note=note, updated_at=utc_now_iso())
+            else:
+                self.store.update_connection_candidate(cid, review_note=note, updated_at=utc_now_iso())
 
     def status_payload(self) -> Dict[str, Any]:
         runtime = self.config_service.get_runtime()
@@ -51,6 +192,7 @@ class WorkbenchService:
             "task_count": len(self.store.list_tasks()),
             "repository_backend": "postgres" if getattr(self.store, "_pg_enabled", False) else "json",
             "deepseek_configured": bool(deepseek.get("enabled")) and bool(deepseek.get("api_key")),
+            "ontology_rules": self.ontology_rules_status(),
             "last_logs": self.log_bus.recent(20),
         }
 
@@ -214,17 +356,60 @@ class WorkbenchService:
         try:
             if mode == "deepseek":
                 self.log_bus.emit(task["task_id"], "EXTRACT", "[DEEPSEEK] request_start", event_type="deepseek_request_started")
-            result = self.extraction_service.run_region_extraction(file_payload, parsed, mode, deepseek_cfg)
+            rt = self.config_service.get_runtime()
+            rev2 = rt.get("pipeline", {}).get("region_extraction_v2", {})
+
+            def _v2_log(msg: str, detail: Optional[Dict[str, Any]] = None) -> None:
+                self.log_bus.emit(
+                    task["task_id"],
+                    "EXTRACT",
+                    msg,
+                    detail_json=detail or {},
+                    event_type="region_pipeline_v2",
+                )
+
+            def _deepseek_batched_log(msg: str, detail: Optional[Dict[str, Any]] = None) -> None:
+                self.log_bus.emit(
+                    task["task_id"],
+                    "EXTRACT",
+                    msg,
+                    detail_json=detail or {},
+                    event_type="deepseek_batched_pipeline",
+                )
+
+            def _extract_emit(msg: str, detail: Optional[Dict[str, Any]] = None) -> None:
+                if mode == "deepseek":
+                    _deepseek_batched_log(msg, detail)
+                elif rev2.get("enabled") and rev2.get("log_layers", True):
+                    _v2_log(msg, detail)
+
+            extract_emit: Optional[Any] = _extract_emit
+            if mode != "deepseek" and not (rev2.get("enabled") and rev2.get("log_layers", True)):
+                extract_emit = None
+
+            result = self.extraction_service.run_region_extraction(
+                file_payload,
+                parsed,
+                mode,
+                deepseek_cfg,
+                pipeline_config=rt.get("pipeline", {}),
+                root_dir=self.root_dir,
+                log_emit=extract_emit,
+            )
             rows = result["candidates"]
             lane = "deepseek" if mode == "deepseek" else "local"
             rmethod = "file_deepseek" if mode == "deepseek" else "file_local"
+            pm: Dict[str, Any] = {"mode": mode, "source": "file"}
+            if result.get("deepseek_batch_summary"):
+                pm["deepseek_batch_summary"] = result["deepseek_batch_summary"]
             ver = self._persist_region_version_and_store(
                 file_id,
                 rmethod,
                 lane,
                 rows,
-                prompt_meta={"mode": mode, "source": "file"},
+                prompt_meta=pm,
             )
+            self._apply_ontology_notes_after_extract(rows, "region")
             self.store.update_file(file_id, status=FileStatus.EXTRACTION_SUCCESS.value, updated_at=utc_now_iso())
             self.task_service.finish_task(task["task_id"], {"candidate_regions": len(rows), "mode": mode})
             if mode == "deepseek":
@@ -240,18 +425,32 @@ class WorkbenchService:
                 f"finish file_id={file_id} regions={len(rows)}",
                 event_type="extract_region_succeeded",
             )
-            return {"success": True, "task_id": task["task_id"], "count": len(rows), **ver}
+            ok_payload: Dict[str, Any] = {"success": True, "task_id": task["task_id"], "count": len(rows), **ver}
+            if result.get("deepseek_batch_summary"):
+                ok_payload["deepseek_batch_summary"] = result["deepseek_batch_summary"]
+            return ok_payload
         except Exception as exc:
+            err = str(exc)
+            err_type = "extract_failed"
+            if err.startswith("deepseek_request_failed") or err.startswith("deepseek_http_"):
+                err_type = "deepseek_transport_failed"
+            elif err.startswith("deepseek_empty_result"):
+                err_type = "deepseek_empty_result"
+            elif err.startswith("deepseek_api_key_missing"):
+                err_type = "deepseek_api_key_missing"
+            elif err.startswith("deepseek_disabled"):
+                err_type = "deepseek_disabled"
             self.store.update_file(file_id, status=FileStatus.EXTRACTION_FAILED.value, updated_at=utc_now_iso())
-            self.task_service.fail_task(task["task_id"], str(exc))
+            self.task_service.fail_task(task["task_id"], err)
             self.log_bus.emit(
                 task["task_id"],
                 "EXTRACT",
-                f"failed reason={exc}",
+                f"failed reason={err}",
                 level="error",
                 event_type="extract_region_failed",
+                detail_json={"error_type": err_type, "mode": mode},
             )
-            return {"success": False, "task_id": task["task_id"], "error": str(exc)}
+            return {"success": False, "task_id": task["task_id"], "error": err, "error_type": err_type}
 
     def generate_regions_from_text(
         self,
@@ -271,21 +470,51 @@ class WorkbenchService:
             profile_key=profile_key or None,
             inline_override=inline_deepseek_override,
         )
-        parsed = self.extraction_service.build_synthetic_parsed_from_text(text, file_id)
-        result = self.extraction_service.run_region_extraction(file_payload, parsed, mode, deepseek_cfg)
-        rows = result["candidates"]
-        lane = "deepseek" if mode == "deepseek" else "local"
-        rmethod = "text_deepseek" if mode == "deepseek" else "text_local"
-        ver = self._persist_region_version_and_store(
-            file_id,
-            rmethod,
-            lane,
-            rows,
-            prompt_text=text[:12000],
-            prompt_meta={"mode": mode, "input_kind": "text"},
-        )
-        self.store.update_file(file_id, status=FileStatus.EXTRACTION_SUCCESS.value, updated_at=utc_now_iso())
-        return {"success": True, "count": len(rows), **ver, "method": result.get("method")}
+        try:
+            parsed = self.extraction_service.build_synthetic_parsed_from_text(text, file_id)
+            rt = self.config_service.get_runtime()
+            result = self.extraction_service.run_region_extraction(
+                file_payload,
+                parsed,
+                mode,
+                deepseek_cfg,
+                pipeline_config=rt.get("pipeline", {}),
+                root_dir=self.root_dir,
+                log_emit=None,
+            )
+            rows = result["candidates"]
+            lane = "deepseek" if mode == "deepseek" else "local"
+            rmethod = "text_deepseek" if mode == "deepseek" else "text_local"
+            pm_text: Dict[str, Any] = {"mode": mode, "input_kind": "text"}
+            if result.get("deepseek_batch_summary"):
+                pm_text["deepseek_batch_summary"] = result["deepseek_batch_summary"]
+            ver = self._persist_region_version_and_store(
+                file_id,
+                rmethod,
+                lane,
+                rows,
+                prompt_text=text[:12000],
+                prompt_meta=pm_text,
+            )
+            self._apply_ontology_notes_after_extract(rows, "region")
+            self.store.update_file(file_id, status=FileStatus.EXTRACTION_SUCCESS.value, updated_at=utc_now_iso())
+            out_text: Dict[str, Any] = {"success": True, "count": len(rows), **ver, "method": result.get("method")}
+            if result.get("deepseek_batch_summary"):
+                out_text["deepseek_batch_summary"] = result["deepseek_batch_summary"]
+            return out_text
+        except Exception as exc:
+            err = str(exc)
+            err_type = "extract_failed"
+            if err.startswith("deepseek_request_failed") or err.startswith("deepseek_http_"):
+                err_type = "deepseek_transport_failed"
+            elif err.startswith("deepseek_empty_result"):
+                err_type = "deepseek_empty_result"
+            elif err.startswith("deepseek_api_key_missing"):
+                err_type = "deepseek_api_key_missing"
+            elif err.startswith("deepseek_disabled"):
+                err_type = "deepseek_disabled"
+            self.store.update_file(file_id, status=FileStatus.EXTRACTION_FAILED.value, updated_at=utc_now_iso())
+            return {"success": False, "error": err, "error_type": err_type}
 
     def generate_regions_direct(
         self,
@@ -329,6 +558,34 @@ class WorkbenchService:
 
     def delete_region_result_version(self, version_id: str) -> bool:
         return self.store.delete_region_result_version(version_id)
+
+    def apply_region_result_version_to_candidates(self, file_id: str, version_id: str) -> Dict[str, Any]:
+        """将某次抽取快照写回当前文件的候选表（覆盖同 file_id+lane），供审核中心使用。"""
+        if not self.file_service.get_file(file_id):
+            return {"success": False, "error": "file_not_found"}
+        ver = self.store.get_region_result_version(version_id)
+        if not ver:
+            return {"success": False, "error": "version_not_found"}
+        vf = (ver.get("file_id") or "").strip()
+        if vf and vf != file_id:
+            return {"success": False, "error": "version_file_mismatch"}
+        raw = ver.get("items") or []
+        if not raw:
+            return {"success": False, "error": "version_empty"}
+        lane = ver.get("lane") or "local"
+        items: List[Dict[str, Any]] = []
+        for it in raw:
+            d = dict(it) if isinstance(it, dict) else {}
+            d.setdefault("status", "pending_review")
+            items.append(d)
+        self.store.put_region_candidates(file_id, items, lane=lane)
+        self.log_bus.emit(
+            "-",
+            "REVIEW",
+            f"apply_snapshot file_id={file_id} version_id={version_id} lane={lane} count={len(items)}",
+            event_type="snapshot_applied_to_candidates",
+        )
+        return {"success": True, "count": len(items), "lane": lane, "version_id": version_id}
 
     def save_generated_candidates(
         self,
@@ -405,6 +662,7 @@ class WorkbenchService:
             result = self.extraction_service.run_circuit_extraction(file_payload, parsed, mode, deepseek_cfg, region_candidates)
             rows = result["candidates"]
             self.store.put_circuit_candidates(file_id, rows)
+            self._apply_ontology_notes_after_extract(rows, "circuit")
             self.task_service.finish_task(task["task_id"], {"candidate_circuits": len(rows), "mode": mode})
             self.log_bus.emit(
                 task["task_id"],
@@ -459,6 +717,7 @@ class WorkbenchService:
             result = self.extraction_service.run_connection_extraction(file_payload, parsed, mode, deepseek_cfg, region_candidates)
             rows = result["candidates"]
             self.store.put_connection_candidates(file_id, rows)
+            self._apply_ontology_notes_after_extract(rows, "connection")
             self.task_service.finish_task(task["task_id"], {"candidate_connections": len(rows), "mode": mode})
             self.log_bus.emit(
                 task["task_id"],
@@ -479,14 +738,14 @@ class WorkbenchService:
             return {"success": False, "task_id": task["task_id"], "error": str(exc)}
 
     # review
-    def list_region_candidates(self, file_id: str = "") -> List[Dict[str, Any]]:
-        return self.store.list_region_candidates(file_id)
+    def list_region_candidates(self, file_id: str = "", lane: Optional[str] = "local") -> List[Dict[str, Any]]:
+        return self.store.list_region_candidates(file_id, lane=lane)
 
-    def list_circuit_candidates(self, file_id: str = "") -> List[Dict[str, Any]]:
-        return self.store.list_circuit_candidates(file_id)
+    def list_circuit_candidates(self, file_id: str = "", lane: Optional[str] = "local") -> List[Dict[str, Any]]:
+        return self.store.list_circuit_candidates(file_id, lane=lane)
 
-    def list_connection_candidates(self, file_id: str = "") -> List[Dict[str, Any]]:
-        return self.store.list_connection_candidates(file_id)
+    def list_connection_candidates(self, file_id: str = "", lane: Optional[str] = "local") -> List[Dict[str, Any]]:
+        return self.store.list_connection_candidates(file_id, lane=lane)
 
     def update_region_candidate(self, candidate_id: str, patch: Dict[str, Any], reviewer: str = "user") -> Dict[str, Any]:
         before = self.store.get_region_candidate(candidate_id)
@@ -535,12 +794,10 @@ class WorkbenchService:
         )
         self.task_service.start_task(task["task_id"])
         new_status = "reviewed" if action == "approve" else "rejected"
-        after = self.store.update_region_candidate(
-            candidate_id,
-            status=new_status,
-            review_note=note,
-            updated_at=utc_now_iso(),
-        )
+        upd: Dict[str, Any] = {"status": new_status, "updated_at": utc_now_iso()}
+        if note:
+            upd["review_note"] = note
+        after = self.store.update_region_candidate(candidate_id, **upd)
         self.store.append_review_record(
             ReviewRecord(
                 id=task["task_id"].replace("task_", "review_"),
@@ -560,6 +817,34 @@ class WorkbenchService:
             event_type="candidate_reviewed",
         )
         return {"success": True, "candidate": after, "task_id": task["task_id"]}
+
+    def batch_review_region_candidates(
+        self,
+        candidate_ids: List[str],
+        action: str,
+        reviewer: str = "user",
+        note: str = "",
+    ) -> Dict[str, Any]:
+        if action not in {"approve", "reject"}:
+            return {"success": False, "error": "invalid_action"}
+        ids = [i for i in candidate_ids if i]
+        if not ids:
+            return {"success": False, "error": "no_candidate_ids"}
+        ok: List[str] = []
+        failed: List[Dict[str, Any]] = []
+        for cid in ids:
+            r = self.review_region_candidate(cid, action=action, reviewer=reviewer, note=note)
+            if r.get("success"):
+                ok.append(cid)
+            else:
+                failed.append({"id": cid, "error": r.get("error", "unknown")})
+        return {
+            "success": len(failed) == 0,
+            "updated": len(ok),
+            "failed_count": len(failed),
+            "ok_ids": ok,
+            "failed": failed,
+        }
 
     def update_circuit_candidate(self, circuit_id: str, patch: Dict[str, Any], reviewer: str = "user") -> Dict[str, Any]:
         before = self.store.get_circuit_candidate(circuit_id)
@@ -656,12 +941,20 @@ class WorkbenchService:
         return {"success": True, "candidate": after, "task_id": task["task_id"]}
 
     # commit
-    def commit_regions(self, file_id: str, reviewer: str = "user") -> Dict[str, Any]:
+    def commit_regions(
+        self,
+        file_id: str,
+        reviewer: str = "user",
+        candidate_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         file_payload = self.file_service.get_file(file_id)
         if not file_payload:
             return {"success": False, "error": "file_not_found"}
-        candidates = self.store.get_region_candidates(file_id)
+        candidates = self.store.list_region_candidates(file_id, lane=None)
         approved = [c for c in candidates if c.get("status") in {"approved", "reviewed", "ready_for_unverified", "staged"}]
+        if candidate_ids:
+            id_set = set(candidate_ids)
+            approved = [c for c in approved if c.get("id") in id_set]
         if not approved:
             return {"success": False, "error": "no_reviewed_candidates"}
 
@@ -682,7 +975,9 @@ class WorkbenchService:
         runtime = self.config_service.get_runtime()
         unverified_cfg = runtime.get("database", {}).get("unverified_db", {})
         try:
-            result = self.ingestion_service.stage_regions_to_unverified(file_payload, approved, unverified_cfg)
+            result = self.ingestion_service.stage_regions_to_unverified(
+                file_payload, approved, unverified_cfg, ontology_context=self._ontology_stage_context()
+            )
         except Exception as exc:
             self.task_service.fail_task(task["task_id"], str(exc))
             self.log_bus.emit(
@@ -765,7 +1060,9 @@ class WorkbenchService:
         runtime = self.config_service.get_runtime()
         unverified_cfg = runtime.get("database", {}).get("unverified_db", {})
         try:
-            result = self.ingestion_service.stage_circuits_to_unverified(file_payload, approved, unverified_cfg)
+            result = self.ingestion_service.stage_circuits_to_unverified(
+                file_payload, approved, unverified_cfg, ontology_context=self._ontology_stage_context()
+            )
         except Exception as exc:
             self.task_service.fail_task(task["task_id"], str(exc))
             self.log_bus.emit(
@@ -847,7 +1144,9 @@ class WorkbenchService:
         runtime = self.config_service.get_runtime()
         unverified_cfg = runtime.get("database", {}).get("unverified_db", {})
         try:
-            result = self.ingestion_service.stage_connections_to_unverified(file_payload, approved, unverified_cfg)
+            result = self.ingestion_service.stage_connections_to_unverified(
+                file_payload, approved, unverified_cfg, ontology_context=self._ontology_stage_context()
+            )
         except Exception as exc:
             self.task_service.fail_task(task["task_id"], str(exc))
             self.log_bus.emit(
@@ -1514,6 +1813,19 @@ class WorkbenchService:
                 event_type=event_type,
                 detail_json=event.get("detail", {}),
             )
+
+    def run_file_ontology_validation(self, file_id: str, mode: str = "local") -> Dict[str, Any]:
+        """Run ValidationService against all region/circuit/connection candidates for a file."""
+        regions = self.store.list_region_candidates(file_id, lane=None)
+        circuits = self.store.get_circuit_candidates(file_id)
+        connections = self.store.get_connection_candidates(file_id)
+        candidates = {
+            "region_candidates": regions,
+            "candidate_circuits": circuits,
+            "candidate_connections": connections,
+        }
+        run = self.validation_service.run_validation(file_id, candidates, mode=mode)
+        return {"validation": asdict(run)}
 
     # helper payload
     def file_workspace_bundle(self, file_id: str) -> Dict[str, Any]:

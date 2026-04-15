@@ -47,6 +47,22 @@ DEFAULT_RUNTIME: Dict[str, Any] = {
         "base_url": "https://api.deepseek.com",
         "model": "deepseek-chat",
         "temperature": 0.2,
+        # 请求稳健性：失败重试，但不自动回退到本地提取（fail-fast）
+        "request_timeout_sec": 600,
+        "request_retries": 2,
+        "retry_backoff_sec": 1.2,
+        "force_json_output": True,
+        # 单批模型输出上限（JSON 很长时须够大；若 API 报错可改为 8192/16384 等）
+        "max_tokens": 131072,
+        "top_p": 1.0,
+        "prompt_version": "region_extract_v2",
+        # 表格：单批最大字符（整表可一次送入时尽量大；极长表仍再切）
+        "deepseek_batch_max_chars": 500000,
+        # 表格：每批最多行数（>0 时优先按行切块，再按字符二次切；避免单批 90+ 行时输出 JSON 被截断）
+        "deepseek_rows_per_batch": 12,
+        "batch_delay_sec": 0,
+        # 为 false 时不对模型输出做本地 KB 名称补全（避免“看起来像模型抽的、实为词典补全”）
+        "enrich_from_kb": False,
         # Custom prompts: empty string means "use built-in default"
         "system_prompt": "",
         "user_prompt_prefix": "",
@@ -68,6 +84,28 @@ DEFAULT_RUNTIME: Dict[str, Any] = {
         "auto_validate_on_extract": False,
         "normalize_mode_default": "local",
         "validate_mode_default": "local",
+        # 脑区提取 v2：仅用于 mode=local 的路径（标准化 + 高召回 + 本地后处理）。
+        # mode=deepseek 时始终走 DeepSeek API 分批抽取，不受此项「抢占」；避免未调 API 却显示 region_v2_deepseek。
+        "region_extraction_v2": {
+            "enabled": False,
+            "log_layers": True,
+            "deepseek_refine": False,
+            "drop_rejected": False,
+        },
+        # Compiled OWL/RDF -> JSON ruleset; consumed by ValidationService + staging gates.
+        "ontology_rules": {
+            "enabled": False,
+            "path": "artifacts/ontology/ruleset.json",
+            "require_known_terms": False,
+            # hard: block stage_to_unverified when a rule issue is severity hard; warn: never block (still records ontology_check).
+            "stage_policy": "warn",
+            "issue_severity": {
+                "parent_not_allowed": "hard",
+                "invalid_domain_range": "hard",
+                "unknown_term": "warn",
+                "invalid_class": "warn",
+            },
+        },
     },
     "ui": {"language": "zh-CN"},
 }
@@ -153,6 +191,19 @@ def resolve_deepseek_config(
         "region_user_prompt_template": merged.get("region_user_prompt_template", ""),
         "direct_region_prompt_preset": merged.get("direct_region_prompt_preset", "default"),
         "direct_region_user_prompt_template": merged.get("direct_region_user_prompt_template", ""),
+        # 稳定性与 JSON 输出控制（从 DEFAULT_RUNTIME["deepseek"] 透传）
+        "request_timeout_sec": int(merged.get("request_timeout_sec", 600)),
+        "request_retries": int(merged.get("request_retries", 2)),
+        "retry_backoff_sec": float(merged.get("retry_backoff_sec", 1.2)),
+        "force_json_output": bool(merged.get("force_json_output", True)),
+        # 0 = 不传 max_tokens（由服务端默认，通常偏小，不推荐）
+        "max_tokens": int(merged.get("max_tokens", 131072) or 0),
+        "top_p": float(merged.get("top_p", 1.0)),
+        "prompt_version": str(merged.get("prompt_version", "region_extract_v2")),
+        "deepseek_batch_max_chars": int(merged.get("deepseek_batch_max_chars", 500000)),
+        "deepseek_rows_per_batch": int(merged.get("deepseek_rows_per_batch", 12) or 0),
+        "batch_delay_sec": float(merged.get("batch_delay_sec", 0)),
+        "enrich_from_kb": bool(merged.get("enrich_from_kb", False)),
         "_config_source": config_source,
     }
 

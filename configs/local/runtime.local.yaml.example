@@ -41,6 +41,15 @@ pipeline:
   auto_validate_on_extract: false
   normalize_mode_default: "local"
   validate_mode_default: "local"
+  # OWL/RDF compiled ruleset (JSON). See scripts/tools/convert_owl_to_ruleset.py
+  ontology_rules:
+    enabled: false
+    path: "artifacts/ontology/ruleset.json"
+    require_known_terms: false
+    stage_policy: "warn" # warn | hard — hard blocks stage_to_unverified on hard-severity issues
+    issue_severity:
+      parent_not_allowed: "hard"
+      invalid_domain_range: "hard"
 
 ui:
   language: "zh-CN"
