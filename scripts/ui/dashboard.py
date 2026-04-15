@@ -1,715 +1,679 @@
 from __future__ import annotations
 
-import json
+import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict
 
-import yaml
-from flask import Flask, Response, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, render_template, request
 
-from scripts.pipeline.major_workflow import run_major_load, run_major_preview
-from scripts.services.job_manager import JobManager
-from scripts.services.file_validation_center import (
-    apply_auto_fix as center_apply_auto_fix,
-    blocking_files_for_load,
-    get_file_content,
-    get_file_preview,
-    get_file_report,
-    list_files,
-    remove_file as center_remove_file,
-    register_uploaded_file,
-    validate_file,
-)
-from scripts.services.preview_reader import load_preview_bundle
-from scripts.services.runtime_config import (
-    apply_runtime_env,
-    load_runtime_config,
-    redact_runtime_config,
-    resolve_runtime_deepseek,
-    runtime_config_path,
-    save_runtime_config,
-)
-from scripts.services.schema_service import rebuild_schema, schema_stats
-from scripts.utils.deepseek_client import DeepSeekClient
-from scripts.utils.db import cursor
-from scripts.utils.excel_reader import read_xlsx_rows
-from scripts.utils.io_utils import ensure_dir
-from scripts.utils.runtime import resolve_run_id
+from scripts.modules.workbench.workbench_service import WorkbenchService
 
 
-ROOT = Path(__file__).resolve().parents[2]
-TEMPLATE_DIR = ROOT / "webapp" / "templates"
-STATIC_DIR = ROOT / "webapp" / "static"
-UI_RUNS_DIR = ROOT / "artifacts" / "ui_runs"
-FILE_CENTER_DIR = ROOT / "artifacts" / "ui_file_center"
-
-app = Flask(__name__, template_folder=str(TEMPLATE_DIR), static_folder=str(STATIC_DIR))
-app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
-jobs = JobManager()
+# 作用：定位项目根目录，并在 Flask 启动时创建一个全局服务对象。
+# 步骤：先解析 ROOT_DIR -> 再把根目录传给 WorkbenchService。
+# 注意：这个 SERVICE 是整个后端 API 的统一业务入口。
+ROOT_DIR = Path(__file__).resolve().parents[2]
+SERVICE = WorkbenchService(str(ROOT_DIR))
 
 
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    result = dict(base)
-    for key, value in override.items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
+# 作用：统一成功响应格式，前端会依赖 ok=True 判断请求成功。
+# 步骤：把业务 payload 包一层 {"ok": True, ...}。
+# 注意：前端 api() 工具函数就是按这个格式做解析的。
+def _ok(payload: Dict[str, Any]) -> Any:
+    return jsonify({"ok": True, **payload})
 
 
-def _pipeline_config(runtime: dict[str, Any], path: Path) -> Path:
-    use_deepseek = bool(runtime.get("pipeline", {}).get("use_deepseek", True))
-    if use_deepseek and not str(runtime.get("deepseek", {}).get("api_key", "")).strip():
-        use_deepseek = False
-    payload = {
-        "excel": runtime.get("excel", {}),
-        "llm": {
-            "use_deepseek": use_deepseek,
-            "batch_size": int(runtime.get("pipeline", {}).get("batch_size", 60)),
-        },
-        "pipeline": {
-            "load_scope": runtime.get("pipeline", {}).get("load_scope", "all_mappable"),
-        },
-    }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    return path
+# 作用：统一失败响应格式，避免每个接口单独拼错误 JSON。
+# 步骤：返回 {"ok": False, "error": ...} 并附带 HTTP 状态码。
+# 注意：前端收到这里的错误后，会在 api() 中抛出 Error。
+def _bad(message: str, code: int = 400, **extra: Any) -> Any:
+    return jsonify({"ok": False, "error": message, **extra}), code
 
 
-def _db_ready() -> dict[str, Any]:
-    info = {"connected": False, "error": "", "stats": {}}
-    try:
-        with cursor() as (_, cur):
-            cur.execute("select 1")
-        info["connected"] = True
-        info["stats"] = schema_stats()
-    except Exception as exc:
-        info["error"] = str(exc)
-    return info
-
-
-def _preview_root(run_id: str) -> Path:
-    root = ensure_dir(UI_RUNS_DIR / run_id)
-    return root
-
-
-def _apply_runtime_for_uploaded(record: dict[str, Any]) -> dict[str, Any]:
-    runtime = load_runtime_config()
-    file_type = str(record.get("file_type") or "").lower()
-    original_path = str(record.get("original_path") or "")
-    changed = False
-
-    if file_type == "xlsx":
-        runtime["excel"] = runtime.get("excel", {})
-        runtime["excel"]["path"] = original_path
-        changed = True
-    if file_type in {"rdf", "owl", "xml"}:
-        runtime["ontology"] = runtime.get("ontology", {})
-        runtime["ontology"]["path"] = original_path
-        changed = True
-
-    if changed:
-        save_runtime_config(runtime)
-    return runtime
-
-
-def _find_file_id_by_original_path(path: str) -> str:
-    listed = list_files(FILE_CENTER_DIR).get("files", [])
-    target = str(Path(path).resolve()) if path else ""
-    for item in listed:
-        current = str(Path(str(item.get("original_path") or "")).resolve())
-        if current == target:
-            return str(item.get("file_id") or "")
-    return ""
-
-
-def _validate_excel_with_deepseek(
-    rows: list[dict[str, str]],
-    headers: list[str],
-    runtime: dict[str, Any],
-) -> dict[str, Any]:
-    resolved_runtime, resolved_meta = resolve_runtime_deepseek(runtime, None)
-    requested_use_deepseek = bool(resolved_runtime.get("pipeline", {}).get("use_deepseek", True))
-    deepseek_cfg = resolved_runtime.get("deepseek", {}) if isinstance(resolved_runtime.get("deepseek"), dict) else {}
-    has_deepseek_key = bool(str(deepseek_cfg.get("api_key", "")).strip())
-    effective_use_deepseek = requested_use_deepseek and has_deepseek_key
-
-    base = {
-        "requested_use_deepseek": requested_use_deepseek,
-        "effective_use_deepseek": effective_use_deepseek,
-        "status": "skipped",
-        "reason": "",
-        "report": {},
-        "source": resolved_meta.get("source", "global"),
-    }
-
-    if not requested_use_deepseek:
-        base["reason"] = "pipeline.use_deepseek=false"
-        return base
-    if not has_deepseek_key:
-        base["reason"] = "DEEPSEEK_API_KEY is empty"
-        return base
-    print(
-        f"[CHECK] deepseek config source={resolved_meta.get('source', 'global')} "
-        f"model={deepseek_cfg.get('model', '')} baseUrl={deepseek_cfg.get('base_url', '')}"
+# 作用：创建 Flask 应用，并在这里集中注册所有页面和 API 路由。
+# 步骤：初始化模板/静态目录 -> 定义页面路由 -> 定义各类业务接口。
+# 注意：这个文件主要做“HTTP 转发”，真正业务逻辑大多在 WorkbenchService。
+def create_app() -> Flask:
+    app = Flask(
+        __name__,
+        template_folder=str(ROOT_DIR / "webapp" / "templates"),
+        static_folder=str(ROOT_DIR / "webapp" / "static"),
     )
 
-    # Keep the prompt bounded while preserving whole-table preview for UI.
-    sample_rows = rows[: min(len(rows), 300)]
-    payload = {
-        "table_name": "major_brain_region_excel",
-        "total_rows": len(rows),
-        "headers": headers,
-        "sample_rows": sample_rows,
-    }
-    system_prompt = (
-        "You are a strict data quality reviewer for a brain-region Excel table. "
-        "Return JSON only."
-    )
-    user_prompt = (
-        "Validate the table quality and consistency for downstream extraction.\n"
-        "Check: required columns, duplicate rows, possible invalid hemisphere naming, "
-        "mixed language anomalies, suspicious empty values, and obvious typo risks.\n"
-        "Return strict JSON with keys:\n"
-        "- status: one of pass|warning|fail\n"
-        "- score: number 0..100\n"
-        "- summary_cn: short Chinese summary\n"
-        "- required_columns_missing: string[]\n"
-        "- duplicate_candidates: object[]\n"
-        "- warnings: object[]\n"
-        "- must_fix: object[]\n"
-        "- suggested_mapping: object\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False)}"
-    )
+    @app.get("/")
+    def index() -> Any:
+        return render_template("index.html")
 
-    try:
-        client = DeepSeekClient(
-            base_url=str(deepseek_cfg.get("base_url", "")).strip() or None,
-            model=str(deepseek_cfg.get("model", "")).strip() or None,
-            api_key=str(deepseek_cfg.get("api_key", "")).strip() or None,
-        )
-        report = client.chat_json(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.1, max_tokens=2200)
-    except Exception as exc:
-        base["status"] = "error"
-        base["reason"] = str(exc)
-        return base
+    @app.get("/api/status")
+    def api_status() -> Any:
+        return _ok({"status": SERVICE.status_payload()})
 
-    base["status"] = "ok"
-    base["report"] = report if isinstance(report, (dict, list)) else {"raw": report}
-    return base
+    @app.get("/api/logs")
+    def api_logs() -> Any:
+        limit = int(request.args.get("limit", 200))
+        return _ok({"logs": SERVICE.store.list_task_logs(limit=limit)})
 
+    @app.get("/api/tasks/list")
+    def api_task_list() -> Any:
+        return _ok({"tasks": SERVICE.store.list_tasks()})
 
-def _is_structured_input(path: str) -> bool:
-    suffix = Path(path).suffix.lower()
-    return suffix in {".xlsx", ".csv", ".tsv", ".json", ".jsonl"}
+    @app.get("/api/tasks/<task_id>")
+    def api_task_detail(task_id: str) -> Any:
+        task = SERVICE.store.get_task(task_id)
+        if not task:
+            return _bad("task_not_found", 404)
+        return _ok({"task": task, "logs": SERVICE.store.list_task_logs(run_id=task_id, limit=1000)})
 
+    @app.get("/api/config")
+    def api_get_config() -> Any:
+        payload = SERVICE.config_service.get_model_center_payload()
+        payload["effective_deepseek"] = SERVICE.config_service.get_public_effective_deepseek()
+        return _ok(payload)
 
-def _is_major_extract_supported(path: str) -> bool:
-    return Path(path).suffix.lower() == ".xlsx"
+    @app.get("/api/config/effective-deepseek")
+    def api_effective_deepseek() -> Any:
+        profile_key = request.args.get("profile_key", "").strip() or None
+        eff = SERVICE.config_service.get_public_effective_deepseek(profile_key=profile_key)
+        return _ok({"effective": eff})
 
+    @app.post("/api/config")
+    def api_update_config() -> Any:
+        payload = request.get_json(silent=True) or {}
+        updated = SERVICE.config_service.update_runtime(payload)
+        SERVICE.log_bus.emit("-", "CONFIG", "runtime_config_updated")
+        eff = SERVICE.config_service.get_public_effective_deepseek()
+        return _ok({"runtime": updated, "effective_deepseek": eff})
 
-def _is_ontology_type(file_type: str) -> bool:
-    return str(file_type or "").lower() in {"owl", "rdf", "ttl", "jsonld", "xml"}
+    @app.get("/api/files/list")
+    def api_files_list() -> Any:
+        return _ok({"files": SERVICE.file_service.list_files()})
 
+    @app.post("/api/files/upload")
+    def api_upload_file() -> Any:
+        incoming = request.files.get("file")
+        if not incoming:
+            return _bad("file_missing")
+        SERVICE.log_bus.emit("-", "FILE", f"upload_start file={incoming.filename or 'uploaded.bin'}", event_type="file_upload_started")
 
-@app.get("/")
-def index() -> str:
-    return render_template("index.html")
-
-
-@app.after_request
-def disable_cache(response: Response) -> Response:
-    # Local workbench should always show the newest frontend changes after restart.
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return response
-
-
-@app.get("/api/status")
-def api_status() -> Any:
-    runtime = load_runtime_config()
-    apply_runtime_env(runtime)
-    excel_path = Path(str(runtime.get("excel", {}).get("path", "")))
-    ontology_path = Path(str(runtime.get("ontology", {}).get("path", "")))
-    return jsonify(
-        {
-            "runtime_config_path": str(runtime_config_path()),
-            "config": redact_runtime_config(runtime),
-            "excel_exists": excel_path.exists(),
-            "ontology_exists": ontology_path.exists(),
-            "database": _db_ready(),
-            "file_center": list_files(FILE_CENTER_DIR).get("stats", {}),
-        }
-    )
-
-
-@app.post("/api/config")
-def api_save_config() -> Any:
-    payload = request.get_json(silent=True) or {}
-    current = load_runtime_config()
-    merged = _deep_merge(current, payload)
-    target = save_runtime_config(merged)
-    return jsonify({"saved": True, "path": str(target), "config": redact_runtime_config(merged)})
-
-
-@app.post("/api/files/preview-excel")
-def api_preview_excel() -> Any:
-    payload = request.get_json(silent=True) or {}
-    runtime = load_runtime_config()
-    excel_cfg = _deep_merge(runtime.get("excel", {}), payload.get("excel", {}))
-    path = Path(str(excel_cfg.get("path", "")))
-    rows = read_xlsx_rows(path, sheet_index=int(excel_cfg.get("sheet_index", 1)), header_row=int(excel_cfg.get("header_row", 1)))
-    headers = list(rows[0].keys()) if rows else []
-    return jsonify({"path": str(path), "headers": headers, "total_rows": len(rows), "rows": rows})
-
-
-@app.post("/api/files/validate-excel")
-def api_validate_excel() -> Any:
-    payload = request.get_json(silent=True) or {}
-    runtime = load_runtime_config()
-    runtime = _deep_merge(runtime, payload.get("runtime_overrides", {}))
-    apply_runtime_env(runtime)
-
-    excel_cfg = _deep_merge(runtime.get("excel", {}), payload.get("excel", {}))
-    path = Path(str(excel_cfg.get("path", "")))
-    matched_file_id = _find_file_id_by_original_path(str(path))
-    if matched_file_id:
-        report = validate_file(matched_file_id, runtime, FILE_CENTER_DIR)
-        return jsonify(
-            {
-                "path": str(path),
-                "headers": [],
-                "total_rows": int(report.get("normalized_stats", {}).get("output_rows", 0)),
-                "validation": {
-                    "status": "ok",
-                    "report": report,
-                    "requested_use_deepseek": report.get("validation_trace", {}).get("llm_initial", {}).get("requested_use_deepseek", False),
-                    "effective_use_deepseek": report.get("validation_trace", {}).get("llm_initial", {}).get("effective_use_deepseek", False),
-                },
-            }
-        )
-
-    rows = read_xlsx_rows(
-        path,
-        sheet_index=int(excel_cfg.get("sheet_index", 1)),
-        header_row=int(excel_cfg.get("header_row", 1)),
-    )
-    headers = list(rows[0].keys()) if rows else []
-    validation = _validate_excel_with_deepseek(rows=rows, headers=headers, runtime=runtime)
-    return jsonify(
-        {
-            "path": str(path),
-            "headers": headers,
-            "total_rows": len(rows),
-            "validation": validation,
-        }
-    )
-
-
-@app.post("/api/files/upload-excel")
-def api_upload_excel() -> Any:
-    file = request.files.get("file")
-    if file is None or not file.filename:
-        return jsonify({"error": "file_missing"}), 400
-    record = register_uploaded_file(file, FILE_CENTER_DIR)
-    _apply_runtime_for_uploaded(record)
-    return jsonify({"saved": True, "path": record.get("original_path"), "file": record})
-
-
-@app.post("/api/files/upload-ontology")
-def api_upload_ontology() -> Any:
-    file = request.files.get("file")
-    if file is None or not file.filename:
-        return jsonify({"error": "file_missing"}), 400
-    record = register_uploaded_file(file, FILE_CENTER_DIR)
-    _apply_runtime_for_uploaded(record)
-    return jsonify({"saved": True, "path": record.get("original_path"), "file": record})
-
-
-@app.post("/api/files/upload")
-def api_files_upload() -> Any:
-    file = request.files.get("file")
-    if file is None or not file.filename:
-        return jsonify({"error": "file_missing"}), 400
-    try:
-        record = register_uploaded_file(file, FILE_CENTER_DIR)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    runtime = _apply_runtime_for_uploaded(record)
-    apply_runtime_env(runtime)
-    auto_validation: dict[str, Any] = {"triggered": False, "status": "skipped", "reason": ""}
-    if not _is_ontology_type(str(record.get("file_type") or "")):
-        auto_validation["triggered"] = True
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            incoming.save(tmp.name)
+            temp_path = tmp.name
         try:
-            report = validate_file(str(record.get("file_id") or ""), runtime, FILE_CENTER_DIR)
-            auto_validation.update(
-                {
-                    "status": "ok",
-                    "label": report.get("overall_label"),
-                    "score": report.get("score"),
-                    "effective_use_deepseek": report.get("validation_trace", {}).get("llm_initial", {}).get("effective_use_deepseek", False),
-                    "source": report.get("validation_trace", {}).get("llm_initial", {}).get("config_source", "global"),
-                    "request_sent": report.get("validation_trace", {}).get("llm_initial", {}).get("request_sent", False),
-                    "response_received": report.get("validation_trace", {}).get("llm_initial", {}).get("response_received", False),
-                    "http_status": report.get("validation_trace", {}).get("llm_initial", {}).get("http_status"),
-                    "elapsed_ms": report.get("validation_trace", {}).get("llm_initial", {}).get("elapsed_ms", 0),
-                }
-            )
+            payload = SERVICE.upload_file(temp_path, incoming.filename or "uploaded.bin")
+            return _ok(payload)
         except Exception as exc:
-            auto_validation.update({"status": "error", "reason": str(exc)})
+            SERVICE.log_bus.emit("-", "FILE", f"upload_failed reason={exc}", level="error", event_type="file_upload_failed")
+            return _bad("upload_failed", 500, detail=str(exc))
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
 
-    listed = list_files(FILE_CENTER_DIR)
-    file_id = str(record.get("file_id") or "")
-    latest = next((item for item in listed.get("files", []) if str(item.get("file_id") or "") == file_id), record)
-    return jsonify({"saved": True, "file": latest, "stats": listed.get("stats", {}), "auto_validation": auto_validation})
+    @app.get("/api/files/<file_id>")
+    def api_file_detail(file_id: str) -> Any:
+        file_payload = SERVICE.file_service.get_file(file_id)
+        if not file_payload:
+            return _bad("file_not_found", 404)
+        return _ok({"bundle": SERVICE.file_workspace_bundle(file_id)})
 
+    @app.get("/api/files/<file_id>/parsed")
+    def api_file_parsed(file_id: str) -> Any:
+        return _ok({"parsed": SERVICE.store.get_parsed_document(file_id)})
 
-@app.get("/api/files/list")
-def api_files_list() -> Any:
-    return jsonify(list_files(FILE_CENTER_DIR))
+    @app.delete("/api/files/<file_id>")
+    def api_file_remove(file_id: str) -> Any:
+        SERVICE.log_bus.emit("-", "FILE", f"remove_start file_id={file_id}", event_type="file_delete_started")
+        ok = SERVICE.file_service.remove_file(file_id)
+        if not ok:
+            SERVICE.log_bus.emit(
+                "-",
+                "FILE",
+                f"remove_failed file_id={file_id} reason=file_not_found",
+                level="error",
+                event_type="file_delete_failed",
+            )
+            return _bad("file_not_found", 404)
+        SERVICE.log_bus.emit("-", "FILE", f"remove_success file_id={file_id}", event_type="file_deleted")
+        return _ok({"file_id": file_id})
 
+    @app.post("/api/files/<file_id>/reparse")
+    def api_file_reparse(file_id: str) -> Any:
+        SERVICE.log_bus.emit("-", "PARSING", f"reparse_requested file_id={file_id}", event_type="reparse_started")
+        payload = SERVICE.trigger_parse(file_id)
+        if not payload.get("success"):
+            SERVICE.log_bus.emit(
+                "-",
+                "PARSING",
+                f"reparse_failed file_id={file_id} reason={payload.get('error', 'unknown')}",
+                level="error",
+                event_type="reparse_failed",
+            )
+            return _bad("reparse_failed", 500, detail=payload)
+        SERVICE.log_bus.emit("-", "PARSING", f"reparse_succeeded file_id={file_id}", event_type="reparse_succeeded")
+        return _ok(payload)
 
-def _remove_file_and_list(file_id: str) -> Any:
-    try:
-        removed = center_remove_file(file_id, FILE_CENTER_DIR)
-    except KeyError:
-        return jsonify({"error": "file_not_found"}), 404
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 400
-    listed = list_files(FILE_CENTER_DIR)
-    return jsonify({"removed": removed, "stats": listed.get("stats", {}), "files": listed.get("files", [])})
+    @app.post("/api/files/<file_id>/renormalize")
+    def api_file_renormalize(file_id: str) -> Any:
+        """Trigger normalization for an already-parsed file (idempotent)."""
+        file_payload = SERVICE.file_service.get_file(file_id)
+        if not file_payload:
+            return _bad("file_not_found", 404)
+        SERVICE.log_bus.emit("-", "NORMALIZE", f"renormalize_requested file_id={file_id}", event_type="renormalize_started")
+        result = SERVICE.trigger_normalize(file_id)
+        if not result.get("success"):
+            return _bad("renormalize_failed", 500, detail=result)
+        return _ok(result)
 
+    # 作用：接收前端的“脑区抽取”请求，并转交给 WorkbenchService。
+    # 步骤：读取 body 参数 -> 记录日志 -> 调 SERVICE.trigger_extract_regions -> 返回结果。
+    # 注意：这里只是 HTTP 入口，真正的抽取逻辑不写在这里。
+    @app.post("/api/files/<file_id>/extract-regions")
+    def api_file_extract_regions(file_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        mode = body.get("mode", "local")
+        profile_key = body.get("profile_key", "").strip()
+        inline_override = body.get("deepseek_override") or None
+        SERVICE.log_bus.emit(
+            "-",
+            "EXTRACT",
+            f"extract_region_requested file_id={file_id} mode={mode}",
+            event_type="extract_region_requested",
+        )
+        payload = SERVICE.trigger_extract_regions(file_id, mode=mode, profile_key=profile_key, inline_deepseek_override=inline_override)
+        if not payload.get("success"):
+            return _bad("extract_region_failed", 500, detail=payload)
+        return _ok(payload)
 
-@app.route("/api/files/<file_id>", methods=["DELETE"])
-def api_files_remove(file_id: str) -> Any:
-    return _remove_file_and_list(file_id)
+    # 作用：接收回路抽取请求，流程与脑区抽取相同。
+    # 步骤：解析参数 -> 写日志 -> 调用 SERVICE.trigger_extract_circuits。
+    # 注意：这个函数负责“接线”，不负责实际抽取算法。
+    @app.post("/api/files/<file_id>/extract-circuits")
+    def api_file_extract_circuits(file_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        mode = body.get("mode", "local")
+        profile_key = body.get("profile_key", "").strip()
+        inline_override = body.get("deepseek_override") or None
+        SERVICE.log_bus.emit(
+            "-",
+            "EXTRACT",
+            f"extract_circuit_requested file_id={file_id} mode={mode}",
+            event_type="extract_circuit_requested",
+        )
+        payload = SERVICE.trigger_extract_circuits(file_id, mode=mode, profile_key=profile_key, inline_deepseek_override=inline_override)
+        if not payload.get("success"):
+            return _bad("extract_circuit_failed", 500, detail=payload)
+        return _ok(payload)
 
+    # 作用：接收连接抽取请求，流程与前两个实体保持一致。
+    # 步骤：读取 mode / DeepSeek 参数 -> 调用 SERVICE.trigger_extract_connections。
+    # 注意：三个 extract API 的结构非常类似，适合初学者对照学习。
+    @app.post("/api/files/<file_id>/extract-connections")
+    def api_file_extract_connections(file_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        mode = body.get("mode", "local")
+        profile_key = body.get("profile_key", "").strip()
+        inline_override = body.get("deepseek_override") or None
+        SERVICE.log_bus.emit(
+            "-",
+            "EXTRACT",
+            f"extract_connection_requested file_id={file_id} mode={mode}",
+            event_type="extract_connection_requested",
+        )
+        payload = SERVICE.trigger_extract_connections(file_id, mode=mode, profile_key=profile_key, inline_deepseek_override=inline_override)
+        if not payload.get("success"):
+            return _bad("extract_connection_failed", 500, detail=payload)
+        return _ok(payload)
 
-@app.post("/api/files/validate")
-def api_files_validate() -> Any:
-    payload = request.get_json(silent=True) or {}
-    file_id = str(payload.get("file_id") or "").strip()
-    if not file_id:
-        return jsonify({"error": "file_id_missing"}), 400
+    @app.get("/api/runs/list")
+    def api_runs_list() -> Any:
+        return _ok({"runs": SERVICE.store.list_tasks()})
 
-    runtime = load_runtime_config()
-    runtime = _deep_merge(runtime, payload.get("runtime_overrides", {}))
-    deepseek_override = payload.get("deepseek_override")
-    runtime, resolved_meta = resolve_runtime_deepseek(runtime, deepseek_override if isinstance(deepseek_override, dict) else None)
-    if isinstance(deepseek_override, dict):
-        runtime["_task_deepseek_override"] = deepseek_override
-    apply_runtime_env(runtime)
-    print(
-        f"[CHECK] deepseek config source={resolved_meta.get('source', 'global')} "
-        f"model={resolved_meta.get('model', '')} baseUrl={resolved_meta.get('base_url', '')}"
-    )
-    try:
-        report = validate_file(file_id, runtime, FILE_CENTER_DIR)
-    except KeyError:
-        return jsonify({"error": "file_not_found"}), 404
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 400
-    return jsonify(
-        {
-            "file_id": file_id,
-            "validation_report": report,
-            "deepseek_config": {
-                "source": resolved_meta.get("source", "global"),
-                "enabled": bool(resolved_meta.get("enabled", False)),
-                "model": resolved_meta.get("model", ""),
-                "base_url": resolved_meta.get("base_url", ""),
-            },
-        }
-    )
+    @app.get("/api/runs/<run_id>")
+    def api_run_detail(run_id: str) -> Any:
+        run = SERVICE.store.get_task(run_id)
+        if not run:
+            return _bad("run_not_found", 404)
+        return _ok({"run": run, "logs": SERVICE.store.list_task_logs(run_id=run_id, limit=1000)})
 
+    @app.get("/api/files/<file_id>/region-candidates")
+    def api_file_region_candidates(file_id: str) -> Any:
+        lane_q = request.args.get("lane", "local").strip()
+        lane = None if lane_q.lower() in ("all", "*") else lane_q
+        return _ok({"items": SERVICE.list_region_candidates(file_id, lane=lane)})
 
-@app.post("/api/files/apply-auto-fix")
-def api_files_apply_auto_fix() -> Any:
-    payload = request.get_json(silent=True) or {}
-    file_id = str(payload.get("file_id") or "").strip()
-    if not file_id:
-        return jsonify({"error": "file_id_missing"}), 400
-    try:
-        result = center_apply_auto_fix(file_id, FILE_CENTER_DIR)
-    except KeyError:
-        return jsonify({"error": "file_not_found"}), 404
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 400
-    return jsonify({"file_id": file_id, **result})
+    @app.get("/api/files/<file_id>/circuit-candidates")
+    def api_file_circuit_candidates(file_id: str) -> Any:
+        lane_q = request.args.get("lane", "local").strip()
+        lane = None if lane_q.lower() in ("all", "*") else lane_q
+        return _ok({"items": SERVICE.list_circuit_candidates(file_id, lane=lane)})
 
+    @app.get("/api/files/<file_id>/connection-candidates")
+    def api_file_connection_candidates(file_id: str) -> Any:
+        lane_q = request.args.get("lane", "local").strip()
+        lane = None if lane_q.lower() in ("all", "*") else lane_q
+        return _ok({"items": SERVICE.list_connection_candidates(file_id, lane=lane)})
 
-@app.get("/api/files/<file_id>/report")
-def api_files_report(file_id: str) -> Any:
-    try:
-        result = get_file_report(file_id, FILE_CENTER_DIR)
-    except KeyError:
-        return jsonify({"error": "file_not_found"}), 404
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 400
-    return jsonify(result)
+    @app.post("/api/candidates/<candidate_id>")
+    def api_candidate_update(candidate_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        patch = body.get("patch", {})
+        result = SERVICE.update_region_candidate(candidate_id, patch, reviewer=reviewer)
+        if not result.get("success"):
+            return _bad(result.get("error", "candidate_update_failed"), 404)
+        return _ok(result)
 
+    @app.post("/api/candidates/<candidate_id>/review")
+    def api_candidate_review(candidate_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        action = body.get("action", "")
+        reviewer = body.get("reviewer", "user")
+        note = body.get("note", "")
+        result = SERVICE.review_region_candidate(candidate_id, action=action, reviewer=reviewer, note=note)
+        if not result.get("success"):
+            return _bad(result.get("error", "candidate_review_failed"), 400)
+        return _ok(result)
 
-@app.get("/api/files/<file_id>/preview")
-def api_files_preview(file_id: str) -> Any:
-    try:
-        page = int(request.args.get("page", 1))
-    except Exception:
-        page = 1
-    try:
-        page_size = int(request.args.get("page_size", 120))
-    except Exception:
-        page_size = 120
-    view = str(request.args.get("view", "auto"))
-    try:
-        result = get_file_preview(
+    @app.post("/api/circuit-candidates/<circuit_id>")
+    def api_circuit_candidate_update(circuit_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        patch = body.get("patch", {})
+        result = SERVICE.update_circuit_candidate(circuit_id, patch, reviewer=reviewer)
+        if not result.get("success"):
+            return _bad(result.get("error", "candidate_circuit_update_failed"), 404)
+        return _ok(result)
+
+    @app.post("/api/circuit-candidates/<circuit_id>/review")
+    def api_circuit_candidate_review(circuit_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        action = body.get("action", "")
+        reviewer = body.get("reviewer", "user")
+        note = body.get("note", "")
+        result = SERVICE.review_circuit_candidate(circuit_id, action=action, reviewer=reviewer, note=note)
+        if not result.get("success"):
+            return _bad(result.get("error", "candidate_circuit_review_failed"), 400)
+        return _ok(result)
+
+    @app.post("/api/connection-candidates/<connection_id>")
+    def api_connection_candidate_update(connection_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        patch = body.get("patch", {})
+        result = SERVICE.update_connection_candidate(connection_id, patch, reviewer=reviewer)
+        if not result.get("success"):
+            return _bad(result.get("error", "candidate_connection_update_failed"), 404)
+        return _ok(result)
+
+    @app.post("/api/connection-candidates/<connection_id>/review")
+    def api_connection_candidate_review(connection_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        action = body.get("action", "")
+        reviewer = body.get("reviewer", "user")
+        note = body.get("note", "")
+        result = SERVICE.review_connection_candidate(connection_id, action=action, reviewer=reviewer, note=note)
+        if not result.get("success"):
+            return _bad(result.get("error", "candidate_connection_review_failed"), 400)
+        return _ok(result)
+
+    @app.post("/api/files/<file_id>/commit-regions")
+    def api_file_commit_regions(file_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        lane = body.get("lane", "local") or "local"
+        result = SERVICE.commit_regions(file_id=file_id, reviewer=reviewer, lane=lane)
+        if not result.get("success"):
+            return _bad(result.get("error", "commit_failed"), 400, detail=result)
+        return _ok(result)
+
+    @app.post("/api/files/<file_id>/commit-circuits")
+    def api_file_commit_circuits(file_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        lane = body.get("lane", "local") or "local"
+        result = SERVICE.commit_circuits(file_id=file_id, reviewer=reviewer, lane=lane)
+        if not result.get("success"):
+            return _bad(result.get("error", "commit_circuit_failed"), 400, detail=result)
+        return _ok(result)
+
+    @app.post("/api/files/<file_id>/commit-connections")
+    def api_file_commit_connections(file_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        lane = body.get("lane", "local") or "local"
+        result = SERVICE.commit_connections(file_id=file_id, reviewer=reviewer, lane=lane)
+        if not result.get("success"):
+            return _bad(result.get("error", "commit_connection_failed"), 400, detail=result)
+        return _ok(result)
+
+    @app.get("/api/unverified/regions")
+    def api_unverified_regions() -> Any:
+        file_id = request.args.get("file_id", "").strip()
+        items = SERVICE.list_unverified_regions(file_id=file_id)
+        return _ok({"items": items})
+
+    @app.post("/api/unverified/<unverified_region_id>/validate")
+    def api_unverified_validate(unverified_region_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        result = SERVICE.validate_unverified_region(unverified_region_id=unverified_region_id, reviewer=reviewer)
+        return _ok(result)
+
+    @app.post("/api/unverified/<unverified_region_id>/promote")
+    def api_unverified_promote(unverified_region_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        result = SERVICE.promote_unverified_region(unverified_region_id=unverified_region_id, reviewer=reviewer)
+        return _ok(result)
+
+    @app.post("/api/unverified/batch-validate")
+    def api_unverified_batch_validate() -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        file_id = body.get("file_id", "").strip()
+        ids = body.get("ids", []) or []
+        result = SERVICE.batch_validate_unverified_regions(reviewer=reviewer, file_id=file_id, ids=ids)
+        return _ok(result)
+
+    @app.post("/api/unverified/batch-promote")
+    def api_unverified_batch_promote() -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        file_id = body.get("file_id", "").strip()
+        ids = body.get("ids", []) or []
+        result = SERVICE.batch_promote_unverified_regions(reviewer=reviewer, file_id=file_id, ids=ids)
+        return _ok(result)
+
+    @app.post("/api/unverified/batch-retry")
+    def api_unverified_batch_retry() -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        file_id = body.get("file_id", "").strip()
+        action = body.get("action", "").strip().lower()
+        ids = body.get("ids", []) or []
+        result = SERVICE.batch_retry_unverified(
+            entity="region",
+            action=action,
+            reviewer=reviewer,
             file_id=file_id,
-            root=FILE_CENTER_DIR,
-            page=page,
-            page_size=page_size,
-            view=view,
+            ids=ids,
         )
-    except KeyError:
-        return jsonify({"error": "file_not_found"}), 404
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 400
-    return jsonify(result)
+        return _ok(result)
 
+    @app.get("/api/unverified/circuits")
+    def api_unverified_circuits() -> Any:
+        file_id = request.args.get("file_id", "").strip()
+        items = SERVICE.list_unverified_circuits(file_id=file_id)
+        return _ok({"items": items})
 
-@app.get("/api/files/<file_id>/content")
-def api_files_content(file_id: str) -> Any:
-    try:
-        content = get_file_content(file_id=file_id, root=FILE_CENTER_DIR)
-    except KeyError:
-        return jsonify({"error": "file_not_found"}), 404
-    path = Path(str(content.get("path") or ""))
-    if not content.get("exists") or not path.exists():
-        return jsonify({"error": "file_missing"}), 404
-    return send_file(
-        path,
-        mimetype=str(content.get("mime_type") or "application/octet-stream"),
-        as_attachment=False,
-        download_name=str(content.get("filename") or path.name),
-    )
+    @app.get("/api/unverified/connections")
+    def api_unverified_connections() -> Any:
+        file_id = request.args.get("file_id", "").strip()
+        items = SERVICE.list_unverified_connections(file_id=file_id)
+        return _ok({"items": items})
 
+    @app.post("/api/unverified-circuits/<unverified_circuit_id>/validate")
+    def api_unverified_circuit_validate(unverified_circuit_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        result = SERVICE.validate_unverified_circuit(unverified_circuit_id=unverified_circuit_id, reviewer=reviewer)
+        return _ok(result)
 
-@app.post("/api/schema/rebuild")
-def api_schema_rebuild() -> Any:
-    job_id = jobs.create_job("schema_rebuild")
+    @app.post("/api/unverified-circuits/<unverified_circuit_id>/promote")
+    def api_unverified_circuit_promote(unverified_circuit_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        result = SERVICE.promote_unverified_circuit(unverified_circuit_id=unverified_circuit_id, reviewer=reviewer)
+        return _ok(result)
 
-    def worker() -> dict[str, Any]:
-        runtime = load_runtime_config()
-        apply_runtime_env(runtime)
-        jobs.add_log(job_id, "schema rebuild started")
-        result = rebuild_schema(callback=lambda ev: jobs.on_progress(job_id, ev))
-        jobs.add_log(job_id, f"schema rebuild completed: {result}")
-        return result
+    @app.post("/api/unverified-circuits/batch-validate")
+    def api_unverified_circuit_batch_validate() -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        file_id = body.get("file_id", "").strip()
+        ids = body.get("ids", []) or []
+        result = SERVICE.batch_validate_unverified_circuits(reviewer=reviewer, file_id=file_id, ids=ids)
+        return _ok(result)
 
-    jobs.run_async(job_id, worker)
-    return jsonify({"job_id": job_id})
+    @app.post("/api/unverified-circuits/batch-promote")
+    def api_unverified_circuit_batch_promote() -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        file_id = body.get("file_id", "").strip()
+        ids = body.get("ids", []) or []
+        result = SERVICE.batch_promote_unverified_circuits(reviewer=reviewer, file_id=file_id, ids=ids)
+        return _ok(result)
 
-
-def _start_major_preview(payload: dict[str, Any], endpoint: str) -> Any:
-    runtime = load_runtime_config()
-    runtime = _deep_merge(runtime, payload.get("runtime_overrides", {}))
-    deepseek_override = payload.get("deepseek_override")
-    runtime, resolved_meta = resolve_runtime_deepseek(runtime, deepseek_override if isinstance(deepseek_override, dict) else None)
-    if isinstance(deepseek_override, dict):
-        runtime["_task_deepseek_override"] = deepseek_override
-    if payload.get("save_runtime_overrides"):
-        save_runtime_config(runtime)
-    apply_runtime_env(runtime)
-    print(
-        f"[CHECK] deepseek config source={resolved_meta.get('source', 'global')} "
-        f"model={resolved_meta.get('model', '')} baseUrl={resolved_meta.get('base_url', '')}"
-    )
-
-    requested_run_id = str(payload.get("run_id") or "").strip()
-    run_id = resolve_run_id(requested_run_id if requested_run_id else "")
-    excel_path = str(payload.get("excel_path") or runtime.get("excel", {}).get("path", "")).strip()
-    if not _is_structured_input(excel_path):
-        return (
-            jsonify(
-                {
-                    "error": "unstructured_input_not_supported_for_extract",
-                    "message": "Start Extraction only supports structured file input (xlsx/csv/tsv/json/jsonl).",
-                    "excel_path": excel_path,
-                }
-            ),
-            400,
+    @app.post("/api/unverified-circuits/batch-retry")
+    def api_unverified_circuit_batch_retry() -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        file_id = body.get("file_id", "").strip()
+        action = body.get("action", "").strip().lower()
+        ids = body.get("ids", []) or []
+        result = SERVICE.batch_retry_unverified(
+            entity="circuit",
+            action=action,
+            reviewer=reviewer,
+            file_id=file_id,
+            ids=ids,
         )
-    if not _is_major_extract_supported(excel_path):
-        return (
-            jsonify(
-                {
-                    "error": "structured_input_not_supported_yet",
-                    "message": "Current major extraction runtime supports .xlsx only; other structured files can be previewed and validated.",
-                    "excel_path": excel_path,
-                }
-            ),
-            400,
+        return _ok(result)
+
+    @app.post("/api/unverified-connections/<unverified_connection_id>/validate")
+    def api_unverified_connection_validate(unverified_connection_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        result = SERVICE.validate_unverified_connection(unverified_connection_id=unverified_connection_id, reviewer=reviewer)
+        return _ok(result)
+
+    @app.post("/api/unverified-connections/<unverified_connection_id>/promote")
+    def api_unverified_connection_promote(unverified_connection_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        result = SERVICE.promote_unverified_connection(unverified_connection_id=unverified_connection_id, reviewer=reviewer)
+        return _ok(result)
+
+    @app.post("/api/unverified-connections/batch-validate")
+    def api_unverified_connection_batch_validate() -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        file_id = body.get("file_id", "").strip()
+        ids = body.get("ids", []) or []
+        result = SERVICE.batch_validate_unverified_connections(reviewer=reviewer, file_id=file_id, ids=ids)
+        return _ok(result)
+
+    @app.post("/api/unverified-connections/batch-promote")
+    def api_unverified_connection_batch_promote() -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        file_id = body.get("file_id", "").strip()
+        ids = body.get("ids", []) or []
+        result = SERVICE.batch_promote_unverified_connections(reviewer=reviewer, file_id=file_id, ids=ids)
+        return _ok(result)
+
+    @app.post("/api/unverified-connections/batch-retry")
+    def api_unverified_connection_batch_retry() -> Any:
+        body = request.get_json(silent=True) or {}
+        reviewer = body.get("reviewer", "user")
+        file_id = body.get("file_id", "").strip()
+        action = body.get("action", "").strip().lower()
+        ids = body.get("ids", []) or []
+        result = SERVICE.batch_retry_unverified(
+            entity="connection",
+            action=action,
+            reviewer=reviewer,
+            file_id=file_id,
+            ids=ids,
         )
-    requested_use_deepseek = bool(runtime.get("pipeline", {}).get("use_deepseek", True))
-    has_deepseek_key = bool(str(runtime.get("deepseek", {}).get("api_key", "")).strip())
-    effective_use_deepseek = requested_use_deepseek and has_deepseek_key
-    preview_root = _preview_root(run_id)
-    pipeline_config_path = _pipeline_config(runtime, preview_root / "runtime_pipeline.yaml")
-    job_id = jobs.create_job("major_preview", meta={"run_id": run_id, "preview_root": str(preview_root)})
+        return _ok(result)
 
-    def worker() -> dict[str, Any]:
-        apply_runtime_env(runtime)
-        if requested_use_deepseek and not has_deepseek_key:
-            jobs.add_log(job_id, "DEEPSEEK_API_KEY is empty; fallback to use_deepseek=false for this run.")
-        jobs.add_log(job_id, f"preview started run_id={run_id}")
-        summary = run_major_preview(
-            input_path=excel_path,
-            output_path=preview_root,
-            config_path=str(pipeline_config_path),
-            run_id=run_id,
-            callback=lambda ev: jobs.on_progress(job_id, ev),
-        )
-        jobs.add_log(job_id, "preview completed")
-        return {"summary": summary, "preview_root": str(preview_root)}
+    @app.get("/api/workbench/snapshot")
+    def api_snapshot_get() -> Any:
+        return _ok({"snapshot": SERVICE.store.get_workspace_snapshot()})
 
-    jobs.run_async(job_id, worker)
-    return jsonify(
-        {
-            "job_id": job_id,
-            "run_id": run_id,
-            "preview_root": str(preview_root),
-            "endpoint": endpoint,
-            "use_deepseek_requested": requested_use_deepseek,
-            "use_deepseek_effective": effective_use_deepseek,
-            "deepseek_config_source": resolved_meta.get("source", "global"),
-        }
-    )
+    @app.post("/api/workbench/snapshot")
+    def api_snapshot_set() -> Any:
+        body = request.get_json(silent=True) or {}
+        SERVICE.store.put_workspace_snapshot(body)
+        return _ok({"snapshot": body})
 
+    # ---- text-generate endpoints (preview only, not persisted) ----
 
-@app.post("/api/preview/major")
-def api_preview_major() -> Any:
-    payload = request.get_json(silent=True) or {}
-    return _start_major_preview(payload, "/api/preview/major")
+    @app.post("/api/generate/regions")
+    def api_generate_regions() -> Any:
+        body = request.get_json(silent=True) or {}
+        text = body.get("text", "").strip()
+        mode = body.get("mode", "local")
+        file_id = body.get("file_id", "").strip()
+        profile_key = body.get("profile_key", "").strip()
+        inline_override = body.get("deepseek_override") or None
+        if not text:
+            return _bad("text_required")
+        try:
+            result = SERVICE.generate_regions_from_text(text=text, mode=mode, file_id=file_id, profile_key=profile_key, inline_deepseek_override=inline_override)
+            if not result.get("success"):
+                return _bad(result.get("error", "generate_regions_failed"), 400, detail=result)
+            return _ok(result)
+        except Exception as exc:
+            SERVICE.log_bus.emit("-", "GENERATE", f"generate_regions_failed reason={exc}", level="error")
+            return _bad("generate_regions_failed", 500, detail=str(exc))
 
+    @app.post("/api/generate/regions-direct")
+    def api_generate_regions_direct() -> Any:
+        body = request.get_json(silent=True) or {}
+        params = body.get("params", {})
+        file_id = body.get("file_id", "").strip()
+        profile_key = body.get("profile_key", "").strip()
+        inline_override = body.get("deepseek_override") or None
+        if not params.get("topic"):
+            params["topic"] = "脑区"
+        try:
+            result = SERVICE.generate_regions_direct(params=params, profile_key=profile_key, inline_deepseek_override=inline_override, file_id=file_id)
+            if not result.get("success"):
+                return _bad(result.get("error", "generate_regions_direct_failed"), 400, detail=result)
+            return _ok(result)
+        except Exception as exc:
+            SERVICE.log_bus.emit("-", "GENERATE", f"generate_regions_direct_failed reason={exc}", level="error")
+            return _bad("generate_regions_direct_failed", 500, detail=str(exc))
 
-@app.post("/api/extract/major/start")
-def api_extract_major_start() -> Any:
-    payload = request.get_json(silent=True) or {}
-    return _start_major_preview(payload, "/api/extract/major/start")
+    @app.post("/api/generate/region-prompt")
+    def api_generate_region_prompt() -> Any:
+        body = request.get_json(silent=True) or {}
+        mode = body.get("mode", "direct_generate")
+        params = body.get("params", {})
+        from scripts.modules.workbench.extraction.extraction_service import ExtractionService as _ES
+        prompt = _ES.build_region_prompt(mode, params)
+        return _ok({"prompt": prompt})
 
+    @app.get("/api/region-result-versions")
+    def api_list_region_result_versions() -> Any:
+        file_id = request.args.get("file_id", "").strip()
+        versions = SERVICE.list_region_result_versions(file_id=file_id)
+        return _ok({"versions": versions})
 
-@app.post("/api/jobs/<job_id>/load")
-def api_load_from_preview(job_id: str) -> Any:
-    blocked_files = blocking_files_for_load(FILE_CENTER_DIR)
-    if blocked_files:
-        return (
-            jsonify(
-                {
-                    "error": "load_blocked_by_validation",
-                    "block_reason": "There are FAIL-labeled files in validation center.",
-                    "blocked_files": blocked_files,
-                }
-            ),
-            400,
-        )
+    @app.get("/api/region-result-versions/<version_id>")
+    def api_get_region_result_version(version_id: str) -> Any:
+        ver = SERVICE.get_region_result_version(version_id)
+        if not ver:
+            return _bad("version_not_found", 404)
+        return _ok({"version": ver})
 
-    preview_job = jobs.get_job(job_id)
-    if preview_job.get("job_type") != "major_preview":
-        return jsonify({"error": "job_type_not_supported"}), 400
-    if preview_job.get("status") != "succeeded":
-        return jsonify({"error": "preview_not_ready"}), 400
+    @app.delete("/api/region-result-versions/<version_id>")
+    def api_delete_region_result_version(version_id: str) -> Any:
+        ok = SERVICE.delete_region_result_version(version_id)
+        if not ok:
+            return _bad("version_not_found", 404)
+        return _ok({"deleted": version_id})
 
-    result = preview_job.get("result") or {}
-    preview_root = (
-        result.get("preview_root")
-        or preview_job.get("meta", {}).get("preview_root")
-        or str(_preview_root(preview_job.get("meta", {}).get("run_id", "")))
-    )
-    run_id = f"{preview_job.get('meta', {}).get('run_id', 'run')}_load"
-    runtime = load_runtime_config()
-    apply_runtime_env(runtime)
-    pipeline_config_path = _pipeline_config(runtime, Path(preview_root) / "runtime_pipeline.yaml")
+    @app.post("/api/generate/circuits")
+    def api_generate_circuits() -> Any:
+        body = request.get_json(silent=True) or {}
+        text = body.get("text", "").strip()
+        mode = body.get("mode", "local")
+        file_id = body.get("file_id", "").strip()
+        profile_key = body.get("profile_key", "").strip()
+        inline_override = body.get("deepseek_override") or None
+        if not text:
+            return _bad("text_required")
+        try:
+            result = SERVICE.generate_circuits_from_text(text=text, mode=mode, file_id=file_id, profile_key=profile_key, inline_deepseek_override=inline_override)
+            return _ok(result)
+        except Exception as exc:
+            SERVICE.log_bus.emit("-", "GENERATE", f"generate_circuits_failed reason={exc}", level="error")
+            return _bad("generate_circuits_failed", 500, detail=str(exc))
 
-    load_job_id = jobs.create_job("major_load", meta={"preview_job_id": job_id, "preview_root": str(preview_root)})
+    @app.post("/api/generate/connections")
+    def api_generate_connections() -> Any:
+        body = request.get_json(silent=True) or {}
+        text = body.get("text", "").strip()
+        mode = body.get("mode", "local")
+        file_id = body.get("file_id", "").strip()
+        profile_key = body.get("profile_key", "").strip()
+        inline_override = body.get("deepseek_override") or None
+        if not text:
+            return _bad("text_required")
+        try:
+            result = SERVICE.generate_connections_from_text(text=text, mode=mode, file_id=file_id, profile_key=profile_key, inline_deepseek_override=inline_override)
+            return _ok(result)
+        except Exception as exc:
+            SERVICE.log_bus.emit("-", "GENERATE", f"generate_connections_failed reason={exc}", level="error")
+            return _bad("generate_connections_failed", 500, detail=str(exc))
 
-    def worker() -> dict[str, Any]:
-        apply_runtime_env(runtime)
-        jobs.add_log(load_job_id, f"load started preview_root={preview_root}")
-        summary = run_major_load(
-            preview_root=preview_root,
-            config_path=str(pipeline_config_path),
-            run_id=run_id,
-            callback=lambda ev: jobs.on_progress(load_job_id, ev),
-        )
-        jobs.add_log(load_job_id, "load completed")
-        return {"summary": summary, "preview_root": str(preview_root)}
+    @app.post("/api/generate/save-candidates")
+    def api_generate_save_candidates() -> Any:
+        body = request.get_json(silent=True) or {}
+        entity_type = body.get("type", "").strip().lower()
+        file_id = body.get("file_id", "").strip()
+        candidates = body.get("candidates", [])
+        if entity_type not in ("region", "circuit", "connection"):
+            return _bad("invalid_type")
+        if not file_id:
+            return _bad("file_id_required")
+        if not isinstance(candidates, list):
+            return _bad("candidates_must_be_list")
+        try:
+            lane = (body.get("lane") or "local").strip() or "local"
+            result = SERVICE.save_generated_candidates(
+                entity_type=entity_type, file_id=file_id, candidates=candidates, lane=lane
+            )
+            return _ok(result)
+        except Exception as exc:
+            SERVICE.log_bus.emit("-", "GENERATE", f"save_candidates_failed type={entity_type} reason={exc}", level="error")
+            return _bad("save_candidates_failed", 500, detail=str(exc))
 
-    jobs.run_async(load_job_id, worker)
-    return jsonify({"job_id": load_job_id, "preview_root": str(preview_root)})
+    # ---- DeepSeek profile management endpoints ----
 
+    @app.get("/api/config/deepseek-profiles")
+    def api_deepseek_profiles_list() -> Any:
+        try:
+            profiles = SERVICE.config_service.list_deepseek_profiles()
+            runtime = SERVICE.config_service.get_runtime()
+            global_cfg = runtime.get("deepseek", {})
+            safe_global = {k: (v if k != "api_key" else ("***" if v else "")) for k, v in global_cfg.items()}
+            return _ok({"profiles": profiles, "global": safe_global})
+        except Exception as exc:
+            return _bad("list_profiles_failed", 500, detail=str(exc))
 
-@app.get("/api/jobs/<job_id>")
-def api_get_job(job_id: str) -> Any:
-    try:
-        job = jobs.get_job(job_id)
-    except KeyError:
-        return jsonify({"error": "job_not_found"}), 404
-    return jsonify(job)
+    @app.post("/api/config/deepseek-profiles")
+    def api_deepseek_profiles_save() -> Any:
+        body = request.get_json(silent=True) or {}
+        profile_key = body.get("profile_key", "").strip()
+        profile_cfg = body.get("profile", {})
+        if not profile_key:
+            return _bad("profile_key_required")
+        if not isinstance(profile_cfg, dict):
+            return _bad("profile_must_be_object")
+        try:
+            SERVICE.config_service.save_deepseek_profile(profile_key, profile_cfg)
+            return _ok({"saved": profile_key})
+        except Exception as exc:
+            return _bad("save_profile_failed", 500, detail=str(exc))
 
+    @app.delete("/api/config/deepseek-profiles/<profile_key>")
+    def api_deepseek_profiles_delete(profile_key: str) -> Any:
+        try:
+            SERVICE.config_service.delete_deepseek_profile(profile_key)
+            return _ok({"deleted": profile_key})
+        except Exception as exc:
+            return _bad("delete_profile_failed", 500, detail=str(exc))
 
-@app.get("/api/jobs/<job_id>/preview")
-def api_job_preview(job_id: str) -> Any:
-    try:
-        job = jobs.get_job(job_id)
-    except KeyError:
-        return jsonify({"error": "job_not_found"}), 404
-
-    result = job.get("result") or {}
-    preview_root = (
-        result.get("preview_root")
-        or job.get("meta", {}).get("preview_root")
-        or ""
-    )
-    if not preview_root:
-        return jsonify({"error": "preview_root_not_found"}), 400
-    root = Path(preview_root)
-    if not root.exists():
-        return jsonify({"error": "preview_root_missing"}), 404
-
-    bundle = load_preview_bundle(root)
-    return jsonify(bundle)
-
-
-@app.post("/api/crawler/jobs")
-def api_crawler_job_create() -> Any:
-    payload = request.get_json(silent=True) or {}
-    return jsonify(
-        {
-            "status": "deferred",
-            "module": "crawler",
-            "message": "Crawler is deferred in V2.1 and is not executed in current pipeline.",
-            "request": payload,
-        }
-    )
-
-
-@app.get("/api/crawler/jobs/<job_id>")
-def api_crawler_job_get(job_id: str) -> Any:
-    return jsonify(
-        {
-            "job_id": job_id,
-            "status": "deferred",
-            "module": "crawler",
-            "message": "Crawler is deferred in V2.1 and has no runtime job state.",
-        }
-    )
-
-
-def run_dashboard(host: str = "127.0.0.1", port: int = 8899) -> None:
-    ensure_dir(UI_RUNS_DIR)
-    ensure_dir(runtime_config_path().parent)
-    app.run(host=host, port=port, debug=False, threaded=True)
-
-
-if __name__ == "__main__":
-    run_dashboard()
+    return app

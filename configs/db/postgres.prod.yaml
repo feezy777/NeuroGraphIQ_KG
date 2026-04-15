@@ -1,8 +1,0 @@
-﻿environment: prod
-database:
-  host: localhost
-  port: 5432
-  name: NeuroKG_Project_prod
-  user: postgres
-  password_env: PGPASSWORD
-  schema: neurokg

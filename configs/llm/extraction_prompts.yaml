@@ -1,4 +1,0 @@
-﻿llm:
-  provider: placeholder
-  prompts_file: configs/llm/extraction_prompts.yaml
-  rules_file: configs/llm/extraction_rules.yaml

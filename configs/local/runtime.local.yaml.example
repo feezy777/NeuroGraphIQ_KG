@@ -1,0 +1,46 @@
+database:
+  backend: "postgres"
+  admin_db:
+    host: "localhost"
+    port: 5432
+    dbname: "postgres"
+    user: "postgres"
+    password: "replace-with-password"
+  workbench_db:
+    host: "localhost"
+    port: 5432
+    dbname: "NeuroGraphIQ_Workbench"
+    schema: "workbench"
+    user: "postgres"
+    password: "replace-with-password"
+  unverified_db:
+    host: "localhost"
+    port: 5432
+    dbname: "NeuroGraphIQ_KG_Unverified"
+    schema: "neurokg_unverified"
+    user: "postgres"
+    password: "replace-with-password"
+  production_db:
+    host: "localhost"
+    port: 5432
+    dbname: "NeuroGraphIQ_KG"
+    schema: "neurokg"
+    user: "postgres"
+    password: "replace-with-password"
+
+deepseek:
+  enabled: false
+  api_key: "replace-with-real-key"
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-chat"
+  temperature: 0.2
+
+pipeline:
+  auto_parse_on_upload: true
+  auto_extract_on_parse: false
+  auto_validate_on_extract: false
+  normalize_mode_default: "local"
+  validate_mode_default: "local"
+
+ui:
+  language: "zh-CN"

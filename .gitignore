@@ -1,6 +1,8 @@
-configs/local/
-artifacts/ui_runs/
-artifacts/ui_file_center/
-artifacts/desktop/
+.idea/
+.venv/
+artifacts/*
+!artifacts/neo4j/
+!artifacts/neo4j/*.cypher
+logs/
 __pycache__/
 *.pyc
