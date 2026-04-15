@@ -34,6 +34,7 @@
         <button class="nav-item" data-tab="tab-review-circuit">回路候选审核</button>
         <button class="nav-item" data-tab="tab-review-connection">连接候选审核</button>
         <button class="nav-item" data-tab="tab-commit">验证与提升中心</button>
+        <button class="nav-item" data-tab="tab-rules">规则中心</button>
         <button class="nav-item" data-tab="tab-config">设置 / 配置中心</button>
         <button class="nav-item" data-tab="tab-tasks">任务与日志中心</button>
       </aside>
@@ -48,6 +49,7 @@
           <button class="tab-btn" data-tab="tab-review-circuit">回路审核</button>
           <button class="tab-btn" data-tab="tab-review-connection">连接审核</button>
           <button class="tab-btn" data-tab="tab-commit">验证与提升</button>
+          <button class="tab-btn" data-tab="tab-rules">规则中心</button>
           <button class="tab-btn" data-tab="tab-config">配置</button>
           <button class="tab-btn" data-tab="tab-tasks">任务与日志</button>
         </div>
@@ -146,10 +148,10 @@
 
             <div id="region-panel-direct" class="region-panel" hidden>
               <h4>方式③：DeepSeek 直接生成</h4>
-              <p class="field-hint">点击「直接生成」时弹出配置（与设置全局一致）。直接生成模板可用 <code>{TOPIC}</code> 等占位符。结果写入当前文件的 deepseek 轨。</p>
+              <p class="field-hint">点击「直接生成」时弹出配置（与设置全局一致）。粒度填 <code>major</code> 时，后端会注入 Allen / Paxinos / 经典教材对齐的<strong>粗颗粒度全脑大体分区清单</strong>（约 28 项），引导模型逐项输出。自定义模板可用 <code>{TOPIC}</code> <code>{ATLAS}</code> 等占位符。结果写入当前文件的 deepseek 轨。</p>
               <div class="inline-fields region-direct-fields">
                 <label>主题 <input type="text" id="region-direct-topic" value="脑区" /></label>
-                <label>物种 <input type="text" id="region-direct-species" value="小鼠" /></label>
+                <label>物种 <input type="text" id="region-direct-species" value="人类" placeholder="人类 / 小鼠…" /></label>
                 <label>粒度 <input type="text" id="region-direct-granularity" value="major" placeholder="major/sub/allen" /></label>
                 <button type="button" class="btn" id="btn-region-run-direct">直接生成</button>
               </div>
@@ -157,12 +159,20 @@
               <textarea id="region-direct-extra" class="region-textarea" rows="3" placeholder="额外指令…"></textarea>
             </div>
 
-            <div class="region-version-row inline-fields">
-              <label>结果版本
-                <select id="region-version-select"></select>
+            <p class="field-hint region-extract-result-hint">下方表格为所选<strong>历史快照</strong>内容；切换文件、重新抽取或在下拉框中换版本后更新。归档功能尚未接入，删除仅移除该条快照记录（不影响源文件）。</p>
+            <div class="region-version-toolbar inline-fields">
+              <label class="region-version-label">历史版本
+                <select id="region-version-select" class="region-version-select" aria-label="选择脑区抽取结果历史版本"></select>
               </label>
-              <button type="button" class="btn" id="btn-region-version-refresh">刷新列表</button>
+              <button type="button" class="btn mini" id="btn-region-version-refresh" title="重新加载列表">刷新</button>
+              <button type="button" class="btn mini danger" id="btn-region-version-delete" title="删除当前选中的快照">删除快照</button>
             </div>
+            <div class="inline-fields region-extract-to-review" style="margin-top:6px;flex-wrap:wrap;gap:8px;">
+              <button type="button" class="btn mini" id="btn-region-sync-to-candidates" title="用当前快照覆盖同轨候选表">将当前快照同步到审核候选</button>
+              <button type="button" class="btn mini" id="btn-region-open-review">打开脑区审核</button>
+            </div>
+            <p class="field-hint" style="margin:6px 0 0;">抽取成功后会自动写入候选；若在「历史版本」中查看旧快照，可先「同步到审核候选」再审核。</p>
+            <p id="region-version-hint" class="region-version-meta" aria-live="polite"></p>
 
             <h4>抽取结果（表格）</h4>
             <div class="table-scroll region-result-scroll">
@@ -174,9 +184,10 @@
                     <th>CN</th>
                     <th>粒度</th>
                     <th>lane</th>
-                    <th>方法</th>
+                    <th>抽取状态</th>
+                    <th>来源方法</th>
                     <th>置信度</th>
-                    <th>source（节选）</th>
+                    <th>证据原文</th>
                   </tr>
                 </thead>
                 <tbody></tbody>
@@ -230,61 +241,171 @@
         <div class="tab-content" id="tab-review-region">
           <div class="panel">
             <h3>脑区候选审核中心</h3>
+            <!-- 过滤 + 批量操作工具栏 -->
+            <div class="review-bulk-bar">
+              <span>过滤：</span>
+              <span class="field-hint" style="margin:0 6px 0 0;font-size:11px;">（改选后即时生效）</span>
+              <select id="review-filter-status" class="ds-select" style="font-size:11px;padding:3px 6px;">
+                <option value="">全部状态</option>
+                <option value="confirmed">confirmed</option>
+                <option value="review_needed">review_needed</option>
+                <option value="unresolved">unresolved</option>
+                <option value="rejected">rejected</option>
+                <option value="pending_review">pending_review</option>
+              </select>
+              <select id="review-filter-method" class="ds-select" style="font-size:11px;padding:3px 6px;">
+                <option value="">全部来源</option>
+                <option value="deepseek">deepseek</option>
+                <option value="direct_deepseek">direct_deepseek</option>
+                <option value="local_rule">local_rule</option>
+                <option value="region_v2_local">region_v2</option>
+              </select>
+              <button class="btn mini" id="btn-review-filter-apply">应用过滤</button>
+              <button class="btn mini" id="btn-review-filter-clear">清除</button>
+              <span class="review-bulk-sep">|</span>
+              <button class="btn mini" id="btn-review-batch-approve">批量通过</button>
+              <button class="btn mini danger" id="btn-review-batch-reject">批量驳回</button>
+              <button class="btn mini" id="btn-review-batch-stage" title="仅处理已勾选且状态为已通过的项">选中已审项入未验证库</button>
+            </div>
             <table id="candidate-table">
               <thead>
               <tr>
+                <th class="review-th-cb"><input type="checkbox" id="review-select-all" title="全选当前列表" /></th>
                 <th>id</th>
                 <th>EN</th>
                 <th>CN</th>
                 <th>粒度</th>
+                <th>抽取状态</th>
+                <th>来源方法</th>
+                <th>证据文本</th>
                 <th>置信度</th>
                 <th>candidate状态</th>
                 <th>unverified</th>
                 <th>validation</th>
-                <th>promotion</th>
-                <th>错误摘要</th>
+                <th>本体规则</th>
               </tr>
               </thead>
               <tbody></tbody>
             </table>
-            <div class="two-col review-editor">
-              <div>
-                <h4>候选编辑</h4>
-                <label>候选ID<input type="text" id="review-id" readonly></label>
-                <label>EN 名称<input type="text" id="review-en"></label>
-                <label>CN 名称<input type="text" id="review-cn"></label>
-                <label>别名（逗号分隔）<input type="text" id="review-alias"></label>
-                <label>侧向
-                  <select id="review-laterality">
-                    <option value="unknown">unknown</option>
-                    <option value="left">left</option>
-                    <option value="right">right</option>
-                    <option value="midline">midline</option>
-                    <option value="bilateral">bilateral</option>
-                  </select>
-                </label>
-              </div>
-              <div>
-                <h4>审核字段</h4>
-                <label>粒度
-                  <select id="review-granularity">
-                    <option value="major">major</option>
-                    <option value="sub">sub</option>
-                    <option value="allen">allen</option>
-                    <option value="unknown">unknown</option>
-                  </select>
-                </label>
-                <label>区域类别<input type="text" id="review-region-category"></label>
-                <label>本体来源<input type="text" id="review-ontology-source"></label>
-                <label>父级候选<input type="text" id="review-parent"></label>
-                <label>置信度<input type="number" id="review-confidence" step="0.01" min="0" max="1"></label>
-                <label>审核备注<textarea id="review-note" rows="3"></textarea></label>
-                <div class="inline-actions">
-                  <button class="btn" id="btn-review-save">保存修改</button>
-                  <button class="btn" id="btn-review-approve">审核通过</button>
-                  <button class="btn" id="btn-review-reject">审核驳回</button>
+
+            <div class="review-region-split" id="review-region-split">
+              <section class="review-snapshot-pane" aria-label="抽取快照参考">
+                <h4 class="review-pane-title review-pane-title-row">
+                  <span>抽取快照（只读）</span>
+                  <button type="button" class="btn mini" id="btn-toggle-review-snapshot" aria-expanded="true" title="折叠或展开快照内容">收起</button>
+                </h4>
+                <div class="review-snapshot-collapsible">
+                  <p class="field-hint review-snapshot-hint">此处「历史版本」可<strong>单独选择</strong>，不必与脑区提取中心一致，便于对照旧快照审核。点击表格行可定位候选（id 一致时）。</p>
+                  <div class="review-snapshot-toolbar inline-fields">
+                    <label class="review-version-label">历史版本
+                      <select id="review-region-version-select" class="review-region-version-select" aria-label="审核页选择抽取快照版本"></select>
+                    </label>
+                    <button type="button" class="btn mini" id="btn-review-snapshot-refresh">刷新</button>
+                  </div>
+                  <p id="review-region-version-hint" class="region-version-meta"></p>
+                  <div class="table-scroll review-snapshot-scroll">
+                    <table id="review-snapshot-table" class="data-table">
+                      <thead>
+                        <tr>
+                          <th>id</th>
+                          <th>EN</th>
+                          <th>CN</th>
+                          <th>粒度</th>
+                          <th>lane</th>
+                          <th>抽取状态</th>
+                          <th>来源</th>
+                          <th>置信度</th>
+                          <th>证据原文</th>
+                        </tr>
+                      </thead>
+                      <tbody></tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              </section>
+              <section class="review-editor-pane">
+                <p class="review-editor-lead">在左侧快照表中<strong>点选一行</strong>定位候选，于此修改并保存或审核。</p>
+                <div class="two-col review-editor">
+                  <div class="review-editor-col">
+                    <h4 class="review-section-title">候选编辑</h4>
+                    <label class="review-field">
+                      <span class="review-field-label">候选ID</span>
+                      <input type="text" id="review-id" readonly class="review-field-control" />
+                    </label>
+                    <div class="review-candidate-header">
+                      <span id="review-extract-status-badge"></span>
+                      <span id="review-method-badge"></span>
+                    </div>
+                    <label class="review-field review-field--stack">
+                      <span class="review-field-label">证据原文</span>
+                      <textarea id="review-source-text" rows="3" readonly class="review-source-text review-field-control"></textarea>
+                    </label>
+                    <label class="review-field">
+                      <span class="review-field-label">EN 名称</span>
+                      <input type="text" id="review-en" class="review-field-control" />
+                    </label>
+                    <label class="review-field">
+                      <span class="review-field-label">CN 名称</span>
+                      <input type="text" id="review-cn" class="review-field-control" />
+                    </label>
+                    <label class="review-field">
+                      <span class="review-field-label">别名</span>
+                      <input type="text" id="review-alias" class="review-field-control" placeholder="逗号分隔" />
+                    </label>
+                    <label class="review-field">
+                      <span class="review-field-label">侧向</span>
+                      <select id="review-laterality" class="review-field-control">
+                        <option value="unknown">unknown</option>
+                        <option value="left">left</option>
+                        <option value="right">right</option>
+                        <option value="midline">midline</option>
+                        <option value="bilateral">bilateral</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="review-editor-col">
+                    <h4 class="review-section-title">审核字段</h4>
+                    <label class="review-field">
+                      <span class="review-field-label">粒度</span>
+                      <select id="review-granularity" class="review-field-control">
+                        <option value="major">major</option>
+                        <option value="sub">sub</option>
+                        <option value="allen">allen</option>
+                        <option value="unknown">unknown</option>
+                      </select>
+                    </label>
+                    <label class="review-field">
+                      <span class="review-field-label">区域类别</span>
+                      <input type="text" id="review-region-category" class="review-field-control" />
+                    </label>
+                    <label class="review-field">
+                      <span class="review-field-label">本体来源</span>
+                      <input type="text" id="review-ontology-source" class="review-field-control" />
+                    </label>
+                    <label class="review-field">
+                      <span class="review-field-label">父级候选</span>
+                      <input type="text" id="review-parent" class="review-field-control" />
+                    </label>
+                    <label class="review-field">
+                      <span class="review-field-label">置信度</span>
+                      <input type="number" id="review-confidence" step="0.01" min="0" max="1" class="review-field-control" />
+                    </label>
+                    <label class="review-field review-field--stack">
+                      <span class="review-field-label">审核备注</span>
+                      <textarea id="review-note" rows="4" class="review-field-control"></textarea>
+                    </label>
+                    <label class="review-field review-field--stack">
+                      <span class="review-field-label">本体规则命中 <span class="field-hint">（review_note.ontology_check，可追溯）</span></span>
+                      <pre id="review-ontology-check" class="review-ontology-pre review-field-control"></pre>
+                    </label>
+                    <div class="review-editor-actions">
+                      <button class="btn" id="btn-review-save">保存修改</button>
+                      <button class="btn" id="btn-review-approve">审核通过</button>
+                      <button class="btn btn-danger-soft" id="btn-review-reject">审核驳回</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
             </div>
           </div>
         </div>
@@ -306,6 +427,7 @@
                 <th>unverified</th>
                 <th>validation</th>
                 <th>promotion</th>
+                <th>本体规则</th>
                 <th>错误摘要</th>
               </tr>
               </thead>
@@ -348,6 +470,7 @@
                 <label>cycle_verified <input type="checkbox" id="c-review-cycle-verified"></label>
                 <label>置信度<input type="number" id="c-review-confidence" step="0.01" min="0" max="1"></label>
                 <label>审核备注<textarea id="c-review-note" rows="2"></textarea></label>
+                <label>本体规则命中<pre id="c-review-ontology-check" class="review-ontology-pre"></pre></label>
                 <label>Node 列表（JSON）
                   <textarea id="c-review-nodes" rows="6"></textarea>
                 </label>
@@ -378,6 +501,7 @@
                 <th>unverified</th>
                 <th>validation</th>
                 <th>promotion</th>
+                <th>本体规则</th>
                 <th>错误摘要</th>
               </tr>
               </thead>
@@ -415,6 +539,7 @@
                 <label>direction_label<input type="text" id="conn-review-direction"></label>
                 <label>置信度<input type="number" id="conn-review-confidence" step="0.01" min="0" max="1"></label>
                 <label>审核备注<textarea id="conn-review-note" rows="2"></textarea></label>
+                <label>本体规则命中<pre id="conn-review-ontology-check" class="review-ontology-pre"></pre></label>
                 <div class="inline-actions">
                   <button class="btn" id="btn-conn-review-save">保存修改</button>
                   <button class="btn" id="btn-conn-review-approve">审核通过</button>
@@ -523,6 +648,66 @@
           </div>
         </div>
 
+        <div class="tab-content" id="tab-rules">
+          <div class="panel rules-center-panel">
+            <div class="rules-center-toolbar">
+              <h3>规则中心</h3>
+              <p class="field-hint">展示当前本体规则包（与配置中的「规则包路径」一致）：术语、父级约束、类别、同义词及粒度/关系规则。</p>
+              <div class="inline-actions">
+                <button type="button" class="btn" id="btn-rules-refresh">刷新规则</button>
+                <button type="button" class="btn mini" id="btn-rules-toggle-raw">展开完整 JSON</button>
+              </div>
+            </div>
+            <div id="rules-alert" class="rules-alert" role="status" hidden></div>
+            <div id="rules-meta" class="rules-meta-grid"></div>
+            <section class="rules-section">
+              <h4>术语（termMap）</h4>
+              <div class="table-scroll">
+                <table class="data-table" id="rules-table-term">
+                  <thead>
+                  <tr><th>IRI 键</th><th>标准名</th><th>标签</th></tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </section>
+            <section class="rules-section">
+              <h4>父级约束（parentRules）</h4>
+              <div class="table-scroll">
+                <table class="data-table" id="rules-table-parent">
+                  <thead>
+                  <tr><th>子项</th><th>允许的父级</th></tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </section>
+            <section class="rules-section">
+              <h4>类别与模态（classRules）</h4>
+              <pre id="rules-classrules" class="rules-json-pre"></pre>
+            </section>
+            <section class="rules-section">
+              <h4>同义词（synonymMap）</h4>
+              <div class="table-scroll">
+                <table class="data-table" id="rules-table-synonym">
+                  <thead>
+                  <tr><th>别名</th><th>归一</th></tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </section>
+            <section class="rules-section">
+              <h4>粒度与连接关系（granularityRules / relationRules）</h4>
+              <pre id="rules-gran-relation" class="rules-json-pre"></pre>
+            </section>
+            <section class="rules-section" id="rules-raw-wrap" hidden>
+              <h4>完整 JSON</h4>
+              <pre id="rules-raw-json" class="rules-json-pre rules-json-pre--full"></pre>
+            </section>
+          </div>
+        </div>
+
         <div class="tab-content" id="tab-config">
           <div class="panel">
             <h3>设置 / 配置中心</h3>
@@ -551,6 +736,23 @@
                 </label>
                 <label>路由策略<input type="text" id="cfg-routing-policy" value="single_model"></label>
                 <label>参数版本<input type="text" id="cfg-param-version" value="v0"></label>
+                <h4>本体规则（OWL/RDF 编译包）</h4>
+                <label>启用规则校验 <input type="checkbox" id="cfg-ontology-enabled"></label>
+                <label>规则包路径 <input type="text" id="cfg-ontology-path" placeholder="artifacts/ontology/ruleset.json" style="width:100%;max-width:28rem;"></label>
+                <label>入未验证库策略
+                  <select id="cfg-ontology-stage-policy">
+                    <option value="warn">warn（仅记录，不拦截）</option>
+                    <option value="hard">hard（严重错误拦截）</option>
+                  </select>
+                </label>
+                <label>抽取后自动写入 ontology_check <input type="checkbox" id="cfg-auto-validate-on-extract"></label>
+                <div class="inline-actions" style="margin-top:8px;flex-wrap:wrap;gap:8px;align-items:center;">
+                  <input type="file" id="ontology-rules-file" accept=".owl,.rdf,.ttl,.xml,.nt,.nq,.trig,application/rdf+xml,text/turtle" style="font-size:11px;max-width:16rem;" />
+                  <button type="button" class="btn mini" id="btn-ontology-import" title="上传 OWL/RDF/Turtle，编译写入上方「规则包路径」并自动重载">导入本体并生成规则包</button>
+                  <button type="button" class="btn mini" id="btn-ontology-reload">重新加载规则包</button>
+                  <span id="cfg-ontology-status-hint" class="field-hint"></span>
+                </div>
+                <p class="field-hint" style="margin-top:6px;">上传后写入当前配置的规则包路径（默认 <code>artifacts/ontology/ruleset.json</code>），请先确认路径或保存配置后再导入。</p>
               </div>
             </div>
             <div class="inline-actions">

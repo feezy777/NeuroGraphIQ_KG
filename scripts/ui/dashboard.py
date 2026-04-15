@@ -80,9 +80,60 @@ def create_app() -> Flask:
     def api_update_config() -> Any:
         payload = request.get_json(silent=True) or {}
         updated = SERVICE.config_service.update_runtime(payload)
+        SERVICE.refresh_ontology_rules()
         SERVICE.log_bus.emit("-", "CONFIG", "runtime_config_updated")
         eff = SERVICE.config_service.get_public_effective_deepseek()
         return _ok({"runtime": updated, "effective_deepseek": eff})
+
+    @app.get("/api/ontology/rules/status")
+    def api_ontology_rules_status() -> Any:
+        return _ok({"ontology_rules": SERVICE.ontology_rules_status()})
+
+    @app.get("/api/ontology/rules/bundle")
+    def api_ontology_rules_bundle() -> Any:
+        """Full ruleset JSON + meta for the rules center UI."""
+        return _ok(SERVICE.get_ontology_rules_bundle())
+
+    @app.post("/api/ontology/rules/reload")
+    def api_ontology_rules_reload() -> Any:
+        return _ok({"ontology_rules": SERVICE.refresh_ontology_rules()})
+
+    @app.post("/api/ontology/rules/import")
+    def api_ontology_rules_import() -> Any:
+        """Upload OWL/RDF/Turtle; compile to ruleset JSON at configured path and reload."""
+        incoming = request.files.get("file")
+        if not incoming:
+            return _bad("file_missing")
+        name = incoming.filename or "ontology.owl"
+        SERVICE.log_bus.emit(
+            "-",
+            "CONFIG",
+            f"ontology_import_start file={name}",
+            event_type="ontology_rules_import_started",
+        )
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(name).suffix or ".owl") as tmp:
+            incoming.save(tmp.name)
+            temp_path = tmp.name
+        try:
+            result = SERVICE.import_ontology_rules_from_upload(temp_path, name)
+            if not result.get("success"):
+                SERVICE.log_bus.emit(
+                    "-",
+                    "CONFIG",
+                    f"ontology_import_failed error={result.get('error', '')}",
+                    level="error",
+                    event_type="ontology_rules_import_failed",
+                )
+                return _bad(result.get("error", "import_failed"), 400, detail=result)
+            return _ok(result)
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+
+    @app.post("/api/files/<file_id>/ontology-validate")
+    def api_file_ontology_validate(file_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        mode = body.get("mode", "local")
+        return _ok(SERVICE.run_file_ontology_validation(file_id, mode=str(mode)))
 
     @app.get("/api/files/list")
     def api_files_list() -> Any:
@@ -272,6 +323,29 @@ def create_app() -> Flask:
             return _bad(result.get("error", "candidate_review_failed"), 400)
         return _ok(result)
 
+    @app.post("/api/candidates/batch-review")
+    def api_candidates_batch_review() -> Any:
+        body = request.get_json(silent=True) or {}
+        candidate_ids = body.get("candidate_ids") or []
+        action = body.get("action", "")
+        reviewer = body.get("reviewer", "user")
+        note = body.get("note", "")
+        if not isinstance(candidate_ids, list):
+            return _bad("invalid_candidate_ids", 400)
+        result = SERVICE.batch_review_region_candidates(candidate_ids, action=action, reviewer=reviewer, note=note)
+        return _ok(result)
+
+    @app.post("/api/files/<file_id>/region-candidates/from-version")
+    def api_region_candidates_from_version(file_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        version_id = (body.get("version_id") or "").strip()
+        if not version_id:
+            return _bad("version_id_required", 400)
+        result = SERVICE.apply_region_result_version_to_candidates(file_id, version_id)
+        if not result.get("success"):
+            return _bad(result.get("error", "apply_version_failed"), 400, detail=result)
+        return _ok(result)
+
     @app.post("/api/circuit-candidates/<circuit_id>")
     def api_circuit_candidate_update(circuit_id: str) -> Any:
         body = request.get_json(silent=True) or {}
@@ -318,8 +392,10 @@ def create_app() -> Flask:
     def api_file_commit_regions(file_id: str) -> Any:
         body = request.get_json(silent=True) or {}
         reviewer = body.get("reviewer", "user")
-        lane = body.get("lane", "local") or "local"
-        result = SERVICE.commit_regions(file_id=file_id, reviewer=reviewer, lane=lane)
+        candidate_ids = body.get("candidate_ids")
+        if candidate_ids is not None and not isinstance(candidate_ids, list):
+            return _bad("invalid_candidate_ids", 400)
+        result = SERVICE.commit_regions(file_id=file_id, reviewer=reviewer, candidate_ids=candidate_ids)
         if not result.get("success"):
             return _bad(result.get("error", "commit_failed"), 400, detail=result)
         return _ok(result)

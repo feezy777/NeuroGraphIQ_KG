@@ -4,12 +4,13 @@ import hashlib
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg
 from psycopg.rows import dict_row
 from .circuit_identity import CircuitIdentityService
 from .region_identity import RegionIdentityService
+from ..validation.ontology_rules import merge_candidate_ontology_note
 
 LATERALITY_ALLOWED = {"left", "right", "midline", "bilateral"}
 GRANULARITY_ALLOWED = {"major", "sub", "allen"}
@@ -18,6 +19,33 @@ LOOP_TYPE_ALLOWED = {"strict", "inferred", "functional"}
 CONNECTION_MODALITY_ALLOWED = {"structural", "functional", "effective", "unknown"}
 EVIDENCE_TYPE_ALLOWED = {"paper", "abstract", "database_record", "review", "manual_note"}
 LOW_CONFIDENCE_THRESHOLD = 0.60
+
+
+def _ontology_stage_eval(
+    candidate: Dict[str, Any],
+    entity: str,
+    ontology_context: Optional[Dict[str, Any]],
+) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    """Returns (ok_to_proceed, fail_reason, ontology_check_payload_if_issues)."""
+    if not ontology_context:
+        return True, "", None
+    eng = ontology_context.get("engine")
+    if not eng or not getattr(eng, "enabled", False):
+        return True, "", None
+    pol = ontology_context.get("stage_policy", "warn")
+    if entity == "region":
+        ev = eng.evaluate_region(candidate)
+    elif entity == "circuit":
+        ev = eng.evaluate_circuit(candidate)
+    else:
+        ev = eng.evaluate_connection(candidate)
+    oc = eng.ontology_check_payload(ev, entity)
+    if eng.should_fail_stage(ev, pol):
+        codes = [str(i.get("code", "")) for i in ev.get("issues", []) if i.get("severity") == "hard"]
+        return False, f"ontology_rules_hard:{','.join(codes)}", oc
+    if ev.get("issues"):
+        return True, "", oc
+    return True, "", None
 
 
 def _make_id(prefix: str) -> str:
@@ -38,6 +66,7 @@ class IngestionService:
         file_payload: Dict[str, Any],
         candidates: List[Dict[str, Any]],
         unverified_cfg: Dict[str, Any],
+        ontology_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if not candidates:
             return {"status": "failed", "summary": {"success_count": 0, "failed_count": 0, "total": 0}, "details": []}
@@ -75,6 +104,22 @@ class IngestionService:
                             )
                             continue
 
+                        ok_ont, reason_ont, oc_ont = _ontology_stage_eval(candidate, "region", ontology_context)
+                        if not ok_ont:
+                            details.append(
+                                {
+                                    "candidate_id": cid,
+                                    "status": "failed",
+                                    "reason": reason_ont,
+                                    "unverified_region_id": "",
+                                }
+                            )
+                            continue
+
+                        review_note_val = candidate.get("review_note", "")
+                        if oc_ont and oc_ont.get("issues"):
+                            review_note_val = merge_candidate_ontology_note(review_note_val, oc_ont)
+
                         uvr_id = _make_id("uvr")
                         payload = {
                             "id": uvr_id,
@@ -95,7 +140,7 @@ class IngestionService:
                             "validation_status": "validation_pending",
                             "promotion_status": "not_ready",
                             "review_status": "reviewed",
-                            "review_note": candidate.get("review_note", ""),
+                            "review_note": review_note_val,
                         }
                         cur.execute(
                             f"""
@@ -222,6 +267,7 @@ class IngestionService:
         file_payload: Dict[str, Any],
         candidates: List[Dict[str, Any]],
         unverified_cfg: Dict[str, Any],
+        ontology_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if not candidates:
             return {"status": "failed", "summary": {"success_count": 0, "failed_count": 0, "total": 0}, "details": []}
@@ -256,6 +302,23 @@ class IngestionService:
                                 }
                             )
                             continue
+
+                        ok_ont, reason_ont, oc_ont = _ontology_stage_eval(candidate, "circuit", ontology_context)
+                        if not ok_ont:
+                            details.append(
+                                {
+                                    "candidate_circuit_id": cid,
+                                    "status": "failed",
+                                    "reason": reason_ont,
+                                    "unverified_circuit_id": "",
+                                }
+                            )
+                            continue
+
+                        review_note_val = candidate.get("review_note", "")
+                        if oc_ont and oc_ont.get("issues"):
+                            review_note_val = merge_candidate_ontology_note(review_note_val, oc_ont)
+
                         uvc_id = _make_id("uvc")
                         payload = {
                             "id": uvc_id,
@@ -274,7 +337,7 @@ class IngestionService:
                             "validation_status": "validation_pending",
                             "promotion_status": "not_ready",
                             "review_status": "reviewed",
-                            "review_note": candidate.get("review_note", ""),
+                            "review_note": review_note_val,
                             "data_source": file_payload.get("filename", ""),
                             "evidence_json": self._json(self._extract_evidence_payload(candidate, file_payload)),
                         }
@@ -376,6 +439,7 @@ class IngestionService:
         file_payload: Dict[str, Any],
         candidates: List[Dict[str, Any]],
         unverified_cfg: Dict[str, Any],
+        ontology_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if not candidates:
             return {"status": "failed", "summary": {"success_count": 0, "failed_count": 0, "total": 0}, "details": []}
@@ -411,6 +475,22 @@ class IngestionService:
                             )
                             continue
 
+                        ok_ont, reason_ont, oc_ont = _ontology_stage_eval(candidate, "connection", ontology_context)
+                        if not ok_ont:
+                            details.append(
+                                {
+                                    "candidate_connection_id": cid,
+                                    "status": "failed",
+                                    "reason": reason_ont,
+                                    "unverified_connection_id": "",
+                                }
+                            )
+                            continue
+
+                        review_note_val = candidate.get("review_note", "")
+                        if oc_ont and oc_ont.get("issues"):
+                            review_note_val = merge_candidate_ontology_note(review_note_val, oc_ont)
+
                         uvcn_id = _make_id("uvcn")
                         payload = {
                             "id": uvcn_id,
@@ -428,7 +508,7 @@ class IngestionService:
                             "confidence": float(candidate.get("confidence", 0.0) or 0.0),
                             "direction_label": (candidate.get("direction_label") or "unknown").strip().lower(),
                             "extraction_method": (candidate.get("extraction_method") or "local_rule").strip(),
-                            "review_note": candidate.get("review_note", ""),
+                            "review_note": review_note_val,
                             "data_source": file_payload.get("filename", ""),
                             "evidence_json": self._json(self._extract_evidence_payload(candidate, file_payload)),
                             "validation_status": "validation_pending",
