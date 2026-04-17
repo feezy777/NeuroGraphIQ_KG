@@ -4,7 +4,22 @@
 
 ---
 
-## [未发布] 2026-04
+## 2026-04（2026-04-15 推送 main）
+
+### Allen Brain Atlas 直连（脑区提取）
+
+- **接口**：`POST /api/files/<file_id>/extract-regions-allen`，请求体支持 `graph_id`（默认 `1` 为成年小鼠结构图）、`structure_id`（精确结构 ID）、`acronym`（缩写精确）、`acronym_pattern`（缩写模糊，RMA `$li`，未写 `*` 时自动加通配符）、`max_rows`（上限 200）。
+- **实现**：`scripts/modules/workbench/extraction/allen_api_client.py` 调用 Allen Institute RMA `http://api.brain-map.org/api/v2/data/query.json`，查询 `Structure` 模型并批量解析 `parent_structure_id` 父区英文名。
+- **候选**：`ExtractionService.run_allen_api_regions` 将结果转为 `CandidateRegion`（`granularity_candidate=allen`、`extraction_method=allen_api`），`review_note` 含统一 `brain_region_classification`；`derive_region_extract_status` 对 `allen_api` 打标。
+- **前端**：脑区提取中心新增 **④ Allen API** 面板与进度条/版本表联动；方法徽章 `Allen API`（样式 `.method-allen_api`）。
+
+### 三层颗粒度策略（major / sub / allen）
+
+- **固定规则模块**：`scripts/modules/workbench/extraction/brain_region_granularity.py` — 统一输出 schema、层级校验（root→major→sub→allen）、Allen 硬约束、非脑区实体关键词拦截、laterality 与 canonical 名剥离、入库前 `staging_gate_reason`。
+- **LLM**：默认 `region_prompt_preset` / `direct_region_prompt_preset` 为 **three_tier**，`region_three_tier_system_prompt` 启用三层分类系统提示与 JSON schema；直接生成与文件/文本抽取共用该策略（仍兼容旧预设 `default`/`detailed`/`minimal`）。
+- **候选**：`review_note.brain_region_classification` 写入完整结构化对象；**排除的非脑区**在抽取阶段不生成候选；**review_required** 的候选在未验证入库时被拒绝。
+- **测试**：`tests/test_brain_region_granularity.py`（≥10 条样例）。
+- **说明**：Allen 在本系统中为 **fine-resolution 标签**（见模块内 `ALLEN_TAG_DISCLAIMER_ZH`），不代表生物学绝对最细层级。
 
 ### 脑区抽取与生成
 

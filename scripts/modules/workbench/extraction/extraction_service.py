@@ -15,6 +15,21 @@ from ..validation.ontology_rules import (
     merge_ontology_binding_into_review_note,
     resolve_term_binding,
 )
+from .allen_api_client import fetch_structures_mouse, resolve_parent_names
+from .brain_region_granularity import (
+    ENTITY_BRAIN_REGION,
+    THREE_TIER_FILE_USER_TEMPLATE,
+    build_three_tier_system_prompt,
+    build_three_tier_user_prompt_direct,
+    detect_non_brain_entity,
+    dedupe_key,
+    finalize_review_flags,
+    merge_unified_into_review_note,
+    row_to_unified_schema,
+    strip_laterality_from_name,
+    unified_to_candidate_fields,
+    validate_unified_record,
+)
 from .region_postprocess_v2 import derive_region_extract_status
 
 
@@ -532,6 +547,7 @@ def normalize_region_llm_row(
     *,
     ontology_default: str,
     enrich_from_kb: bool = True,
+    apply_three_tier_policy: bool = True,
 ) -> Dict[str, Any]:
     """将模型返回的任意键名归一为工作台统一中间态（与 CandidateRegion / 入库字段对应）。"""
     r = {k: v for k, v in row.items() if isinstance(k, str)}
@@ -600,7 +616,7 @@ def normalize_region_llm_row(
     else:
         en2, cn2 = en, cn
         merged_aliases = list(dict.fromkeys(aliases))
-    return {
+    out: Dict[str, Any] = {
         "en_name_candidate": en2,
         "cn_name_candidate": cn2,
         "alias_candidates": merged_aliases,
@@ -612,6 +628,33 @@ def normalize_region_llm_row(
         "confidence": conf,
         "source_text": (src or "")[:400],
     }
+    if not apply_three_tier_policy:
+        return out
+
+    u = row_to_unified_schema(r)
+    u["canonical_name_en"] = strip_laterality_from_name(en2) or u["canonical_name_en"]
+    u["canonical_name_cn"] = strip_laterality_from_name(cn2) or u["canonical_name_cn"]
+    if merged_aliases:
+        u["alias"] = list(dict.fromkeys((u.get("alias") or []) + merged_aliases))
+    ex = detect_non_brain_entity(u)
+    errs = validate_unified_record(u)
+    finalize_review_flags(u, errs, ex)
+    cand = unified_to_candidate_fields(u)
+    out["en_name_candidate"] = cand["en_name_candidate"] or out["en_name_candidate"]
+    out["cn_name_candidate"] = cand["cn_name_candidate"] or out["cn_name_candidate"]
+    out["alias_candidates"] = cand["alias_candidates"] or out["alias_candidates"]
+    out["laterality_candidate"] = cand["laterality_candidate"]
+    out["region_category_candidate"] = cand["region_category_candidate"]
+    out["granularity_candidate"] = cand["granularity_candidate"]
+    out["parent_region_candidate"] = cand["parent_region_candidate"]
+    out["ontology_source_candidate"] = cand["ontology_source_candidate"] or out["ontology_source_candidate"]
+    out["confidence"] = cand["confidence"]
+    out["source_text"] = cand["source_text"] or out["source_text"]
+    out["_wb_unified_brain_region"] = u
+    if ex:
+        out["_skip_candidate"] = True
+        out["_skip_reason"] = ex
+    return out
 
 
 # DeepSeek 脑区抽取：规划好的 user prompt（需含 {TEXT}）
@@ -653,6 +696,8 @@ REGION_USER_PROMPT_PRESETS: Dict[str, str] = {
         "granularity_candidate ∈ major/sub/allen/unknown；laterality_candidate ∈ left/right/bilateral/midline/unknown；"
         "ontology_source_candidate 填 deepseek_extract。\n\nTEXT:\n{TEXT}"
     ),
+    # 固定三层颗粒度 + 统一 schema（canonical_name_*、Allen 约束、排除非脑区实体）
+    "three_tier": THREE_TIER_FILE_USER_TEMPLATE,
 }
 
 DEFAULT_DEEPSEEK_SYSTEM = (
@@ -798,8 +843,8 @@ def compose_region_file_user_prompt(sample_text: str, cfg: Dict[str, Any]) -> st
                 "不要输出裸数组，不要 Markdown 围栏。"
             )
     else:
-        pid = (cfg.get("region_prompt_preset") or "default").strip()
-        template = REGION_USER_PROMPT_PRESETS.get(pid, REGION_USER_PROMPT_PRESETS["default"])
+        pid = (cfg.get("region_prompt_preset") or "three_tier").strip()
+        template = REGION_USER_PROMPT_PRESETS.get(pid, REGION_USER_PROMPT_PRESETS["three_tier"])
         body = template.replace("{TEXT}", sample_text)
     prefix = (cfg.get("user_prompt_prefix") or "").strip()
     if prefix:
@@ -831,7 +876,9 @@ def compose_direct_region_user_prompt(params: Dict[str, Any], cfg: Dict[str, Any
                 "不要输出裸数组，不要 Markdown 围栏。"
             )
         return body
-    pid = (cfg.get("direct_region_prompt_preset") or "default").strip()
+    pid = (cfg.get("direct_region_prompt_preset") or "three_tier").strip()
+    if pid in ("three_tier", "default"):
+        return build_three_tier_user_prompt_direct(topic, species, granularity, extra, atlas)
     if pid == "detailed":
         body = (
             f"请系统、完整地列出{species}与「{topic}」相关的脑区（中英文标准名），粒度参考为{granularity}。"
@@ -870,6 +917,11 @@ _JSON_INSTRUCTION_SUFFIX = (
 
 def deepseek_system_content(cfg: Dict[str, Any]) -> str:
     """当 force_json_output 开启时，保证 system_prompt 中含有 'json' 关键字（DeepSeek API 强制要求）。"""
+    if cfg.get("region_three_tier_system_prompt", True):
+        base = build_three_tier_system_prompt()
+        if cfg.get("force_json_output", True) and "json" not in base.lower():
+            base = base + _JSON_INSTRUCTION_SUFFIX
+        return base
     s = (cfg.get("system_prompt") or "").strip()
     base = s if s else DEFAULT_DEEPSEEK_SYSTEM
     if cfg.get("force_json_output", True):
@@ -1595,12 +1647,15 @@ class ExtractionService:
                 ontology_default=ontology_source,
                 enrich_from_kb=enrich_from_kb,
             )
+            if norm.get("_skip_candidate"):
+                continue
             norm["ontology_source_candidate"] = ontology_source
             en = norm["en_name_candidate"]
             cn = norm["cn_name_candidate"]
             if not en and not cn:
                 continue
-            dedupe = f"{en.strip().lower()}|{cn.strip()}"
+            u = norm.get("_wb_unified_brain_region")
+            dedupe = dedupe_key(u) if isinstance(u, dict) else f"{en.strip().lower()}|{cn.strip()}"
             if dedupe in seen_keys:
                 continue
             seen_keys.add(dedupe)
@@ -1620,6 +1675,9 @@ class ExtractionService:
                 },
             }
             note_str = json.dumps(note_obj, ensure_ascii=False)
+            u2 = norm.get("_wb_unified_brain_region")
+            if isinstance(u2, dict):
+                note_str = merge_unified_into_review_note(note_str, u2)
             bind_row: Dict[str, Any] = {}
             if bind_on_ds:
                 bind_row = resolve_term_binding(ruleset_ds, en, cn)
@@ -1729,6 +1787,7 @@ class ExtractionService:
             ms.setdefault("base_url", "https://api.moonshot.cn")
             ms.setdefault("model", "moonshot-v1-8k")
             ms["force_json_output"] = False
+            ms.setdefault("region_three_tier_system_prompt", deepseek_cfg.get("region_three_tier_system_prompt", True))
             return self._deepseek_prompt_to_regions(
                 prompt,
                 file_payload,
@@ -1771,6 +1830,167 @@ class ExtractionService:
             pipeline_config=pipeline_config,
             root_dir=root_dir,
         )
+
+    def run_allen_api_regions(
+        self,
+        file_payload: Dict[str, Any],
+        parsed_document_id: str,
+        params: Dict[str, Any],
+        *,
+        pipeline_config: Optional[Dict[str, Any]] = None,
+        root_dir: Optional[str] = None,
+    ) -> List[CandidateRegion]:
+        """直连 Allen RMA API 拉取 Structure，转为 CandidateRegion（granularity=allen）。"""
+        file_id = str(file_payload.get("file_id") or "")
+        try:
+            graph_id = int(params.get("graph_id") or 1)
+        except (TypeError, ValueError):
+            raise RuntimeError("invalid_graph_id") from None
+        try:
+            max_rows = int(params.get("max_rows") or 50)
+        except (TypeError, ValueError):
+            raise RuntimeError("invalid_max_rows") from None
+        sid_raw = params.get("structure_id")
+        structure_id: Optional[int] = None
+        if sid_raw is not None and str(sid_raw).strip() != "":
+            try:
+                structure_id = int(sid_raw)
+            except (TypeError, ValueError):
+                raise RuntimeError("invalid_structure_id") from None
+        acronym_exact = (params.get("acronym") or "").strip() or None
+        acronym_pattern = (params.get("acronym_pattern") or "").strip() or None
+
+        try:
+            rows = fetch_structures_mouse(
+                graph_id=graph_id,
+                acronym_exact=acronym_exact,
+                acronym_pattern=acronym_pattern,
+                structure_id=structure_id,
+                max_rows=max_rows,
+            )
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        if not rows:
+            raise RuntimeError("allen_api_empty_result")
+
+        parent_names = resolve_parent_names(rows, graph_id=graph_id)
+
+        orc = (pipeline_config or {}).get("ontology_rules") or {}
+        ontology_bind_on = bool(orc.get("bind_on_extract", True))
+        ontology_require_binding = bool(orc.get("require_binding_for_confirmed", True))
+        ontology_ruleset: Optional[Dict[str, Any]] = None
+        if ontology_bind_on and root_dir:
+            rules_path = str(orc.get("path") or "artifacts/ontology/ruleset.json").replace("\\", "/")
+            ontology_ruleset, _ = load_ruleset_dict(root_dir, rules_path)
+
+        out: List[CandidateRegion] = []
+        for batch_index, st in enumerate(rows):
+            sid = int(st.get("id") or 0)
+            name_en = strip_laterality_from_name(str(st.get("name") or "").strip())
+            ac = str(st.get("acronym") or "").strip()
+            pid = st.get("parent_structure_id")
+            try:
+                p_int = int(pid) if pid is not None else None
+            except (TypeError, ValueError):
+                p_int = None
+            parent_name = parent_names.get(p_int, "") if p_int is not None else ""
+
+            src_blob = {
+                "allen_api": {
+                    "structure_id": sid,
+                    "acronym": ac,
+                    "graph_id": graph_id,
+                    "structure_id_path": str(st.get("structure_id_path") or ""),
+                }
+            }
+            source_text = json.dumps(src_blob, ensure_ascii=False)[:400]
+
+            row_in = {
+                "granularity_candidate": "allen",
+                "en_name_candidate": name_en,
+                "cn_name_candidate": "",
+                "alias_candidates": [ac] if ac else [],
+                "laterality_candidate": "unknown",
+                "region_category_candidate": ENTITY_BRAIN_REGION,
+                "parent_region_candidate": parent_name,
+                "ontology_source_candidate": "Allen",
+                "confidence": 1.0,
+                "source_text": source_text,
+                "source": "Allen",
+                "source_id": str(sid),
+                "source_acronym": ac,
+                "primary_parent_name": parent_name,
+                "primary_parent_granularity": "sub",
+                "description": f"Allen Brain Atlas Structure id={sid}, graph_id={graph_id}",
+            }
+            u = row_to_unified_schema(row_in)
+            val_err = validate_unified_record(u)
+            excl = detect_non_brain_entity(u)
+            finalize_review_flags(u, val_err, excl)
+            note_str = merge_unified_into_review_note("{}", u)
+            note_obj = json.loads(note_str)
+            estatus = derive_region_extract_status(
+                extraction_method="allen_api",
+                match_type="exact",
+                confidence=1.0,
+                en_name=name_en,
+                cn_name="",
+            )
+            note_obj["extract_status"] = estatus
+            note_str = json.dumps(note_obj, ensure_ascii=False)
+
+            en = name_en
+            cn = ""
+            bind_row: Dict[str, Any] = {}
+            if ontology_bind_on and ontology_ruleset is not None:
+                bind_row = resolve_term_binding(ontology_ruleset, en, cn)
+            term_key = str(bind_row.get("term_key") or "") if bind_row else ""
+            canonical = str(bind_row.get("canonical") or "") if bind_row else ""
+            if ontology_bind_on and ontology_ruleset is not None:
+                note_str = merge_ontology_binding_into_review_note(note_str, bind_row)
+            note_str = apply_ontology_binding_gate_to_review_note(
+                note_str,
+                bind_on_extract=ontology_bind_on,
+                require_binding_for_confirmed=ontology_require_binding,
+            )
+
+            rid = make_region_candidate_id(
+                file_id=file_id,
+                en_name=en,
+                cn_name=cn,
+                source_text=source_text,
+                batch_index=batch_index,
+                term_key=term_key,
+                canonical=canonical,
+            )
+            out.append(
+                CandidateRegion(
+                    id=rid,
+                    file_id=file_id,
+                    parsed_document_id=parsed_document_id,
+                    chunk_id="",
+                    source_text=source_text,
+                    en_name_candidate=en,
+                    cn_name_candidate=cn,
+                    alias_candidates=[ac] if ac else [],
+                    laterality_candidate="unknown",
+                    region_category_candidate=ENTITY_BRAIN_REGION,
+                    granularity_candidate="allen",
+                    parent_region_candidate=parent_name,
+                    ontology_source_candidate="Allen",
+                    confidence=1.0,
+                    extraction_method="allen_api",
+                    llm_model="",
+                    status="pending_review",
+                    review_note=note_str,
+                    created_at=utc_now_iso(),
+                    updated_at=utc_now_iso(),
+                )
+            )
+
+        if not out:
+            raise RuntimeError("allen_api_empty_result")
+        return out
 
     @staticmethod
     def _parse_chat_text(body: str) -> str:

@@ -363,7 +363,12 @@ class WorkbenchService:
         prompt_text: str = "",
         prompt_meta: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        items = [self.store._to_dict(r) for r in rows]
+        items: List[Dict[str, Any]] = []
+        for r in rows:
+            d = self.store._to_dict(r)
+            # 快照表格与候选轨一致：CandidateRegion 默认 lane=local，需覆盖为本次抽取轨道
+            d["lane"] = lane
+            items.append(d)
         version_id = make_id("rrv")
         version = {
             "version_id": version_id,
@@ -716,6 +721,46 @@ class WorkbenchService:
                 err_type = "kimi_transport_failed"
             elif err.startswith("kimi_empty_result"):
                 err_type = "kimi_empty_result"
+            self.store.update_file(file_id, status=FileStatus.EXTRACTION_FAILED.value, updated_at=utc_now_iso())
+            return {"success": False, "error": err, "error_type": err_type}
+
+    def extract_regions_allen_api(self, file_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """直连 Allen Brain Atlas RMA（Structure）拉取脑区，写入版本与候选。"""
+        if not file_id:
+            return {"success": False, "error": "file_id_required"}
+        file_payload = self.file_service.get_file(file_id)
+        if not file_payload:
+            return {"success": False, "error": "file_not_found"}
+        parsed = self.store.get_parsed_document(file_id)
+        if not parsed.get("document"):
+            return {"success": False, "error": "parsed_document_missing"}
+        pd_id = parsed["document"]["parsed_document_id"]
+        try:
+            rt = self.config_service.get_runtime()
+            rows = self.extraction_service.run_allen_api_regions(
+                file_payload,
+                pd_id,
+                params,
+                pipeline_config=rt.get("pipeline", {}),
+                root_dir=self.root_dir,
+            )
+            meta = {k: v for k, v in (params or {}).items() if v is not None and v != ""}
+            ver = self._persist_region_version_and_store(
+                file_id,
+                "allen_api",
+                "local",
+                rows,
+                prompt_text=json.dumps(meta, ensure_ascii=False)[:20000],
+                prompt_meta={"source": "allen_api", **meta},
+            )
+            self._apply_ontology_notes_after_extract(rows, "region")
+            self.store.update_file(file_id, status=FileStatus.EXTRACTION_SUCCESS.value, updated_at=utc_now_iso())
+            return {"success": True, "count": len(rows), **ver, "method": "allen_api"}
+        except Exception as exc:
+            err = str(exc)
+            err_type = "extract_failed"
+            if err.startswith("allen_") or "allen_" in err[:40]:
+                err_type = "allen_api_failed"
             self.store.update_file(file_id, status=FileStatus.EXTRACTION_FAILED.value, updated_at=utc_now_iso())
             return {"success": False, "error": err, "error_type": err_type}
 

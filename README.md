@@ -9,12 +9,13 @@
 
 ## 本阶段已落地
 - IDE 风格主界面：顶部工具栏 / 左侧导航 / 中央工作区 / 右侧 Inspector / 底部日志
-- 多中心 Tab：文件、标准化、校验、粒度治理、入库、配置、任务与日志；脑区提取与审核（**文件 / 文本 / DeepSeek 或 Kimi 直接生成**、**Kimi+DeepSeek 双模型抽取**、结果版本与候选同步）
+- 多中心 Tab：文件、标准化、校验、粒度治理、入库、配置、任务与日志；脑区提取与审核（**文件 / 文本 / DeepSeek 或 Kimi 直接生成**、**Kimi+DeepSeek 双模型抽取**、**Allen Brain Atlas RMA 直连拉取 Structure**、结果版本与候选同步）
 - 后端模块：文件、解析、标准化、抽取、校验、粒度、入库、任务、配置等；脑区候选 **验证流水线** 与本体规则扩展
 - 文件状态流与任务状态流；统一中间层（document / content chunk / candidate）
 - staging / production 双路径占位
 - **DeepSeek**：全局配置、弹窗内参数与 Prompt 预设/自定义、`deepseek_profiles` 个性化配置
 - **Moonshot（Kimi）**：运行时配置（见 `configs/local/runtime.local.yaml.example` 中 `moonshot` 段），用于 Kimi 抽取、双模型与 Kimi 直接生成
+- **三层颗粒度（major / sub / allen）**：固定层级与 Allen 约束、非脑区实体拦截、统一 LLM JSON schema；见 `scripts/modules/workbench/extraction/brain_region_granularity.py` 与 `docs/CHANGELOG.md`
 - SQL 数据模型骨架（stage/prod schema + 核心表）
 
 ## 技术栈
@@ -61,6 +62,7 @@ python -m scripts.ui.run_dashboard
 - `POST /api/files/<file_id>/reparse`
 - `POST /api/files/<file_id>/renormalize`
 - `POST /api/files/<file_id>/extract-regions`
+- `POST /api/files/<file_id>/extract-regions-allen`（Allen Brain Atlas RMA，小鼠默认 `graph_id=1`）
 - `POST /api/files/<file_id>/extract-circuits`
 - `POST /api/files/<file_id>/extract-connections`
 - `POST /api/files/<file_id>/validate`

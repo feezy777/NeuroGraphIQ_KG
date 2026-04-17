@@ -1172,6 +1172,7 @@ select.region-version-select {
 .method-multi      { background: #fdf4ff; color: #a21caf; border: 1px solid #e879f9; }
 .method-local_rule { background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; }
 .method-region_v2  { background: #ecfdf5; color: #065f46; border: 1px solid #6ee7b7; }
+.method-allen_api  { background: #eef2ff; color: #4338ca; border: 1px solid #a5b4fc; }
 .method-unknown    { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; }
 
 /* 审核中心候选行按状态高亮 */

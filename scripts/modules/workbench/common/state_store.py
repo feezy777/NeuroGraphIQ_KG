@@ -1809,7 +1809,12 @@ class StateStore:
         state = self._load_json()
         versions = state.get("region_result_versions", [])
         if file_id:
-            versions = [v for v in versions if v.get("file_id") == file_id or not v.get("file_id")]
+            fid = str(file_id).strip()
+            versions = [
+                v
+                for v in versions
+                if str(v.get("file_id") or "").strip() == fid or not str(v.get("file_id") or "").strip()
+            ]
         # Strip items array for list view (can be large); caller uses get_region_result_version to load full data
         return [
             {k: v for k, v in ver.items() if k != "items"}
@@ -1831,7 +1836,12 @@ class StateStore:
         state = self._load_json()
         versions: List[Dict[str, Any]] = list(state.get("region_result_versions", []))
         if file_id:
-            versions = [v for v in versions if v.get("file_id") == file_id or not v.get("file_id")]
+            fid = str(file_id).strip()
+            versions = [
+                v
+                for v in versions
+                if str(v.get("file_id") or "").strip() == fid or not str(v.get("file_id") or "").strip()
+            ]
         for ver in versions:
             for it in ver.get("items") or []:
                 if isinstance(it, dict) and it.get("id") == candidate_id:

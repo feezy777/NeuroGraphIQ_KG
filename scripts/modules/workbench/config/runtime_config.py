@@ -70,6 +70,8 @@ DEFAULT_RUNTIME: Dict[str, Any] = {
         "max_tokens": 8192,
         "top_p": 1.0,
         "prompt_version": "region_extract_v2",
+        # 脑区 LLM：使用三层颗粒度（major/sub/allen）系统提示与 JSON schema
+        "region_three_tier_system_prompt": True,
         # 表格：单批最大字符（整表可一次送入时尽量大；极长表仍再切）
         "deepseek_batch_max_chars": 500000,
         # 表格：每批最多行数（>0 时优先按行切块，再按字符二次切；避免单批 90+ 行时输出 JSON 被截断）
@@ -80,12 +82,12 @@ DEFAULT_RUNTIME: Dict[str, Any] = {
         # Custom prompts: empty string means "use built-in default"
         "system_prompt": "",
         "user_prompt_prefix": "",
-        # 脑区抽取（文件/文本）：预设 id 见 ExtractionService；空则走默认预设
-        "region_prompt_preset": "default",
+        # 脑区抽取（文件/文本）：预设 id 见 ExtractionService；three_tier 为固定三层颗粒度 schema
+        "region_prompt_preset": "three_tier",
         # 非空则完全覆盖预设 user 内容，需含 {TEXT} 占位符
         "region_user_prompt_template": "",
-        # 脑区直接生成：预设 id；空模板则走内置默认/direct 预设
-        "direct_region_prompt_preset": "default",
+        # 脑区直接生成：three_tier 为固定三层颗粒度 + Allen 说明
+        "direct_region_prompt_preset": "three_tier",
         "direct_region_user_prompt_template": "",
     },
     # Persisted per-center DeepSeek profile overrides.
@@ -105,6 +107,7 @@ DEFAULT_RUNTIME: Dict[str, Any] = {
         # Kimi 兼容接口不支持 response_format=json_object；代码侧对 label=kimi 也会强制关闭
         "force_json_output": False,
         "max_tokens": 2048,
+        "region_three_tier_system_prompt": True,
     },
     "pipeline": {
         "auto_parse_on_upload": True,
@@ -217,10 +220,11 @@ def resolve_deepseek_config(
         "temperature": float(merged.get("temperature", 0.2)),
         "system_prompt": merged.get("system_prompt", ""),
         "user_prompt_prefix": merged.get("user_prompt_prefix", ""),
-        "region_prompt_preset": merged.get("region_prompt_preset", "default"),
+        "region_prompt_preset": merged.get("region_prompt_preset", "three_tier"),
         "region_user_prompt_template": merged.get("region_user_prompt_template", ""),
-        "direct_region_prompt_preset": merged.get("direct_region_prompt_preset", "default"),
+        "direct_region_prompt_preset": merged.get("direct_region_prompt_preset", "three_tier"),
         "direct_region_user_prompt_template": merged.get("direct_region_user_prompt_template", ""),
+        "region_three_tier_system_prompt": bool(merged.get("region_three_tier_system_prompt", True)),
         # 稳定性与 JSON 输出控制（从 DEFAULT_RUNTIME["deepseek"] 透传）
         "request_timeout_sec": int(merged.get("request_timeout_sec", 600)),
         "request_retries": int(merged.get("request_retries", 2)),
@@ -252,6 +256,7 @@ def resolve_moonshot_config(global_runtime: Dict[str, Any]) -> Dict[str, Any]:
         "retry_backoff_sec": float(m.get("retry_backoff_sec", 1.2)),
         "force_json_output": bool(m.get("force_json_output", True)),
         "max_tokens": clamp_deepseek_max_tokens(m.get("max_tokens", 2048)),
+        "region_three_tier_system_prompt": bool(m.get("region_three_tier_system_prompt", True)),
     }
 
 

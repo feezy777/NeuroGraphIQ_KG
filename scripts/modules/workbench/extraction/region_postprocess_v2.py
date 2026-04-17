@@ -68,6 +68,11 @@ def derive_region_extract_status(
             return "unresolved"
         return "review_needed" if confidence >= _REVIEW_THRESHOLD else "unresolved"
 
+    if method == "allen_api":
+        if confidence >= _CONFIRM_THRESHOLD and mt == "exact":
+            return "confirmed"
+        return "review_needed"
+
     # 兜底
     return "review_needed"
 

@@ -763,6 +763,24 @@ function fillRegionVersionSelect() {
   updateRegionVersionMeta();
 }
 
+/** 抽取/直接生成成功后，强制选中接口返回的 version_id 并填充下方快照表（避免 bootstrap 后未锚定到本次 Kimi/双模型结果）。 */
+async function finalizeRegionExtractVersionUi(res) {
+  const vId = res && res.version_id;
+  if (!vId) {
+    await refreshRegionVersions();
+    return;
+  }
+  state.regionSelectedVersionId = vId;
+  state.reviewSnapshotVersionId = vId;
+  await refreshRegionVersions();
+  if (state.regionVersionsList.some((x) => x.version_id === vId)) {
+    fillRegionVersionSelect();
+    await loadExtractRegionVersionTable(vId);
+    await loadReviewSnapshotVersionTable(vId);
+    updateRegionVersionMeta();
+  }
+}
+
 async function refreshRegionVersions() {
   const fid = state.selectedFileId || (qs("extract-file-select") && qs("extract-file-select").value) || "";
   const hintEl = qs("region-version-hint");
@@ -962,9 +980,11 @@ function setRegionExtractMode(mode) {
   const pf = qs("region-panel-file");
   const pt = qs("region-panel-text");
   const pd = qs("region-panel-direct");
+  const pa = qs("region-panel-allen");
   if (pf) pf.hidden = mode !== "file";
   if (pt) pt.hidden = mode !== "text";
   if (pd) pd.hidden = mode !== "direct";
+  if (pa) pa.hidden = mode !== "allen";
 }
 
 function renderCircuitExtractionSummary() {
@@ -1039,6 +1059,7 @@ const METHOD_LABEL = {
   region_v2_deepseek: "V2+DS",
   direct_deepseek: "直接生成(DS)",
   direct_kimi:     "直接生成(Kimi)",
+  allen_api:       "Allen API",
 };
 
 function xbadgeHtml(status) {
@@ -1055,6 +1076,7 @@ function methodBadgeHtml(method) {
   else if (m === "multi") cls = "method-multi";
   else if (m === "local_rule") cls = "method-local_rule";
   else if (m.startsWith("region_v2")) cls = "method-region_v2";
+  else if (m === "allen_api") cls = "method-allen_api";
   const label = METHOD_LABEL[method] || method || "未知";
   return `<span class="method-badge ${cls}">${label}</span>`;
 }
@@ -2548,14 +2570,10 @@ async function runRegionExtractFile() {
   );
   state.selectedFileId = fileId;
   if (qs("extract-file-select")) qs("extract-file-select").value = fileId;
-  if (res.version_id) {
-    state.regionSelectedVersionId = res.version_id;
-    state.reviewSnapshotVersionId = res.version_id;
-  }
   notifyRegionDuplicateHint(res);
   appendClientLog(`[EXTRACT] file file_id=${fileId} mode=${mode} version=${res.version_id || "-"}`);
   await bootstrap();
-  await refreshRegionVersions();
+  await finalizeRegionExtractVersionUi(res);
 }
 
 async function runRegionExtractText() {
@@ -2590,14 +2608,10 @@ async function runRegionExtractText() {
   );
   state.selectedFileId = fileId;
   if (qs("extract-file-select")) qs("extract-file-select").value = fileId;
-  if (res.version_id) {
-    state.regionSelectedVersionId = res.version_id;
-    state.reviewSnapshotVersionId = res.version_id;
-  }
   notifyRegionDuplicateHint(res);
   appendClientLog(`[EXTRACT] text file_id=${fileId} mode=${mode}`);
   await bootstrap();
-  await refreshRegionVersions();
+  await finalizeRegionExtractVersionUi(res);
 }
 
 async function runRegionExtractDirect() {
@@ -2629,14 +2643,10 @@ async function runRegionExtractDirect() {
   );
   state.selectedFileId = fileId;
   if (qs("extract-file-select")) qs("extract-file-select").value = fileId;
-  if (res.version_id) {
-    state.regionSelectedVersionId = res.version_id;
-    state.reviewSnapshotVersionId = res.version_id;
-  }
   notifyRegionDuplicateHint(res);
   appendClientLog(`[EXTRACT] direct file_id=${fileId}`);
   await bootstrap();
-  await refreshRegionVersions();
+  await finalizeRegionExtractVersionUi(res);
 }
 
 async function runRegionExtractDirectKimi() {
@@ -2661,14 +2671,52 @@ async function runRegionExtractDirectKimi() {
   );
   state.selectedFileId = fileId;
   if (qs("extract-file-select")) qs("extract-file-select").value = fileId;
-  if (res.version_id) {
-    state.regionSelectedVersionId = res.version_id;
-    state.reviewSnapshotVersionId = res.version_id;
-  }
   notifyRegionDuplicateHint(res);
   appendClientLog(`[EXTRACT] direct_kimi file_id=${fileId}`);
   await bootstrap();
-  await refreshRegionVersions();
+  await finalizeRegionExtractVersionUi(res);
+}
+
+async function runRegionExtractAllen() {
+  const fileId = qs("extract-file-select").value || state.selectedFileId;
+  if (!fileId) {
+    alert("请先选择文件");
+    return;
+  }
+  const sidRaw = (qs("region-allen-structure-id").value || "").trim();
+  const ac = (qs("region-allen-acronym").value || "").trim();
+  const acpat = (qs("region-allen-acronym-pattern").value || "").trim();
+  if (!sidRaw && !ac && !acpat) {
+    alert("请填写结构 ID、缩写（精确）或缩写（模糊）至少一项");
+    return;
+  }
+  const body = {
+    graph_id: Number(qs("region-allen-graph-id").value || 1),
+    max_rows: Math.min(200, Math.max(1, Number(qs("region-allen-max-rows").value || 50))),
+  };
+  if (sidRaw) {
+    const n = parseInt(sidRaw, 10);
+    if (Number.isNaN(n) || n < 1) {
+      alert("结构 ID 须为正整数");
+      return;
+    }
+    body.structure_id = n;
+  }
+  if (ac) body.acronym = ac;
+  if (acpat) body.acronym_pattern = acpat;
+
+  const res = await withRegionProgress("Allen Brain Atlas API", () =>
+    api(`/api/files/${fileId}/extract-regions-allen`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+  state.selectedFileId = fileId;
+  if (qs("extract-file-select")) qs("extract-file-select").value = fileId;
+  notifyRegionDuplicateHint(res);
+  appendClientLog(`[EXTRACT] allen_api file_id=${fileId}`);
+  await bootstrap();
+  await finalizeRegionExtractVersionUi(res);
 }
 
 async function runCircuitExtraction() {
@@ -3362,6 +3410,18 @@ function bindEvents() {
       } catch (err) {
         appendClientLog(`[ERROR] kimi direct generate failed reason=${err.message}`, "error");
         alert(`Kimi 直接生成失败: ${err.message}`);
+      }
+    });
+  }
+
+  const bra = qs("btn-region-run-allen");
+  if (bra) {
+    bra.addEventListener("click", async () => {
+      try {
+        await runRegionExtractAllen();
+      } catch (err) {
+        appendClientLog(`[ERROR] allen api extract failed reason=${err.message}`, "error");
+        alert(`Allen API 拉取失败: ${err.message}`);
       }
     });
   }

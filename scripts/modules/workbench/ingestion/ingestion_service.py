@@ -10,6 +10,7 @@ import psycopg
 from psycopg.rows import dict_row
 from .circuit_identity import CircuitIdentityService
 from .region_identity import RegionIdentityService
+from ..extraction.brain_region_granularity import staging_gate_reason
 from ..validation.ontology_rules import merge_candidate_ontology_note
 
 LATERALITY_ALLOWED = {"left", "right", "midline", "bilateral"}
@@ -99,6 +100,18 @@ class IngestionService:
                                     "candidate_id": cid,
                                     "status": "failed",
                                     "reason": f"invalid_granularity:{granularity or 'empty'}",
+                                    "unverified_region_id": "",
+                                }
+                            )
+                            continue
+
+                        gate = staging_gate_reason(str(candidate.get("review_note") or ""))
+                        if gate:
+                            details.append(
+                                {
+                                    "candidate_id": cid,
+                                    "status": "failed",
+                                    "reason": f"granularity_policy:{gate}",
                                     "unverified_region_id": "",
                                 }
                             )

@@ -233,6 +233,25 @@ def create_app() -> Flask:
             return _bad("extract_region_failed", 500, detail=payload)
         return _ok(payload)
 
+    @app.post("/api/files/<file_id>/extract-regions-allen")
+    def api_file_extract_regions_allen(file_id: str) -> Any:
+        """直连 Allen Brain Atlas RMA（Structure）拉取脑区，写入当前文件的候选与快照。"""
+        body = request.get_json(silent=True) or {}
+        SERVICE.log_bus.emit(
+            "-",
+            "EXTRACT",
+            f"extract_region_allen_requested file_id={file_id}",
+            event_type="extract_region_allen_requested",
+        )
+        try:
+            result = SERVICE.extract_regions_allen_api(file_id, body)
+            if not result.get("success"):
+                return _bad(result.get("error", "extract_regions_allen_failed"), 400, detail=result)
+            return _ok(result)
+        except Exception as exc:
+            SERVICE.log_bus.emit("-", "EXTRACT", f"extract_regions_allen_failed reason={exc}", level="error")
+            return _bad("extract_regions_allen_failed", 500, detail=str(exc))
+
     # 作用：接收回路抽取请求，流程与脑区抽取相同。
     # 步骤：解析参数 -> 写日志 -> 调用 SERVICE.trigger_extract_circuits。
     # 注意：这个函数负责“接线”，不负责实际抽取算法。

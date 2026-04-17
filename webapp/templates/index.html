@@ -103,7 +103,7 @@
 
         <div class="tab-content" id="tab-extract-region">
           <div class="panel">
-            <p class="tab-hint">三种方式共用下方进度条与结果表。方式①基于已解析文件；方式②对粘贴文本抽取；方式③由 DeepSeek 按主题直接生成。结果写入当前文件的候选（local / deepseek 分轨），并保留可切换的历史版本。</p>
+            <p class="tab-hint">四种方式共用下方进度条与结果表。方式①基于已解析文件；方式②对粘贴文本抽取；方式③由 DeepSeek 按主题直接生成；方式④直连 Allen Institute RMA 拉取小鼠 Structure。结果写入当前文件的候选（local / deepseek 分轨），并保留可切换的历史版本。</p>
 
             <div id="region-progress-wrap" class="region-progress-wrap" hidden>
               <div class="region-progress-bar">
@@ -117,6 +117,7 @@
               <button type="button" class="btn region-mode-btn active" data-region-mode="file">① 文件抽取</button>
               <button type="button" class="btn region-mode-btn" data-region-mode="text">② 文本抽取</button>
               <button type="button" class="btn region-mode-btn" data-region-mode="direct">③ 直接生成</button>
+              <button type="button" class="btn region-mode-btn" data-region-mode="allen">④ Allen API</button>
             </div>
 
             <div id="region-panel-file" class="region-panel">
@@ -169,6 +170,19 @@
               </div>
               <label class="block-label">补充说明（可选）</label>
               <textarea id="region-direct-extra" class="region-textarea" rows="3" placeholder="额外指令…"></textarea>
+            </div>
+
+            <div id="region-panel-allen" class="region-panel" hidden>
+              <h4>方式④：Allen Brain Atlas（RMA · Structure）</h4>
+              <p class="field-hint">直连 <code>http://api.brain-map.org/api/v2/data</code> 查询。默认 <code>graph_id=1</code> 为成年小鼠参考图谱。请至少填写：<strong>结构 ID</strong>、<strong>缩写（精确）</strong>、<strong>缩写（模糊）</strong> 三者之一；模糊查询使用 <code>$li</code>，未写 <code>*</code> 时会自动加通配符。</p>
+              <div class="inline-fields region-allen-fields">
+                <label>graph_id <input type="number" id="region-allen-graph-id" value="1" min="1" step="1" /></label>
+                <label>结构 ID <input type="text" id="region-allen-structure-id" placeholder="如 382" /></label>
+                <label>缩写（精确） <input type="text" id="region-allen-acronym" placeholder="CA1" /></label>
+                <label>缩写（模糊） <input type="text" id="region-allen-acronym-pattern" placeholder="VIS" /></label>
+                <label>最多条数 <input type="number" id="region-allen-max-rows" value="50" min="1" max="200" /></label>
+                <button type="button" class="btn" id="btn-region-run-allen">从 Allen 拉取</button>
+              </div>
             </div>
 
             <p class="field-hint region-extract-result-hint">下方表格为所选<strong>历史快照</strong>内容；切换文件、重新抽取或在下拉框中换版本后更新。归档功能尚未接入，删除仅移除该条快照记录（不影响源文件）。</p>
