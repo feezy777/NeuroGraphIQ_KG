@@ -5,6 +5,20 @@ from typing import Any, Dict, Optional
 
 import yaml
 
+# DeepSeek /v1/chat/completions: max_tokens must be in [1, 8192] (API returns 400 otherwise).
+DEEPSEEK_CHAT_COMPLETION_MAX_TOKENS = 8192
+
+
+def clamp_deepseek_max_tokens(value: Any) -> int:
+    """Return 0 to omit max_tokens, or an int in [1, DEEPSEEK_CHAT_COMPLETION_MAX_TOKENS]."""
+    try:
+        mt = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    if mt <= 0:
+        return 0
+    return min(max(mt, 1), DEEPSEEK_CHAT_COMPLETION_MAX_TOKENS)
+
 
 DEFAULT_RUNTIME: Dict[str, Any] = {
     "database": {
@@ -52,8 +66,8 @@ DEFAULT_RUNTIME: Dict[str, Any] = {
         "request_retries": 2,
         "retry_backoff_sec": 1.2,
         "force_json_output": True,
-        # 单批模型输出上限（JSON 很长时须够大；若 API 报错可改为 8192/16384 等）
-        "max_tokens": 131072,
+        # 单批 completion 输出上限；DeepSeek Chat API 仅允许 [1, 8192]，超出会被拒绝
+        "max_tokens": 8192,
         "top_p": 1.0,
         "prompt_version": "region_extract_v2",
         # 表格：单批最大字符（整表可一次送入时尽量大；极长表仍再切）
@@ -78,6 +92,20 @@ DEFAULT_RUNTIME: Dict[str, Any] = {
     # Key is a profile name (e.g. "region_center", "circuit_center", "connection_center",
     # or any user-chosen name). Each value is a partial deepseek dict merged over global.
     "deepseek_profiles": {},
+    # Moonshot (Kimi) — OpenAI-compatible API; used by 脑区验证中心 multi-model path.
+    "moonshot": {
+        "enabled": False,
+        "api_key": "",
+        "base_url": "https://api.moonshot.cn",
+        "model": "moonshot-v1-8k",
+        "temperature": 0.2,
+        "request_timeout_sec": 120,
+        "request_retries": 2,
+        "retry_backoff_sec": 1.2,
+        # Kimi 兼容接口不支持 response_format=json_object；代码侧对 label=kimi 也会强制关闭
+        "force_json_output": False,
+        "max_tokens": 2048,
+    },
     "pipeline": {
         "auto_parse_on_upload": True,
         "auto_extract_on_parse": False,
@@ -96,6 +124,8 @@ DEFAULT_RUNTIME: Dict[str, Any] = {
         "ontology_rules": {
             "enabled": False,
             "path": "artifacts/ontology/ruleset.json",
+            "bind_on_extract": True,
+            "require_binding_for_confirmed": True,
             "require_known_terms": False,
             # hard: block stage_to_unverified when a rule issue is severity hard; warn: never block (still records ontology_check).
             "stage_policy": "warn",
@@ -196,8 +226,8 @@ def resolve_deepseek_config(
         "request_retries": int(merged.get("request_retries", 2)),
         "retry_backoff_sec": float(merged.get("retry_backoff_sec", 1.2)),
         "force_json_output": bool(merged.get("force_json_output", True)),
-        # 0 = 不传 max_tokens（由服务端默认，通常偏小，不推荐）
-        "max_tokens": int(merged.get("max_tokens", 131072) or 0),
+        # 0 = 不传 max_tokens；否则钳制到 DeepSeek API 允许范围
+        "max_tokens": clamp_deepseek_max_tokens(merged.get("max_tokens", DEEPSEEK_CHAT_COMPLETION_MAX_TOKENS)),
         "top_p": float(merged.get("top_p", 1.0)),
         "prompt_version": str(merged.get("prompt_version", "region_extract_v2")),
         "deepseek_batch_max_chars": int(merged.get("deepseek_batch_max_chars", 500000)),
@@ -205,6 +235,23 @@ def resolve_deepseek_config(
         "batch_delay_sec": float(merged.get("batch_delay_sec", 0)),
         "enrich_from_kb": bool(merged.get("enrich_from_kb", False)),
         "_config_source": config_source,
+    }
+
+
+def resolve_moonshot_config(global_runtime: Dict[str, Any]) -> Dict[str, Any]:
+    """Flat Moonshot/Kimi config for chat completions (validation center)."""
+    m = dict(global_runtime.get("moonshot") or {})
+    return {
+        "enabled": bool(m.get("enabled")),
+        "api_key": str(m.get("api_key", "") or ""),
+        "base_url": str(m.get("base_url", "https://api.moonshot.cn")),
+        "model": str(m.get("model", "moonshot-v1-8k")),
+        "temperature": float(m.get("temperature", 0.2)),
+        "request_timeout_sec": int(m.get("request_timeout_sec", 120)),
+        "request_retries": int(m.get("request_retries", 2)),
+        "retry_backoff_sec": float(m.get("retry_backoff_sec", 1.2)),
+        "force_json_output": bool(m.get("force_json_output", True)),
+        "max_tokens": clamp_deepseek_max_tokens(m.get("max_tokens", 2048)),
     }
 
 

@@ -6,8 +6,15 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib import error, request
 
-from ..common.id_utils import make_id
+from ..common.id_utils import make_id, make_region_candidate_id
 from ..common.models import CandidateCircuit, CandidateConnection, CandidateRegion, utc_now_iso
+from ..config.runtime_config import clamp_deepseek_max_tokens
+from ..validation.ontology_rules import (
+    apply_ontology_binding_gate_to_review_note,
+    load_ruleset_dict,
+    merge_ontology_binding_into_review_note,
+    resolve_term_binding,
+)
 from .region_postprocess_v2 import derive_region_extract_status
 
 
@@ -348,6 +355,11 @@ def _make_candidate(
     category: str,
     laterality: str,
     confidence: float,
+    *,
+    ontology_ruleset: Optional[Dict[str, Any]] = None,
+    ontology_bind_on: bool = False,
+    ontology_require_binding: bool = False,
+    batch_index: int = 0,
 ) -> CandidateRegion:
     lat = (laterality or "").strip() or "unknown"
     gran = (granularity or "").strip().lower() or "unknown"
@@ -357,6 +369,11 @@ def _make_candidate(
     _en = (en or "").strip()
     _cn = (cn or "").strip()
     _conf = float(confidence)
+    binding: Dict[str, Any] = {}
+    if ontology_bind_on and ontology_ruleset is not None:
+        binding = resolve_term_binding(ontology_ruleset, _en, _cn)
+    term_key = str(binding.get("term_key") or "") if binding else ""
+    canonical = str(binding.get("canonical") or "") if binding else ""
     _estatus = derive_region_extract_status(
         extraction_method="local_rule",
         match_type="exact" if _conf >= 0.75 else "fuzzy",
@@ -368,12 +385,29 @@ def _make_candidate(
         {"local_rule": {"extract_status": _estatus, "confidence": _conf}},
         ensure_ascii=False,
     )
+    if ontology_bind_on and ontology_ruleset is not None:
+        _note = merge_ontology_binding_into_review_note(_note, binding)
+    _note = apply_ontology_binding_gate_to_review_note(
+        _note,
+        bind_on_extract=ontology_bind_on,
+        require_binding_for_confirmed=ontology_require_binding,
+    )
+    _src = (source_text or "")[:400]
+    cid = make_region_candidate_id(
+        file_id=file_id,
+        en_name=_en,
+        cn_name=_cn,
+        source_text=_src,
+        batch_index=batch_index,
+        term_key=term_key,
+        canonical=canonical,
+    )
     return CandidateRegion(
-        id=make_id("cr"),
+        id=cid,
         file_id=file_id,
         parsed_document_id=parsed_document_id,
         chunk_id=chunk_id,
-        source_text=(source_text or "")[:400],
+        source_text=_src,
         en_name_candidate=_en,
         cn_name_candidate=_cn,
         alias_candidates=[a for a in abbrevs if a],
@@ -687,7 +721,13 @@ def _batch_table_lines(lines: List[str], max_chars: int, rows_per_batch: int) ->
     return batches
 
 
-def _merge_deepseek_region_candidates(dst: CandidateRegion, src: CandidateRegion) -> None:
+def _merge_deepseek_region_candidates(
+    dst: CandidateRegion,
+    src: CandidateRegion,
+    *,
+    bind_on_extract: bool = True,
+    require_binding_for_confirmed: bool = True,
+) -> None:
     """多批次合并去重时保留各批次的溯源与证据，不修改模型给出的中英文名。"""
     def _loads(rn: str) -> Dict[str, Any]:
         if not rn:
@@ -712,7 +752,22 @@ def _merge_deepseek_region_candidates(dst: CandidateRegion, src: CandidateRegion
         bb = []
     da["batches"] = ba + bb
     a["deepseek"] = da
+    ob_a = a.get("ontology_binding") if isinstance(a.get("ontology_binding"), dict) else {}
+    ob_b = b.get("ontology_binding") if isinstance(b.get("ontology_binding"), dict) else {}
+    if (ob_b.get("term_key") or "").strip():
+        a["ontology_binding"] = ob_b
+    elif (ob_a.get("term_key") or "").strip():
+        a["ontology_binding"] = ob_a
+    elif ob_b:
+        a["ontology_binding"] = ob_b
+    elif ob_a:
+        a["ontology_binding"] = ob_a
     dst.review_note = _dumps(a)
+    dst.review_note = apply_ontology_binding_gate_to_review_note(
+        dst.review_note,
+        bind_on_extract=bind_on_extract,
+        require_binding_for_confirmed=require_binding_for_confirmed,
+    )
     s1 = (dst.source_text or "").strip()
     s2 = (src.source_text or "").strip()
     if s2 and s2 not in s1:
@@ -847,6 +902,7 @@ class ExtractionService:
         mode: str,
         deepseek_cfg: Dict[str, Any],
         *,
+        moonshot_cfg: Optional[Dict[str, Any]] = None,
         pipeline_config: Optional[Dict[str, Any]] = None,
         root_dir: Optional[str] = None,
         log_emit: Optional[Any] = None,
@@ -864,10 +920,11 @@ class ExtractionService:
         fp_with_raw.setdefault("raw_text", parsed_doc.get("raw_text", "") if isinstance(parsed_doc, dict) else "")
 
         pc = pipeline_config or {}
-        # v2 仅用于「本地高召回 + 规则/后处理」；若用户选择 DeepSeek，必须走下方 API 分批抽取，
+        moonshot_cfg = moonshot_cfg or {}
+        # v2 仅用于「本地高召回 + 规则/后处理」；若用户选择大模型分批抽取，必须走下方 API，
         # 否则会出现 extraction_method=region_v2_deepseek 但实际未调用 API、仅靠 KB 模糊匹配的假结果。
         v2_on = bool(pc.get("region_extraction_v2", {}).get("enabled")) and bool(root_dir)
-        if v2_on and mode != "deepseek":
+        if v2_on and mode not in ("deepseek", "kimi", "multi"):
             from .region_pipeline_v2 import run_region_extraction_v2
 
             return run_region_extraction_v2(
@@ -897,6 +954,8 @@ class ExtractionService:
                 deepseek_cfg,
                 table_rows=table_rows,
                 log_emit=log_emit,
+                pipeline_config=pc,
+                root_dir=root_dir,
             )
             return {
                 "method": "deepseek",
@@ -905,7 +964,90 @@ class ExtractionService:
                 "deepseek_batch_summary": batch_summary,
             }
 
-        candidates = self._extract_by_local_rules(fp_with_raw, chunks, parsed_document_id, table_rows=table_rows)
+        if mode == "kimi":
+            ms = dict(moonshot_cfg)
+            if not ms.get("api_key"):
+                raise RuntimeError("moonshot_api_key_missing")
+            ms.setdefault("enabled", True)
+            ms.setdefault("base_url", "https://api.moonshot.cn")
+            ms.setdefault("model", "moonshot-v1-8k")
+            ms["force_json_output"] = False
+            candidates, batch_summary = self._extract_by_deepseek(
+                fp_with_raw,
+                chunks,
+                parsed_document_id,
+                ms,
+                table_rows=table_rows,
+                log_emit=log_emit,
+                pipeline_config=pc,
+                root_dir=root_dir,
+                error_prefix="kimi",
+                extraction_method="kimi",
+                ontology_source="kimi_extract",
+                log_emit_prefix="[KIMI]",
+            )
+            return {
+                "method": "kimi",
+                "llm_model": ms.get("model", ""),
+                "candidates": candidates,
+                "moonshot_batch_summary": batch_summary,
+            }
+
+        if mode == "multi":
+            if not deepseek_cfg.get("api_key"):
+                raise RuntimeError("deepseek_api_key_missing")
+            if not moonshot_cfg.get("api_key"):
+                raise RuntimeError("moonshot_api_key_missing")
+            ms = dict(moonshot_cfg)
+            ms.setdefault("enabled", True)
+            ms.setdefault("base_url", "https://api.moonshot.cn")
+            ms.setdefault("model", "moonshot-v1-8k")
+            ms["force_json_output"] = False
+            km, km_sum = self._extract_by_deepseek(
+                fp_with_raw,
+                chunks,
+                parsed_document_id,
+                ms,
+                table_rows=table_rows,
+                log_emit=log_emit,
+                pipeline_config=pc,
+                root_dir=root_dir,
+                error_prefix="kimi",
+                extraction_method="kimi",
+                ontology_source="kimi_extract",
+                log_emit_prefix="[KIMI]",
+            )
+            ds, ds_sum = self._extract_by_deepseek(
+                fp_with_raw,
+                chunks,
+                parsed_document_id,
+                deepseek_cfg,
+                table_rows=table_rows,
+                log_emit=log_emit,
+                pipeline_config=pc,
+                root_dir=root_dir,
+                error_prefix="deepseek",
+                extraction_method="deepseek",
+                ontology_source="deepseek_extract",
+                log_emit_prefix="[DEEPSEEK]",
+            )
+            candidates = self._merge_region_candidate_lists(km, ds)
+            return {
+                "method": "multi",
+                "llm_model": f"{ms.get('model', '')}+{deepseek_cfg.get('model', '')}",
+                "candidates": candidates,
+                "deepseek_batch_summary": ds_sum,
+                "moonshot_batch_summary": km_sum,
+            }
+
+        candidates = self._extract_by_local_rules(
+            fp_with_raw,
+            chunks,
+            parsed_document_id,
+            table_rows=table_rows,
+            pipeline_config=pc,
+            root_dir=root_dir,
+        )
         return {"method": "local_rule", "llm_model": "", "candidates": candidates}
 
     def _extract_by_local_rules(
@@ -914,10 +1056,19 @@ class ExtractionService:
         chunks: List[Dict[str, Any]],
         parsed_document_id: str,
         table_rows: Optional[List[Dict[str, Any]]] = None,
+        pipeline_config: Optional[Dict[str, Any]] = None,
+        root_dir: Optional[str] = None,
     ) -> List[CandidateRegion]:
         file_id = file_payload.get("file_id", "")
         rows: List[CandidateRegion] = []
         seen: set = set()
+        orc = (pipeline_config or {}).get("ontology_rules") or {}
+        ontology_bind_on = bool(orc.get("bind_on_extract", True))
+        ontology_require_binding = bool(orc.get("require_binding_for_confirmed", True))
+        ontology_ruleset: Optional[Dict[str, Any]] = None
+        if ontology_bind_on and root_dir:
+            rules_path = str(orc.get("path") or "artifacts/ontology/ruleset.json").replace("\\", "/")
+            ontology_ruleset, _ = load_ruleset_dict(root_dir, rules_path)
 
         def _add(en: str, cn: str, abbrevs: list, gran: str, parent: str, cat: str,
                  lat: str, conf: float, src: str, cid: str) -> None:
@@ -928,6 +1079,10 @@ class ExtractionService:
             rows.append(_make_candidate(
                 file_id, parsed_document_id, cid, src,
                 en, cn, abbrevs, gran, parent, cat, lat, conf,
+                ontology_ruleset=ontology_ruleset,
+                ontology_bind_on=ontology_bind_on,
+                ontology_require_binding=ontology_require_binding,
+                batch_index=len(rows),
             ))
 
         # ── 路径0：结构化 table_rows（带表头语义映射，最精准）───────────────────
@@ -1055,6 +1210,10 @@ class ExtractionService:
             rows.append(_make_candidate(
                 file_id, parsed_document_id, "", file_payload.get("filename", ""),
                 "", "", [], "unknown", "", "brain_region", "unknown", 0.3,
+                ontology_ruleset=ontology_ruleset,
+                ontology_bind_on=ontology_bind_on,
+                ontology_require_binding=ontology_require_binding,
+                batch_index=0,
             ))
         return rows
 
@@ -1066,6 +1225,13 @@ class ExtractionService:
         deepseek_cfg: Dict[str, Any],
         table_rows: Optional[List[Dict[str, Any]]] = None,
         log_emit: Optional[Any] = None,
+        pipeline_config: Optional[Dict[str, Any]] = None,
+        root_dir: Optional[str] = None,
+        *,
+        error_prefix: str = "deepseek",
+        extraction_method: str = "deepseek",
+        ontology_source: str = "deepseek_extract",
+        log_emit_prefix: str = "[DEEPSEEK]",
     ) -> Tuple[List[CandidateRegion], Dict[str, Any]]:
         """整表遍历：按行顺序分批调用模型，合并去重，避免单次截断导致失败或漏抽。"""
         max_chars = int(deepseek_cfg.get("deepseek_batch_max_chars", DEEPSEEK_TABLE_BATCH_MAX_CHARS) or DEEPSEEK_TABLE_BATCH_MAX_CHARS)
@@ -1096,8 +1262,12 @@ class ExtractionService:
                 batches_text = _batch_joined_lines(raw_lines, max_chars)
         if not batches_text:
             raise RuntimeError(
-                "deepseek_no_input_content: 无 table_rows、无 chunk 正文、无 raw_text，无法调用 DeepSeek 做真实抽取。"
+                f"{error_prefix}_no_input_content: 无 table_rows、无 chunk 正文、无 raw_text，无法调用模型做真实抽取。"
             )
+
+        orc_merge = (pipeline_config or {}).get("ontology_rules") or {}
+        merge_bind_on = bool(orc_merge.get("bind_on_extract", True))
+        merge_require_binding = bool(orc_merge.get("require_binding_for_confirmed", True))
 
         merged: List[CandidateRegion] = []
         merged_by_key: Dict[str, CandidateRegion] = {}
@@ -1109,7 +1279,7 @@ class ExtractionService:
         if log_emit:
             try:
                 log_emit(
-                    "[DEEPSEEK] batched_extract_start",
+                    f"{log_emit_prefix} batched_extract_start",
                     {
                         "total_batches": total,
                         "source": "table_rows" if table_rows else "chunks_or_raw",
@@ -1149,23 +1319,26 @@ class ExtractionService:
                     file_payload,
                     parsed_document_id,
                     deepseek_cfg,
-                    extraction_method="deepseek",
-                    ontology_source="deepseek_extract",
+                    error_prefix=error_prefix,
+                    extraction_method=extraction_method,
+                    ontology_source=ontology_source,
                     allow_empty=True,
                     batch_meta={"index": bi + 1, "total": total, "max_chars": max_chars},
+                    pipeline_config=pipeline_config,
+                    root_dir=root_dir,
                 )
             except Exception as exc:
                 emsg = str(exc)
                 # 配置类/鉴权类错误直接失败，不进入“空结果”汇总，避免掩盖根因。
-                if emsg.startswith("deepseek_disabled") or emsg.startswith("deepseek_api_key_missing"):
+                if emsg.startswith(f"{error_prefix}_disabled") or emsg.startswith(f"{error_prefix}_api_key_missing"):
                     raise
-                if emsg.startswith("deepseek_http_401") or emsg.startswith("deepseek_http_403"):
+                if emsg.startswith(f"{error_prefix}_http_401") or emsg.startswith(f"{error_prefix}_http_403"):
                     raise
                 batch_errors.append(f"batch_{bi + 1}:{emsg}")
                 if log_emit:
                     try:
                         log_emit(
-                            "[DEEPSEEK] batch_failed",
+                            f"{log_emit_prefix} batch_failed",
                             {"batch_idx": bi + 1, "total_batches": total, "reason": str(exc)[:500]},
                         )
                     except Exception:
@@ -1176,7 +1349,7 @@ class ExtractionService:
                 if log_emit:
                     try:
                         log_emit(
-                            "[DEEPSEEK] batch_empty",
+                            f"{log_emit_prefix} batch_empty",
                             {"batch_idx": bi + 1, "total_batches": total},
                         )
                     except Exception:
@@ -1186,7 +1359,7 @@ class ExtractionService:
             if log_emit:
                 try:
                     log_emit(
-                        "[DEEPSEEK] batch_succeeded",
+                        f"{log_emit_prefix} batch_succeeded",
                         {"batch_idx": bi + 1, "total_batches": total, "candidates": len(part)},
                     )
                 except Exception:
@@ -1201,7 +1374,12 @@ class ExtractionService:
                     merged_by_key[key] = c
                     merge_order.append(key)
                 else:
-                    _merge_deepseek_region_candidates(merged_by_key[key], c)
+                    _merge_deepseek_region_candidates(
+                        merged_by_key[key],
+                        c,
+                        bind_on_extract=merge_bind_on,
+                        require_binding_for_confirmed=merge_require_binding,
+                    )
 
         merged = [merged_by_key[k] for k in merge_order]
 
@@ -1209,17 +1387,17 @@ class ExtractionService:
             err_tail = ("; ".join(batch_errors[:5])) if batch_errors else ""
             if batch_errors and empty_batches == 0:
                 raise RuntimeError(
-                    "deepseek_all_batches_failed:"
+                    f"{error_prefix}_all_batches_failed:"
                     f" batch_total={total}, batch_failed={len(batch_errors)}, batch_empty={empty_batches}"
                     + (f" details={err_tail}" if err_tail else "")
                 )
             if empty_batches == total and not batch_errors:
                 raise RuntimeError(
-                    "deepseek_empty_result:"
+                    f"{error_prefix}_empty_result:"
                     f" batch_total={total}, batch_empty={empty_batches}, batch_failed={len(batch_errors)}"
                 )
             raise RuntimeError(
-                "deepseek_no_valid_candidates:"
+                f"{error_prefix}_no_valid_candidates:"
                 f" batch_total={total}, batch_empty={empty_batches}, batch_failed={len(batch_errors)}"
                 + (f" details={err_tail}" if err_tail else "")
             )
@@ -1234,12 +1412,42 @@ class ExtractionService:
         if log_emit:
             try:
                 log_emit(
-                    "[DEEPSEEK] batched_extract_done",
+                    f"{log_emit_prefix} batched_extract_done",
                     {"merged_candidates": len(merged), "failed_batches": len(batch_errors), "empty_batches": empty_batches},
                 )
             except Exception:
                 pass
         return merged, summary
+
+    def _merge_region_candidate_lists(
+        self,
+        kimi_rows: List[CandidateRegion],
+        ds_rows: List[CandidateRegion],
+    ) -> List[CandidateRegion]:
+        """双模型：先 Kimi 再 DeepSeek；同名（英|中）以 DeepSeek 条为准覆盖。"""
+        merged_by_key: Dict[str, CandidateRegion] = {}
+        merge_order: List[str] = []
+
+        def _key(c: CandidateRegion) -> str:
+            en = (c.en_name_candidate or "").strip()
+            cn = (c.cn_name_candidate or "").strip()
+            return f"{en.lower()}|{cn}"
+
+        for c in kimi_rows:
+            k = _key(c)
+            if k and k != "|" and k not in merged_by_key:
+                merged_by_key[k] = c
+                merge_order.append(k)
+        for c in ds_rows:
+            k = _key(c)
+            if not k or k == "|":
+                continue
+            if k in merged_by_key:
+                merged_by_key[k] = c
+            else:
+                merged_by_key[k] = c
+                merge_order.append(k)
+        return [merged_by_key[k] for k in merge_order]
 
     def _deepseek_prompt_to_regions(
         self,
@@ -1248,46 +1456,56 @@ class ExtractionService:
         parsed_document_id: str,
         deepseek_cfg: Dict[str, Any],
         *,
+        error_prefix: str = "deepseek",
+        force_json: Optional[bool] = None,
         extraction_method: str = "deepseek",
         ontology_source: str = "deepseek_extract",
         allow_empty: bool = False,
         batch_meta: Optional[Dict[str, Any]] = None,
+        pipeline_config: Optional[Dict[str, Any]] = None,
+        root_dir: Optional[str] = None,
     ) -> List[CandidateRegion]:
-        if not deepseek_cfg.get("enabled"):
+        llm_cfg = deepseek_cfg
+        if error_prefix == "deepseek" and not llm_cfg.get("enabled"):
             raise RuntimeError("deepseek_disabled")
-        if not deepseek_cfg.get("api_key"):
-            raise RuntimeError("deepseek_api_key_missing")
-        prompt_version = str(deepseek_cfg.get("prompt_version") or "region_extract_v1")
-        enrich_from_kb = bool(deepseek_cfg.get("enrich_from_kb", False))
+        if not llm_cfg.get("api_key"):
+            raise RuntimeError(f"{error_prefix}_api_key_missing")
+        prompt_version = str(llm_cfg.get("prompt_version") or "region_extract_v1")
+        enrich_from_kb = bool(llm_cfg.get("enrich_from_kb", False))
 
-        url = deepseek_cfg.get("base_url", "https://api.deepseek.com").rstrip("/") + "/v1/chat/completions"
+        default_base = "https://api.deepseek.com" if error_prefix == "deepseek" else "https://api.moonshot.cn"
+        bu = (llm_cfg.get("base_url") or "").strip().rstrip("/") or default_base
+        if bu.endswith("/v1"):
+            bu = bu[:-3].rstrip("/")
+        url = bu + "/v1/chat/completions"
         payload = {
-            "model": deepseek_cfg.get("model", "deepseek-chat"),
-            "temperature": deepseek_cfg.get("temperature", 0.2),
+            "model": llm_cfg.get("model", "deepseek-chat" if error_prefix == "deepseek" else "moonshot-v1-8k"),
+            "temperature": llm_cfg.get("temperature", 0.2),
             "messages": [
-                {"role": "system", "content": deepseek_system_content(deepseek_cfg)},
+                {"role": "system", "content": deepseek_system_content(llm_cfg)},
                 {"role": "user", "content": prompt},
             ],
         }
-        mt = int(deepseek_cfg.get("max_tokens") or 0)
+        mt = clamp_deepseek_max_tokens(llm_cfg.get("max_tokens"))
         if mt > 0:
             payload["max_tokens"] = mt
-        if deepseek_cfg.get("top_p") is not None:
-            payload["top_p"] = float(deepseek_cfg.get("top_p"))
-        if deepseek_cfg.get("force_json_output", True):
+        if llm_cfg.get("top_p") is not None:
+            payload["top_p"] = float(llm_cfg.get("top_p"))
+        fj = force_json if force_json is not None else (False if error_prefix == "kimi" else bool(llm_cfg.get("force_json_output", True)))
+        if fj:
             payload["response_format"] = {"type": "json_object"}
         req = request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {deepseek_cfg.get('api_key', '')}",
+                "Authorization": f"Bearer {llm_cfg.get('api_key', '')}",
             },
             method="POST",
         )
-        retries = max(0, int(deepseek_cfg.get("request_retries", 2)))
-        timeout_sec = max(10, int(deepseek_cfg.get("request_timeout_sec", 120)))
-        backoff_sec = max(0.2, float(deepseek_cfg.get("retry_backoff_sec", 1.2)))
+        retries = max(0, int(llm_cfg.get("request_retries", 2)))
+        timeout_sec = max(10, int(llm_cfg.get("request_timeout_sec", 120)))
+        backoff_sec = max(0.2, float(llm_cfg.get("retry_backoff_sec", 1.2)))
         body = ""
         last_exc: Optional[Exception] = None
         for attempt in range(retries + 1):
@@ -1298,11 +1516,11 @@ class ExtractionService:
                 break
             except error.HTTPError as exc:  # pragma: no cover
                 detail = exc.read().decode("utf-8", errors="ignore")
-                last_exc = RuntimeError(f"deepseek_http_{exc.code}:{detail[:300]}")
+                last_exc = RuntimeError(f"{error_prefix}_http_{exc.code}:{detail[:300]}")
                 if exc.code in (400, 401, 403, 404):
                     break
             except Exception as exc:  # pragma: no cover
-                last_exc = RuntimeError(f"deepseek_request_failed:{exc}; {_network_error_hint(exc)}")
+                last_exc = RuntimeError(f"{error_prefix}_request_failed:{exc}; {_network_error_hint(exc)}")
             if attempt < retries:
                 time.sleep(backoff_sec * (attempt + 1))
         if last_exc is not None:
@@ -1320,7 +1538,7 @@ class ExtractionService:
             if not raw_msg:
                 if allow_empty:
                     return []
-                raise RuntimeError("deepseek_empty_result")
+                raise RuntimeError(f"{error_prefix}_empty_result")
             probe: Any = None
             try:
                 probe = json.loads(raw_msg)
@@ -1330,7 +1548,7 @@ class ExtractionService:
                     parsed_rows = _extract_regions_array_objects(raw_msg)
                     if not parsed_rows:
                         raise RuntimeError(
-                            f"deepseek_json_parse_failed: prompt_version={prompt_version}; "
+                            f"{error_prefix}_json_parse_failed: prompt_version={prompt_version}; "
                             f"hint=truncated_or_malformed_json_try_raise_max_tokens; raw_preview={raw_msg[:240]}"
                         ) from None
                 else:
@@ -1340,29 +1558,36 @@ class ExtractionService:
                         parsed_rows = _extract_regions_array_objects(raw_msg)
                         if not parsed_rows:
                             raise RuntimeError(
-                                f"deepseek_json_parse_failed: prompt_version={prompt_version}; "
+                                f"{error_prefix}_json_parse_failed: prompt_version={prompt_version}; "
                                 f"hint=truncated_or_malformed_json_try_raise_max_tokens; raw_preview={raw_msg[:240]}"
                             ) from exc
             if not parsed_rows and probe is not None:
                 if isinstance(probe, dict) and isinstance(probe.get("regions"), list) and len(probe["regions"]) == 0:
                     if allow_empty:
                         return []
-                    raise RuntimeError("deepseek_empty_result")
+                    raise RuntimeError(f"{error_prefix}_empty_result")
                 if isinstance(probe, list) and len(probe) == 0:
                     if allow_empty:
                         return []
-                    raise RuntimeError("deepseek_empty_result")
+                    raise RuntimeError(f"{error_prefix}_empty_result")
                 if isinstance(probe, dict) and isinstance(probe.get("regions"), list):
                     parsed_rows = probe["regions"]
                 elif isinstance(probe, list):
                     parsed_rows = probe
             if not parsed_rows:
                 raise RuntimeError(
-                    f"deepseek_json_unexpected_shape: prompt_version={prompt_version}; raw_preview={raw_msg[:240]}"
+                    f"{error_prefix}_json_unexpected_shape: prompt_version={prompt_version}; raw_preview={raw_msg[:240]}"
                 )
         out: List[CandidateRegion] = []
         seen_keys: set[str] = set()
-        for row in parsed_rows:
+        orc_ds = (pipeline_config or {}).get("ontology_rules") or {}
+        bind_on_ds = bool(orc_ds.get("bind_on_extract", True))
+        require_binding_ds = bool(orc_ds.get("require_binding_for_confirmed", True))
+        ruleset_ds: Dict[str, Any] = {}
+        if bind_on_ds and root_dir:
+            _rp = str(orc_ds.get("path") or "artifacts/ontology/ruleset.json").replace("\\", "/")
+            ruleset_ds, _ = load_ruleset_dict(root_dir, _rp)
+        for batch_index, row in enumerate(parsed_rows):
             if not isinstance(row, dict):
                 continue
             norm = normalize_region_llm_row(
@@ -1381,7 +1606,7 @@ class ExtractionService:
             seen_keys.add(dedupe)
             _conf = float(norm["confidence"])
             _estatus = derive_region_extract_status(
-                extraction_method="deepseek",
+                extraction_method=extraction_method,
                 match_type="",
                 confidence=_conf,
                 en_name=en,
@@ -1389,14 +1614,36 @@ class ExtractionService:
             )
             note_obj: Dict[str, Any] = {
                 "extract_status": _estatus,
-                "deepseek": {
+                error_prefix: {
                     "prompt_version": prompt_version,
                     "batches": [batch_meta] if batch_meta else [],
                 },
             }
+            note_str = json.dumps(note_obj, ensure_ascii=False)
+            bind_row: Dict[str, Any] = {}
+            if bind_on_ds:
+                bind_row = resolve_term_binding(ruleset_ds, en, cn)
+            term_key_ds = str(bind_row.get("term_key") or "")
+            canonical_ds = str(bind_row.get("canonical") or "")
+            if bind_on_ds:
+                note_str = merge_ontology_binding_into_review_note(note_str, bind_row)
+            note_str = apply_ontology_binding_gate_to_review_note(
+                note_str,
+                bind_on_extract=bind_on_ds,
+                require_binding_for_confirmed=require_binding_ds,
+            )
+            rid = make_region_candidate_id(
+                file_id=file_payload.get("file_id", ""),
+                en_name=en,
+                cn_name=cn,
+                source_text=norm["source_text"],
+                batch_index=batch_index,
+                term_key=term_key_ds,
+                canonical=canonical_ds,
+            )
             out.append(
                 CandidateRegion(
-                    id=make_id("cr"),
+                    id=rid,
                     file_id=file_payload.get("file_id", ""),
                     parsed_document_id=parsed_document_id,
                     chunk_id="",
@@ -1411,9 +1658,9 @@ class ExtractionService:
                     ontology_source_candidate=norm["ontology_source_candidate"],
                     confidence=_conf,
                     extraction_method=extraction_method,
-                    llm_model=deepseek_cfg.get("model", ""),
+                    llm_model=llm_cfg.get("model", ""),
                     status="pending_review",
-                    review_note=json.dumps(note_obj, ensure_ascii=False),
+                    review_note=note_str,
                     created_at=utc_now_iso(),
                     updated_at=utc_now_iso(),
                 )
@@ -1421,7 +1668,7 @@ class ExtractionService:
         if not out:
             if allow_empty:
                 return []
-            raise RuntimeError("deepseek_empty_result")
+            raise RuntimeError(f"{error_prefix}_empty_result")
         return out
 
     @staticmethod
@@ -1461,14 +1708,38 @@ class ExtractionService:
         }
         return {"document": doc, "chunks": chunks}
 
-    def run_direct_deepseek_regions(
+    def run_direct_llm_regions(
         self,
         file_payload: Dict[str, Any],
         parsed_document_id: str,
         params: Dict[str, Any],
         deepseek_cfg: Dict[str, Any],
+        *,
+        provider: str = "deepseek",
+        moonshot_cfg: Optional[Dict[str, Any]] = None,
+        pipeline_config: Optional[Dict[str, Any]] = None,
+        root_dir: Optional[str] = None,
     ) -> List[CandidateRegion]:
         prompt = compose_direct_region_user_prompt(params, deepseek_cfg)
+        if (provider or "").lower() == "kimi":
+            ms = dict(moonshot_cfg or {})
+            if not ms.get("api_key"):
+                raise RuntimeError("moonshot_api_key_missing")
+            ms.setdefault("enabled", True)
+            ms.setdefault("base_url", "https://api.moonshot.cn")
+            ms.setdefault("model", "moonshot-v1-8k")
+            ms["force_json_output"] = False
+            return self._deepseek_prompt_to_regions(
+                prompt,
+                file_payload,
+                parsed_document_id,
+                ms,
+                error_prefix="kimi",
+                extraction_method="direct_kimi",
+                ontology_source="direct_kimi",
+                pipeline_config=pipeline_config,
+                root_dir=root_dir,
+            )
         return self._deepseek_prompt_to_regions(
             prompt,
             file_payload,
@@ -1476,6 +1747,29 @@ class ExtractionService:
             deepseek_cfg,
             extraction_method="direct_deepseek",
             ontology_source="direct_deepseek",
+            pipeline_config=pipeline_config,
+            root_dir=root_dir,
+        )
+
+    def run_direct_deepseek_regions(
+        self,
+        file_payload: Dict[str, Any],
+        parsed_document_id: str,
+        params: Dict[str, Any],
+        deepseek_cfg: Dict[str, Any],
+        *,
+        pipeline_config: Optional[Dict[str, Any]] = None,
+        root_dir: Optional[str] = None,
+    ) -> List[CandidateRegion]:
+        return self.run_direct_llm_regions(
+            file_payload,
+            parsed_document_id,
+            params,
+            deepseek_cfg,
+            provider="deepseek",
+            moonshot_cfg=None,
+            pipeline_config=pipeline_config,
+            root_dir=root_dir,
         )
 
     @staticmethod

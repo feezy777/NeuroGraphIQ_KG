@@ -35,6 +35,14 @@ deepseek:
   model: "deepseek-chat"
   temperature: 0.2
 
+# Moonshot (Kimi) — 脑区验证中心「Kimi+DeepSeek」双模型路径
+moonshot:
+  enabled: false
+  api_key: ""
+  base_url: "https://api.moonshot.cn"
+  model: "moonshot-v1-8k"
+  temperature: 0.2
+
 pipeline:
   auto_parse_on_upload: true
   auto_extract_on_parse: false
@@ -45,6 +53,9 @@ pipeline:
   ontology_rules:
     enabled: false
     path: "artifacts/ontology/ruleset.json"
+    # 抽取阶段写入 review_note.ontology_binding；严格模式下无 term_key 时不允许 confirmed
+    bind_on_extract: true
+    require_binding_for_confirmed: true
     require_known_terms: false
     stage_policy: "warn" # warn | hard — hard blocks stage_to_unverified on hard-severity issues
     issue_severity:

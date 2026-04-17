@@ -10,14 +10,80 @@ from .common.log_bus import LogBus
 from .common.models import FileStatus, ReviewRecord, TaskType, utc_now_iso
 from .common.state_store import StateStore
 from .config.config_service import ConfigService
+from .config.runtime_config import resolve_deepseek_config, resolve_moonshot_config
 from .extraction.extraction_service import ExtractionService
 from .files.file_service import FileService
 from .ingestion.ingestion_service import IngestionService
 from .normalization.normalization_service import NormalizationService
 from .parsing.parsing_service import ParsingService
 from .tasks.task_service import TaskService
+from .validation.candidate_validation import (
+    check_region_candidate_completeness,
+    consensus_verdict,
+    merge_validation_center_into_review_note,
+    needs_llm_fix_after_checks,
+    run_llm_region_fix_and_complete,
+    run_llm_region_fix_and_complete_multi,
+    run_local_region_validation,
+    run_llm_region_validation,
+)
 from .validation.ontology_rules import engine_from_runtime, merge_candidate_ontology_note, refresh_engine
 from .validation.validation_service import ValidationService
+
+_GRANULARITY_PROMOTE_ORDER = ("major", "sub", "allen")
+
+
+def _region_granularity_sort_key(granularity: str) -> int:
+    g = (granularity or "").strip().lower()
+    if g in _GRANULARITY_PROMOTE_ORDER:
+        return _GRANULARITY_PROMOTE_ORDER.index(g)
+    return 99
+
+
+def _region_en_cn_key(en: str, cn: str) -> str:
+    """与 summarize_region_name_duplicates 一致：英文小写 | 中文。"""
+    en = (en or "").strip()
+    cn = (cn or "").strip()
+    if not en and not cn:
+        return ""
+    return f"{en.lower()}|{cn}"
+
+
+def summarize_region_name_duplicates(rows: List[Any]) -> Dict[str, Any]:
+    """同一批候选中，按「英文小写|中文」统计重复脑区名称（至少一侧非空才参与）。"""
+    from collections import defaultdict
+
+    counts: Dict[str, int] = defaultdict(int)
+    first_label: Dict[str, tuple[str, str]] = {}
+    for r in rows:
+        d: Dict[str, Any]
+        if isinstance(r, dict):
+            d = r
+        else:
+            raw = getattr(r, "__dict__", None)
+            d = raw if isinstance(raw, dict) else {}
+        en = (d.get("en_name_candidate") or "").strip()
+        cn = (d.get("cn_name_candidate") or "").strip()
+        if not en and not cn:
+            continue
+        key = _region_en_cn_key(en, cn)
+        if not key:
+            continue
+        counts[key] += 1
+        if key not in first_label:
+            first_label[key] = (en, cn)
+    dup_keys = {k: c for k, c in counts.items() if c > 1}
+    extra = sum(c - 1 for c in dup_keys.values())
+    samples: List[Dict[str, Any]] = []
+    for k in list(dup_keys.keys())[:12]:
+        en, cn = first_label[k]
+        samples.append({"en": en, "cn": cn, "occurrences": dup_keys[k]})
+    return {
+        "has_duplicates": bool(dup_keys),
+        "duplicate_group_count": len(dup_keys),
+        "extra_row_count": extra,
+        "samples": samples,
+    }
 
 
 class WorkbenchService:
@@ -313,7 +379,8 @@ class WorkbenchService:
         }
         self.store.put_region_result_version(version)
         self.store.put_region_candidates(file_id, rows, lane=lane)
-        return {"version_id": version_id, "item_count": len(items)}
+        dup = summarize_region_name_duplicates(items)
+        return {"version_id": version_id, "item_count": len(items), "region_duplicates": dup}
 
     # region extraction
     def trigger_extract_regions(
@@ -356,7 +423,12 @@ class WorkbenchService:
         try:
             if mode == "deepseek":
                 self.log_bus.emit(task["task_id"], "EXTRACT", "[DEEPSEEK] request_start", event_type="deepseek_request_started")
+            elif mode == "kimi":
+                self.log_bus.emit(task["task_id"], "EXTRACT", "[KIMI] request_start", event_type="kimi_request_started")
+            elif mode == "multi":
+                self.log_bus.emit(task["task_id"], "EXTRACT", "[MULTI] request_start", event_type="multi_request_started")
             rt = self.config_service.get_runtime()
+            moonshot_cfg = resolve_moonshot_config(rt)
             rev2 = rt.get("pipeline", {}).get("region_extraction_v2", {})
 
             def _v2_log(msg: str, detail: Optional[Dict[str, Any]] = None) -> None:
@@ -378,13 +450,13 @@ class WorkbenchService:
                 )
 
             def _extract_emit(msg: str, detail: Optional[Dict[str, Any]] = None) -> None:
-                if mode == "deepseek":
+                if mode in ("deepseek", "kimi", "multi"):
                     _deepseek_batched_log(msg, detail)
                 elif rev2.get("enabled") and rev2.get("log_layers", True):
                     _v2_log(msg, detail)
 
             extract_emit: Optional[Any] = _extract_emit
-            if mode != "deepseek" and not (rev2.get("enabled") and rev2.get("log_layers", True)):
+            if mode not in ("deepseek", "kimi", "multi") and not (rev2.get("enabled") and rev2.get("log_layers", True)):
                 extract_emit = None
 
             result = self.extraction_service.run_region_extraction(
@@ -392,16 +464,25 @@ class WorkbenchService:
                 parsed,
                 mode,
                 deepseek_cfg,
+                moonshot_cfg=moonshot_cfg,
                 pipeline_config=rt.get("pipeline", {}),
                 root_dir=self.root_dir,
                 log_emit=extract_emit,
             )
             rows = result["candidates"]
-            lane = "deepseek" if mode == "deepseek" else "local"
-            rmethod = "file_deepseek" if mode == "deepseek" else "file_local"
+            if mode == "deepseek":
+                lane, rmethod = "deepseek", "file_deepseek"
+            elif mode == "kimi":
+                lane, rmethod = "kimi", "file_kimi"
+            elif mode == "multi":
+                lane, rmethod = "multi", "file_multi"
+            else:
+                lane, rmethod = "local", "file_local"
             pm: Dict[str, Any] = {"mode": mode, "source": "file"}
             if result.get("deepseek_batch_summary"):
                 pm["deepseek_batch_summary"] = result["deepseek_batch_summary"]
+            if result.get("moonshot_batch_summary"):
+                pm["moonshot_batch_summary"] = result["moonshot_batch_summary"]
             ver = self._persist_region_version_and_store(
                 file_id,
                 rmethod,
@@ -419,15 +500,40 @@ class WorkbenchService:
                     f"[DEEPSEEK] request_success model={result.get('llm_model', '')}",
                     event_type="deepseek_request_succeeded",
                 )
+            elif mode == "kimi":
+                self.log_bus.emit(
+                    task["task_id"],
+                    "EXTRACT",
+                    f"[KIMI] request_success model={result.get('llm_model', '')}",
+                    event_type="kimi_request_succeeded",
+                )
+            elif mode == "multi":
+                self.log_bus.emit(
+                    task["task_id"],
+                    "EXTRACT",
+                    f"[MULTI] request_success models={result.get('llm_model', '')}",
+                    event_type="multi_request_succeeded",
+                )
             self.log_bus.emit(
                 task["task_id"],
                 "EXTRACT",
                 f"finish file_id={file_id} regions={len(rows)}",
                 event_type="extract_region_succeeded",
             )
+            rdup = ver.get("region_duplicates") or {}
+            if rdup.get("has_duplicates"):
+                self.log_bus.emit(
+                    task["task_id"],
+                    "EXTRACT",
+                    f"[提示] 本批存在重复脑区名称：{rdup.get('duplicate_group_count', 0)} 组，多出 {rdup.get('extra_row_count', 0)} 条",
+                    detail_json={"region_duplicates": rdup},
+                    event_type="extract_region_duplicate_names",
+                )
             ok_payload: Dict[str, Any] = {"success": True, "task_id": task["task_id"], "count": len(rows), **ver}
             if result.get("deepseek_batch_summary"):
                 ok_payload["deepseek_batch_summary"] = result["deepseek_batch_summary"]
+            if result.get("moonshot_batch_summary"):
+                ok_payload["moonshot_batch_summary"] = result["moonshot_batch_summary"]
             return ok_payload
         except Exception as exc:
             err = str(exc)
@@ -440,6 +546,12 @@ class WorkbenchService:
                 err_type = "deepseek_api_key_missing"
             elif err.startswith("deepseek_disabled"):
                 err_type = "deepseek_disabled"
+            elif err.startswith("moonshot_api_key_missing"):
+                err_type = "moonshot_api_key_missing"
+            elif err.startswith("kimi_http_") or err.startswith("kimi_request_failed"):
+                err_type = "kimi_transport_failed"
+            elif err.startswith("kimi_empty_result"):
+                err_type = "kimi_empty_result"
             self.store.update_file(file_id, status=FileStatus.EXTRACTION_FAILED.value, updated_at=utc_now_iso())
             self.task_service.fail_task(task["task_id"], err)
             self.log_bus.emit(
@@ -473,21 +585,31 @@ class WorkbenchService:
         try:
             parsed = self.extraction_service.build_synthetic_parsed_from_text(text, file_id)
             rt = self.config_service.get_runtime()
+            moonshot_cfg = resolve_moonshot_config(rt)
             result = self.extraction_service.run_region_extraction(
                 file_payload,
                 parsed,
                 mode,
                 deepseek_cfg,
+                moonshot_cfg=moonshot_cfg,
                 pipeline_config=rt.get("pipeline", {}),
                 root_dir=self.root_dir,
                 log_emit=None,
             )
             rows = result["candidates"]
-            lane = "deepseek" if mode == "deepseek" else "local"
-            rmethod = "text_deepseek" if mode == "deepseek" else "text_local"
+            if mode == "deepseek":
+                lane, rmethod = "deepseek", "text_deepseek"
+            elif mode == "kimi":
+                lane, rmethod = "kimi", "text_kimi"
+            elif mode == "multi":
+                lane, rmethod = "multi", "text_multi"
+            else:
+                lane, rmethod = "local", "text_local"
             pm_text: Dict[str, Any] = {"mode": mode, "input_kind": "text"}
             if result.get("deepseek_batch_summary"):
                 pm_text["deepseek_batch_summary"] = result["deepseek_batch_summary"]
+            if result.get("moonshot_batch_summary"):
+                pm_text["moonshot_batch_summary"] = result["moonshot_batch_summary"]
             ver = self._persist_region_version_and_store(
                 file_id,
                 rmethod,
@@ -501,6 +623,8 @@ class WorkbenchService:
             out_text: Dict[str, Any] = {"success": True, "count": len(rows), **ver, "method": result.get("method")}
             if result.get("deepseek_batch_summary"):
                 out_text["deepseek_batch_summary"] = result["deepseek_batch_summary"]
+            if result.get("moonshot_batch_summary"):
+                out_text["moonshot_batch_summary"] = result["moonshot_batch_summary"]
             return out_text
         except Exception as exc:
             err = str(exc)
@@ -513,6 +637,12 @@ class WorkbenchService:
                 err_type = "deepseek_api_key_missing"
             elif err.startswith("deepseek_disabled"):
                 err_type = "deepseek_disabled"
+            elif err.startswith("moonshot_api_key_missing"):
+                err_type = "moonshot_api_key_missing"
+            elif err.startswith("kimi_http_") or err.startswith("kimi_request_failed"):
+                err_type = "kimi_transport_failed"
+            elif err.startswith("kimi_empty_result"):
+                err_type = "kimi_empty_result"
             self.store.update_file(file_id, status=FileStatus.EXTRACTION_FAILED.value, updated_at=utc_now_iso())
             return {"success": False, "error": err, "error_type": err_type}
 
@@ -522,6 +652,7 @@ class WorkbenchService:
         profile_key: str = "",
         inline_deepseek_override: Optional[Dict[str, Any]] = None,
         file_id: str = "",
+        provider: str = "deepseek",
     ) -> Dict[str, Any]:
         if not file_id:
             return {"success": False, "error": "file_id_required"}
@@ -535,26 +666,70 @@ class WorkbenchService:
             profile_key=profile_key or None,
             inline_override=inline_deepseek_override,
         )
-        parsed = self.extraction_service.build_synthetic_parsed_from_text(f"[direct] topic={p.get('topic')}", file_id)
-        pd_id = parsed["document"]["parsed_document_id"]
-        rows = self.extraction_service.run_direct_deepseek_regions(file_payload, pd_id, p, deepseek_cfg)
-        prompt = self.extraction_service.build_region_prompt("direct_generate", p)
-        ver = self._persist_region_version_and_store(
-            file_id,
-            "direct_deepseek",
-            "deepseek",
-            rows,
-            prompt_text=prompt,
-            prompt_meta=p,
-        )
-        self.store.update_file(file_id, status=FileStatus.EXTRACTION_SUCCESS.value, updated_at=utc_now_iso())
-        return {"success": True, "count": len(rows), **ver, "method": "direct_deepseek"}
+        try:
+            rt = self.config_service.get_runtime()
+            moonshot_cfg = resolve_moonshot_config(rt)
+            parsed = self.extraction_service.build_synthetic_parsed_from_text(f"[direct] topic={p.get('topic')}", file_id)
+            pd_id = parsed["document"]["parsed_document_id"]
+            prov = (provider or "deepseek").lower()
+            rows = self.extraction_service.run_direct_llm_regions(
+                file_payload,
+                pd_id,
+                p,
+                deepseek_cfg,
+                provider=prov,
+                moonshot_cfg=moonshot_cfg,
+                pipeline_config=rt.get("pipeline", {}),
+                root_dir=self.root_dir,
+            )
+            prompt = self.extraction_service.build_region_prompt("direct_generate", p)
+            if prov == "kimi":
+                rmethod, lane = "direct_kimi", "kimi"
+                method_name = "direct_kimi"
+            else:
+                rmethod, lane = "direct_deepseek", "deepseek"
+                method_name = "direct_deepseek"
+            ver = self._persist_region_version_and_store(
+                file_id,
+                rmethod,
+                lane,
+                rows,
+                prompt_text=prompt,
+                prompt_meta={**p, "provider": prov},
+            )
+            self.store.update_file(file_id, status=FileStatus.EXTRACTION_SUCCESS.value, updated_at=utc_now_iso())
+            return {"success": True, "count": len(rows), **ver, "method": method_name}
+        except Exception as exc:
+            err = str(exc)
+            err_type = "extract_failed"
+            if err.startswith("deepseek_request_failed") or err.startswith("deepseek_http_"):
+                err_type = "deepseek_transport_failed"
+            elif err.startswith("deepseek_empty_result"):
+                err_type = "deepseek_empty_result"
+            elif err.startswith("deepseek_api_key_missing"):
+                err_type = "deepseek_api_key_missing"
+            elif err.startswith("deepseek_disabled"):
+                err_type = "deepseek_disabled"
+            elif err.startswith("moonshot_api_key_missing"):
+                err_type = "moonshot_api_key_missing"
+            elif err.startswith("kimi_http_") or err.startswith("kimi_request_failed"):
+                err_type = "kimi_transport_failed"
+            elif err.startswith("kimi_empty_result"):
+                err_type = "kimi_empty_result"
+            self.store.update_file(file_id, status=FileStatus.EXTRACTION_FAILED.value, updated_at=utc_now_iso())
+            return {"success": False, "error": err, "error_type": err_type}
 
     def list_region_result_versions(self, file_id: Optional[str] = None) -> List[Dict[str, Any]]:
         return self.store.list_region_result_versions(file_id=file_id)
 
     def get_region_result_version(self, version_id: str) -> Optional[Dict[str, Any]]:
         return self.store.get_region_result_version(version_id)
+
+    def find_region_version_id_for_candidate(self, candidate_id: str, file_id: str = "") -> Optional[str]:
+        return self.store.find_region_version_id_for_candidate(
+            candidate_id,
+            file_id=file_id or None,
+        )
 
     def delete_region_result_version(self, version_id: str) -> bool:
         return self.store.delete_region_result_version(version_id)
@@ -579,13 +754,20 @@ class WorkbenchService:
             d.setdefault("status", "pending_review")
             items.append(d)
         self.store.put_region_candidates(file_id, items, lane=lane)
+        dup = summarize_region_name_duplicates(items)
         self.log_bus.emit(
             "-",
             "REVIEW",
             f"apply_snapshot file_id={file_id} version_id={version_id} lane={lane} count={len(items)}",
             event_type="snapshot_applied_to_candidates",
         )
-        return {"success": True, "count": len(items), "lane": lane, "version_id": version_id}
+        return {
+            "success": True,
+            "count": len(items),
+            "lane": lane,
+            "version_id": version_id,
+            "region_duplicates": dup,
+        }
 
     def save_generated_candidates(
         self,
@@ -596,7 +778,8 @@ class WorkbenchService:
     ) -> Dict[str, Any]:
         if entity_type == "region":
             self.store.put_region_candidates(file_id, candidates, lane=lane)
-            return {"success": True, "count": len(candidates)}
+            dup = summarize_region_name_duplicates(candidates)
+            return {"success": True, "count": len(candidates), "region_duplicates": dup}
         if entity_type == "circuit":
             self.store.put_circuit_candidates(file_id, candidates, lane=lane)
             return {"success": True, "count": len(candidates)}
@@ -747,11 +930,39 @@ class WorkbenchService:
     def list_connection_candidates(self, file_id: str = "", lane: Optional[str] = "local") -> List[Dict[str, Any]]:
         return self.store.list_connection_candidates(file_id, lane=lane)
 
-    def update_region_candidate(self, candidate_id: str, patch: Dict[str, Any], reviewer: str = "user") -> Dict[str, Any]:
+    def _conflicting_region_ids_for_name(
+        self,
+        file_id: str,
+        lane: str,
+        key: str,
+        exclude_id: str,
+    ) -> List[str]:
+        if not key or not file_id:
+            return []
+        rows = self.store.list_region_candidates(file_id, lane=lane)
+        out: List[str] = []
+        for r in rows:
+            rid = str(r.get("id") or "")
+            if not rid or rid == exclude_id:
+                continue
+            k = _region_en_cn_key(str(r.get("en_name_candidate") or ""), str(r.get("cn_name_candidate") or ""))
+            if k and k == key:
+                out.append(rid)
+        return out
+
+    def update_region_candidate(
+        self,
+        candidate_id: str,
+        patch: Dict[str, Any],
+        reviewer: str = "user",
+        *,
+        duplicate_resolution: Optional[str] = None,
+    ) -> Dict[str, Any]:
         before = self.store.get_region_candidate(candidate_id)
         if not before:
             return {"success": False, "error": "candidate_not_found"}
         allowed = {
+            "source_text",
             "en_name_candidate",
             "cn_name_candidate",
             "alias_candidates",
@@ -764,6 +975,43 @@ class WorkbenchService:
             "review_note",
         }
         safe_patch = {k: v for k, v in patch.items() if k in allowed}
+        en = (
+            (safe_patch["en_name_candidate"] if "en_name_candidate" in safe_patch else before.get("en_name_candidate"))
+            or ""
+        )
+        cn = (
+            (safe_patch["cn_name_candidate"] if "cn_name_candidate" in safe_patch else before.get("cn_name_candidate"))
+            or ""
+        )
+        en = str(en).strip()
+        cn = str(cn).strip()
+        key = _region_en_cn_key(en, cn)
+        file_id = str(before.get("file_id") or "")
+        lane = str(before.get("lane") or "local")
+        conflicting: List[str] = []
+        if key:
+            conflicting = self._conflicting_region_ids_for_name(file_id, lane, key, candidate_id)
+        dr = (duplicate_resolution or "").strip().lower()
+        if conflicting and dr not in ("replace_others", "keep_duplicates"):
+            return {
+                "success": False,
+                "error": "duplicate_name_conflict",
+                "duplicate_conflict": {
+                    "conflicting_ids": conflicting,
+                    "en": en,
+                    "cn": cn,
+                },
+            }
+        if conflicting and dr == "replace_others":
+            for oid in conflicting:
+                self.store.delete_region_candidate(oid)
+            self.log_bus.emit(
+                "-",
+                "REVIEW",
+                f"duplicate_replace_removed count={len(conflicting)} file_id={file_id}",
+                event_type="region_duplicate_replace",
+                detail_json={"kept_id": candidate_id, "removed_ids": conflicting},
+            )
         safe_patch["updated_at"] = utc_now_iso()
         after = self.store.update_region_candidate(candidate_id, **safe_patch)
         record = ReviewRecord(
@@ -778,6 +1026,181 @@ class WorkbenchService:
         self.store.append_review_record(record)
         self.log_bus.emit("-", "REVIEW", f"edit candidate_id={candidate_id}", event_type="candidate_edit")
         return {"success": True, "candidate": after}
+
+    def run_region_candidate_validation(self, candidate_id: str, mode: str, reviewer: str = "user") -> Dict[str, Any]:
+        """脑区验证中心：local（本体规则）/ deepseek / multi（Kimi+DeepSeek）。结果写入 review_note.validation_center。"""
+        before = self.store.get_region_candidate(candidate_id)
+        if not before:
+            return {"success": False, "error": "candidate_not_found"}
+        mode_n = (mode or "").strip().lower()
+        if mode_n not in ("local", "deepseek", "multi"):
+            return {"success": False, "error": "invalid_validation_mode"}
+        rt = self.config_service.get_runtime()
+        note_before = str(before.get("review_note") or "")
+
+        if mode_n == "local":
+            out = run_local_region_validation(self.ontology_rule_engine, before)
+            payload: Dict[str, Any] = {"result": out}
+            merged = merge_validation_center_into_review_note(note_before, "local", payload)
+            result = self.update_region_candidate(candidate_id, {"review_note": merged}, reviewer=reviewer)
+            if not result.get("success"):
+                return result
+            return {"success": True, "mode": "local", "validation": out, "candidate": result.get("candidate")}
+
+        if mode_n == "deepseek":
+            ds = resolve_deepseek_config(rt)
+            if not ds.get("api_key"):
+                return {"success": False, "error": "deepseek_api_key_missing"}
+            try:
+                llm = run_llm_region_validation(row=before, llm_cfg=ds, label="deepseek")
+            except Exception as exc:
+                return {"success": False, "error": "deepseek_request_failed", "detail": str(exc)}
+            if not llm.get("ok"):
+                return {"success": False, **{k: v for k, v in llm.items() if k != "ok"}}
+            payload = {"result": llm}
+            merged = merge_validation_center_into_review_note(note_before, "deepseek", payload)
+            result = self.update_region_candidate(candidate_id, {"review_note": merged}, reviewer=reviewer)
+            if not result.get("success"):
+                return result
+            return {"success": True, "mode": "deepseek", "validation": llm, "candidate": result.get("candidate")}
+
+        ms = resolve_moonshot_config(rt)
+        ds = resolve_deepseek_config(rt)
+        if not ms.get("api_key"):
+            return {"success": False, "error": "moonshot_api_key_missing"}
+        if not ds.get("api_key"):
+            return {"success": False, "error": "deepseek_api_key_missing"}
+        kimi_res: Dict[str, Any] = {}
+        ds_res: Dict[str, Any] = {}
+        try:
+            kimi_res = run_llm_region_validation(row=before, llm_cfg=ms, label="kimi")
+        except Exception as exc:
+            kimi_res = {"ok": False, "error": "kimi_request_failed", "detail": str(exc)}
+        try:
+            ds_res = run_llm_region_validation(row=before, llm_cfg=ds, label="deepseek")
+        except Exception as exc:
+            ds_res = {"ok": False, "error": "deepseek_request_failed", "detail": str(exc)}
+        k_parsed = kimi_res.get("parsed") if kimi_res.get("ok") else None
+        d_parsed = ds_res.get("parsed") if ds_res.get("ok") else None
+        cons = consensus_verdict(k_parsed if isinstance(k_parsed, dict) else None, d_parsed if isinstance(d_parsed, dict) else None)
+        payload = {
+            "per_model": {"kimi": kimi_res, "deepseek": ds_res},
+            "consensus": cons,
+        }
+        merged = merge_validation_center_into_review_note(note_before, "multi", payload)
+        result = self.update_region_candidate(candidate_id, {"review_note": merged}, reviewer=reviewer)
+        if not result.get("success"):
+            return result
+        return {
+            "success": True,
+            "mode": "multi",
+            "validation": payload,
+            "candidate": result.get("candidate"),
+        }
+
+    def run_region_candidate_validation_pipeline(self, candidate_id: str, llm_mode: str = "none", reviewer: str = "user") -> Dict[str, Any]:
+        """正确性(本体) → 完整性 → LLM（当 llm_mode 为 deepseek/multi 时始终调用 API；none 则仅规则/完整性，不落库）。"""
+        _ = reviewer
+        row = self.store.get_region_candidate(candidate_id)
+        if not row:
+            return {"success": False, "error": "candidate_not_found"}
+        lm = (llm_mode or "none").strip().lower()
+        if lm not in ("none", "deepseek", "multi"):
+            return {"success": False, "error": "invalid_llm_mode"}
+
+        local_out = run_local_region_validation(self.ontology_rule_engine, row)
+        comp = check_region_candidate_completeness(row)
+        # 规则/完整性层面「是否需要纠偏」的启发式（用于展示与 none 模式下的跳过说明）
+        needs_heuristic = needs_llm_fix_after_checks(local_out, comp)
+        # 用户若显式选 DeepSeek / 双模型，应始终走 LLM（否则本地 pass + 字段齐会完全不请求 API，看起来像「没用上」）
+        invoke_llm = lm != "none"
+        steps: Dict[str, Any] = {
+            "local": local_out,
+            "completeness": comp,
+            "needs_llm": needs_heuristic,
+            "invoke_llm": invoke_llm,
+            "llm_mode_requested": lm,
+        }
+
+        proposed_patch: Dict[str, Any] = {}
+        llm_result: Optional[Dict[str, Any]] = None
+
+        if invoke_llm:
+            rt = self.config_service.get_runtime()
+            if lm == "deepseek":
+                ds = resolve_deepseek_config(rt)
+                if not ds.get("api_key"):
+                    return {"success": False, "error": "deepseek_api_key_missing", "steps": steps}
+                llm_result = run_llm_region_fix_and_complete(row, local_out, comp, ds)
+                if not llm_result.get("ok"):
+                    return {
+                        "success": False,
+                        "error": llm_result.get("error", "llm_failed"),
+                        "detail": llm_result.get("detail"),
+                        "raw_content_preview": llm_result.get("raw_content_preview"),
+                        "steps": steps,
+                    }
+                proposed_patch = dict(llm_result.get("patch") or {})
+            else:
+                ms = resolve_moonshot_config(rt)
+                ds = resolve_deepseek_config(rt)
+                if not ms.get("api_key"):
+                    return {"success": False, "error": "moonshot_api_key_missing", "steps": steps}
+                if not ds.get("api_key"):
+                    return {"success": False, "error": "deepseek_api_key_missing", "steps": steps}
+                llm_result = run_llm_region_fix_and_complete_multi(row, local_out, comp, ms, ds)
+                if not llm_result.get("ok"):
+                    return {
+                        "success": False,
+                        "error": llm_result.get("error", "llm_failed"),
+                        "detail": llm_result.get("detail"),
+                        "raw_content_preview": llm_result.get("raw_content_preview"),
+                        "steps": steps,
+                    }
+                proposed_patch = dict(llm_result.get("patch") or {})
+        elif needs_heuristic and lm == "none":
+            steps["llm_skipped"] = "mode_none_requires_manual_or_switch_llm"
+
+        return {
+            "success": True,
+            "steps": steps,
+            "needs_llm": needs_heuristic,
+            "proposed_patch": proposed_patch,
+            "llm": llm_result,
+            "candidate_id": candidate_id,
+        }
+
+    def apply_region_candidate_pipeline_patch(
+        self,
+        candidate_id: str,
+        patch: Dict[str, Any],
+        pipeline_meta: Optional[Dict[str, Any]] = None,
+        reviewer: str = "user",
+    ) -> Dict[str, Any]:
+        """弹窗确认后：将 proposed_patch 与流水线摘要写入 review_note.validation_center.pipeline。"""
+        before = self.store.get_region_candidate(candidate_id)
+        if not before:
+            return {"success": False, "error": "candidate_not_found"}
+        allowed = {
+            "source_text",
+            "en_name_candidate",
+            "cn_name_candidate",
+            "alias_candidates",
+            "laterality_candidate",
+            "region_category_candidate",
+            "granularity_candidate",
+            "parent_region_candidate",
+            "ontology_source_candidate",
+            "confidence",
+            "review_note",
+        }
+        safe = {k: v for k, v in (patch or {}).items() if k in allowed}
+        note_before = str(before.get("review_note") or "")
+        meta = dict(pipeline_meta or {})
+        meta["applied_at"] = utc_now_iso()
+        merged_note = merge_validation_center_into_review_note(note_before, "pipeline", meta)
+        safe["review_note"] = merged_note
+        return self.update_region_candidate(candidate_id, safe, reviewer=reviewer)
 
     def review_region_candidate(self, candidate_id: str, action: str, reviewer: str, note: str = "") -> Dict[str, Any]:
         before = self.store.get_region_candidate(candidate_id)
@@ -1211,6 +1634,38 @@ class WorkbenchService:
         unverified_cfg = runtime.get("database", {}).get("unverified_db", {})
         return self.ingestion_service.list_unverified_connections(unverified_cfg, source_file_id=file_id)
 
+    def _filename_hint_for_final_filter(self, file_id: str) -> str:
+        if not file_id:
+            return ""
+        row = self.store.get_file(file_id)
+        if not row:
+            return ""
+        return (row.get("file_name") or row.get("filename") or "").strip()
+
+    def list_final_brain_regions_view(self, file_id: str = "", limit: int = 200) -> Dict[str, Any]:
+        runtime = self.config_service.get_runtime()
+        prod = (runtime.get("database") or {}).get("production_db") or {}
+        hint = self._filename_hint_for_final_filter(file_id) if file_id else ""
+        return self.ingestion_service.list_final_brain_regions(
+            prod, limit=limit, data_source_substring=hint
+        )
+
+    def list_final_circuits_view(self, file_id: str = "", limit: int = 200) -> Dict[str, Any]:
+        runtime = self.config_service.get_runtime()
+        prod = (runtime.get("database") or {}).get("production_db") or {}
+        hint = self._filename_hint_for_final_filter(file_id) if file_id else ""
+        return self.ingestion_service.list_final_circuits(
+            prod, limit=limit, data_source_substring=hint
+        )
+
+    def list_final_connections_view(self, file_id: str = "", limit: int = 200) -> Dict[str, Any]:
+        runtime = self.config_service.get_runtime()
+        prod = (runtime.get("database") or {}).get("production_db") or {}
+        hint = self._filename_hint_for_final_filter(file_id) if file_id else ""
+        return self.ingestion_service.list_final_connections(
+            prod, limit=limit, data_source_substring=hint
+        )
+
     def validate_unverified_region(self, unverified_region_id: str, reviewer: str = "user") -> Dict[str, Any]:
         runtime = self.config_service.get_runtime()
         unverified_cfg = runtime.get("database", {}).get("unverified_db", {})
@@ -1303,6 +1758,219 @@ class WorkbenchService:
                 detail_json=result,
             )
         return {"task_id": task["task_id"], **result}
+
+    def batch_validate_unverified_regions(
+        self,
+        reviewer: str = "user",
+        file_id: str = "",
+        ids: List[str] | None = None,
+    ) -> Dict[str, Any]:
+        targets = list(ids or [])
+        if not targets:
+            targets = [x.get("id", "") for x in self.list_unverified_regions(file_id=file_id)]
+        targets = [x for x in targets if x]
+        if not targets:
+            return {"success": False, "error": "no_unverified_regions"}
+        task = self.task_service.create_task(
+            TaskType.VALIDATE_UNVERIFIED,
+            initiator=reviewer,
+            input_objects={"file_id": file_id, "ids": targets},
+            parameters={"batch": True},
+        )
+        self.task_service.start_task(task["task_id"])
+        self.log_bus.emit(
+            task["task_id"],
+            "VALIDATION",
+            f"batch_validate_started total={len(targets)}",
+            event_type="batch_validate_started",
+            detail_json={"entity": "region", "targets": targets},
+        )
+        results: List[Dict[str, Any]] = []
+        for target_id in targets:
+            runtime = self.config_service.get_runtime()
+            unverified_cfg = runtime.get("database", {}).get("unverified_db", {})
+            item = self.ingestion_service.validate_unverified_region(
+                unverified_region_id=target_id,
+                unverified_cfg=unverified_cfg,
+                validator_name="rule_basic_validator",
+                validation_type="rule",
+            )
+            results.append({"id": target_id, **item})
+            if not item.get("success"):
+                self.log_bus.emit(
+                    task["task_id"],
+                    "VALIDATION",
+                    f"batch_item_failed action=validate id={target_id}",
+                    level="error",
+                    event_type="batch_item_failed",
+                    detail_json={"entity": "region", "action": "validate", "id": target_id, "detail": item},
+                )
+        summary = self._summarize_batch_results(results)
+        if summary["failed_count"] == 0:
+            self.task_service.finish_task(task["task_id"], summary)
+        else:
+            self.task_service.fail_task(task["task_id"], f"batch_validate_failed failed_count={summary['failed_count']}")
+        self.log_bus.emit(
+            task["task_id"],
+            "VALIDATION",
+            f"batch_validate_finished total={summary['total']} success={summary['success_count']} failed={summary['failed_count']}",
+            event_type="batch_validate_finished",
+            detail_json={"entity": "region", "summary": summary},
+        )
+        return {"success": summary["failed_count"] == 0, "task_id": task["task_id"], "summary": summary, "items": results}
+
+    def batch_promote_unverified_regions(
+        self,
+        reviewer: str = "user",
+        file_id: str = "",
+        ids: List[str] | None = None,
+        granularity: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        targets = list(ids or [])
+        if not targets:
+            targets = [x.get("id", "") for x in self.list_unverified_regions(file_id=file_id)]
+        targets = [x for x in targets if x]
+        g_filter = (granularity or "").strip().lower()
+        if g_filter and g_filter not in ("major", "sub", "allen"):
+            return {"success": False, "error": "invalid_granularity"}
+        uv_rows = self.list_unverified_regions(file_id=file_id)
+        uv_map = {x.get("id"): x for x in uv_rows if x.get("id")}
+        if g_filter and g_filter in ("major", "sub", "allen"):
+            targets = [
+                t
+                for t in targets
+                if (uv_map.get(t) or {}).get("granularity", "").strip().lower() == g_filter
+            ]
+        if not targets:
+            return {"success": False, "error": "no_unverified_regions"}
+        targets = sorted(
+            targets,
+            key=lambda tid: _region_granularity_sort_key((uv_map.get(tid) or {}).get("granularity", "") or ""),
+        )
+        task = self.task_service.create_task(
+            TaskType.PROMOTE_FINAL,
+            initiator=reviewer,
+            input_objects={"file_id": file_id, "ids": targets},
+            parameters={"batch": True},
+        )
+        self.task_service.start_task(task["task_id"])
+        self.log_bus.emit(
+            task["task_id"],
+            "PROMOTE",
+            f"batch_promote_started total={len(targets)}",
+            event_type="batch_promote_started",
+            detail_json={"entity": "region", "targets": targets},
+        )
+        results: List[Dict[str, Any]] = []
+        for target_id in targets:
+            runtime = self.config_service.get_runtime()
+            unverified_cfg = runtime.get("database", {}).get("unverified_db", {})
+            production_cfg = runtime.get("database", {}).get("production_db", {})
+            item = self.ingestion_service.promote_unverified_region(
+                unverified_region_id=target_id,
+                unverified_cfg=unverified_cfg,
+                production_cfg=production_cfg,
+            )
+            results.append({"id": target_id, **item})
+            if item.get("success"):
+                source_candidate_id = item.get("source_candidate_region_id", "")
+                if source_candidate_id:
+                    self.store.update_region_candidate(source_candidate_id, status="committed", updated_at=utc_now_iso())
+            else:
+                self.log_bus.emit(
+                    task["task_id"],
+                    "PROMOTE",
+                    f"batch_item_failed action=promote id={target_id}",
+                    level="error",
+                    event_type="batch_item_failed",
+                    detail_json={"entity": "region", "action": "promote", "id": target_id, "detail": item},
+                )
+        summary = self._summarize_batch_results(results)
+        if summary["failed_count"] == 0:
+            self.task_service.finish_task(task["task_id"], summary)
+        else:
+            self.task_service.fail_task(task["task_id"], f"batch_promote_failed failed_count={summary['failed_count']}")
+        self.log_bus.emit(
+            task["task_id"],
+            "PROMOTE",
+            f"batch_promote_finished total={summary['total']} success={summary['success_count']} failed={summary['failed_count']}",
+            event_type="batch_promote_finished",
+            detail_json={"entity": "region", "summary": summary},
+        )
+        return {"success": summary["failed_count"] == 0, "task_id": task["task_id"], "summary": summary, "items": results}
+
+    def promote_region_candidates_to_final_by_granularity(
+        self,
+        lane: Optional[str],
+        granularity: str,
+        reviewer: str = "user",
+        candidate_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """脑区验证中心：按候选颗粒度筛选，将已在未验证库且校验通过的项按 major→sub→allen 顺序写入正式库。"""
+        g_mode = (granularity or "all").strip().lower()
+        if g_mode not in ("all", "major", "sub", "allen"):
+            return {"success": False, "error": "invalid_granularity"}
+        lane_norm = (lane or "").strip().lower()
+        if not lane_norm or lane_norm in ("all", "*"):
+            candidates = self.store.list_region_candidates("", lane=None)
+        else:
+            candidates = self.store.list_region_candidates("", lane=lane_norm)
+        if candidate_ids:
+            id_set = {str(x) for x in candidate_ids if x}
+            candidates = [c for c in candidates if str(c.get("id", "")) in id_set]
+        if g_mode != "all":
+            candidates = [c for c in candidates if (c.get("granularity_candidate") or "").strip().lower() == g_mode]
+        cids = [c.get("id") for c in candidates if c.get("id")]
+        if not cids:
+            return {"success": False, "error": "no_matching_candidates"}
+        unverified_cfg = self.config_service.get_runtime().get("database", {}).get("unverified_db", {})
+        uv_rows = self.ingestion_service.fetch_unverified_regions_for_candidates(unverified_cfg, cids)
+        by_cand: Dict[str, Dict[str, Any]] = {
+            str(r.get("source_candidate_region_id") or ""): r for r in uv_rows if r.get("source_candidate_region_id")
+        }
+        skipped: List[Dict[str, Any]] = []
+        promote_ids: List[str] = []
+        for cid in cids:
+            row = by_cand.get(str(cid))
+            if not row:
+                skipped.append({"candidate_id": cid, "reason": "not_in_unverified"})
+                continue
+            if (row.get("promotion_status") or "").strip().lower() == "promoted":
+                skipped.append(
+                    {
+                        "candidate_id": cid,
+                        "reason": "already_promoted",
+                        "unverified_region_id": row.get("id"),
+                    }
+                )
+                continue
+            if row.get("validation_status") != "validation_passed":
+                skipped.append(
+                    {
+                        "candidate_id": cid,
+                        "reason": "validation_not_passed",
+                        "validation_status": row.get("validation_status"),
+                        "unverified_region_id": row.get("id"),
+                    }
+                )
+                continue
+            promote_ids.append(str(row["id"]))
+        if not promote_ids:
+            return {
+                "success": False,
+                "error": "no_ready_to_promote",
+                "skipped": skipped,
+                "hint": "需先将候选「入未验证库」，并在「验证与提升中心」对未验证记录执行规则校验且通过。",
+            }
+        batch_result = self.batch_promote_unverified_regions(
+            reviewer=reviewer,
+            file_id="",
+            ids=promote_ids,
+            granularity=None,
+        )
+        out = dict(batch_result)
+        out["skipped"] = skipped
+        return out
 
     def validate_unverified_circuit(self, unverified_circuit_id: str, reviewer: str = "user") -> Dict[str, Any]:
         runtime = self.config_service.get_runtime()

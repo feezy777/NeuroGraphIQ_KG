@@ -33,9 +33,20 @@ const state = {
   reviewBatchIds: new Set(),
   /** 规则中心最近一次 /api/ontology/rules/bundle */
   rulesCenterBundle: null,
+  /** 脑区验证中心 · candidate_region 列表 */
+  validationRegionCandidates: [],
+  /** 脑区验证中心 · 上部方式切换 local | deepseek | multi */
+  validationCenterMode: "local",
+  /** 最近一次批量验证结果（供弹窗与应用建议） */
+  lastValidationBatch: null,
+  /** 批量验证：暂停 / 取消（仅条间生效） */
+  validationBatchPaused: false,
+  validationBatchCancelled: false,
+  validationBatchRunning: false,
 };
 
 let regionProgressTimer = null;
+let validationProgressTimer = null;
 
 function qs(id) {
   return document.getElementById(id);
@@ -65,14 +76,23 @@ function setActiveTab(tabId) {
   document.querySelectorAll(".tab-btn").forEach((el) => el.classList.toggle("active", el.dataset.tab === tabId));
   document.querySelectorAll(".nav-item").forEach((el) => el.classList.toggle("active", el.dataset.tab === tabId));
   if (tabId === "tab-review-region") {
-    refreshCandidates().catch(() => {});
-    refreshRegionVersions().catch(() => {});
+    (async () => {
+      await refreshCandidates();
+      await refreshRegionVersions();
+    })().catch(() => {});
   } else if (tabId === "tab-review-circuit") {
     refreshCircuitCandidates().catch(() => {});
   } else if (tabId === "tab-review-connection") {
     refreshConnectionCandidates().catch(() => {});
   } else if (tabId === "tab-extract-region") {
     refreshRegionVersions().catch(() => {});
+  } else if (tabId === "tab-validation-region") {
+    setValidationCenterMode(state.validationCenterMode || "local");
+    refreshValidationRegionCandidates().catch(() => {});
+  } else if (tabId === "tab-validation-circuit") {
+    refreshFinalCircuits().catch(() => {});
+  } else if (tabId === "tab-validation-connection") {
+    refreshFinalConnections().catch(() => {});
   } else if (tabId === "tab-rules") {
     refreshRulesCenter().catch((err) => {
       appendClientLog(`[ERROR] rules center load failed reason=${err.message}`, "error");
@@ -196,6 +216,29 @@ function appendClientLog(message, level = "info") {
   renderConsole();
 }
 
+/** API 返回的 region_duplicates：本批存入的重复 EN/CN 名称提示 */
+function notifyRegionDuplicateHint(res) {
+  const hintEl = qs("region-duplicate-hint");
+  const d = res && res.region_duplicates;
+  if (!d || !d.has_duplicates) {
+    if (hintEl) {
+      hintEl.hidden = true;
+      hintEl.textContent = "";
+    }
+    return;
+  }
+  const samples = (d.samples || [])
+    .slice(0, 5)
+    .map((s) => `${s.en || "—"}/${s.cn || "—"}×${s.occurrences}`)
+    .join("；");
+  const msg = `[提示] 本批存入的脑区存在重复名称：${d.duplicate_group_count} 组，多出 ${d.extra_row_count} 条。示例：${samples || "—"}`;
+  if (hintEl) {
+    hintEl.hidden = false;
+    hintEl.textContent = msg;
+  }
+  appendClientLog(msg, "warn");
+}
+
 function renderConsole() {
   const el = qs("console-content");
   if (!el) return;
@@ -315,6 +358,110 @@ async function withRegionProgress(label, fn) {
   } catch (e) {
     stopRegionProgress(false, e.message || "失败");
     throw e;
+  }
+}
+
+function stopValidationSegmentProgress() {
+  if (validationProgressTimer) {
+    clearInterval(validationProgressTimer);
+    validationProgressTimer = null;
+  }
+}
+
+function startValidationSegmentProgress(i, total, modeLabel) {
+  stopValidationSegmentProgress();
+  const fill = qs("validation-progress-fill");
+  const lab = qs("validation-progress-label");
+  if (!fill || total <= 0) return;
+  const segStart = (i / total) * 100;
+  const segMax = Math.max(segStart, ((i + 1) / total) * 100 - 0.5);
+  let p = segStart;
+  fill.style.width = `${p}%`;
+  if (lab) lab.textContent = `验证中 ${i + 1} / ${total}（${modeLabel}）…`;
+  validationProgressTimer = setInterval(() => {
+    if (state.validationBatchPaused) return;
+    p = Math.min(segMax, p + 2);
+    fill.style.width = `${p}%`;
+  }, 180);
+}
+
+function setValidationBatchProgressDeterministic(doneCount, total, modeLabel) {
+  const fill = qs("validation-progress-fill");
+  const lab = qs("validation-progress-label");
+  if (fill && total > 0) {
+    fill.style.width = `${Math.round((doneCount / total) * 100)}%`;
+  }
+  if (lab) {
+    if (state.validationBatchCancelled) {
+      lab.textContent = `已取消 · 已完成 ${doneCount} / ${total}（${modeLabel}）`;
+    } else {
+      lab.textContent = `验证中 ${doneCount} / ${total}（${modeLabel}）…`;
+    }
+  }
+}
+
+function setValidationExecButtonsDisabled(disabled) {
+  ["btn-validation-exec-local", "btn-validation-exec-deepseek", "btn-validation-exec-multi"].forEach((id) => {
+    const el = qs(id);
+    if (el) el.disabled = !!disabled;
+  });
+}
+
+function showValidationBatchChrome(showBar, showPauseCancel) {
+  const wrap = qs("validation-progress-wrap");
+  const pauseBtn = qs("btn-validation-batch-pause");
+  const cancelBtn = qs("btn-validation-batch-cancel");
+  if (wrap && showBar !== undefined) wrap.hidden = !showBar;
+  if (pauseBtn) {
+    pauseBtn.hidden = !showPauseCancel;
+    pauseBtn.textContent = state.validationBatchPaused ? "继续" : "暂停";
+  }
+  if (cancelBtn) cancelBtn.hidden = !showPauseCancel;
+}
+
+function beginValidationBatchUI(total, modeLabel) {
+  state.validationBatchRunning = true;
+  state.validationBatchPaused = false;
+  state.validationBatchCancelled = false;
+  const wrap = qs("validation-progress-wrap");
+  const fill = qs("validation-progress-fill");
+  const lab = qs("validation-progress-label");
+  if (wrap) wrap.hidden = false;
+  if (fill) fill.style.width = "0%";
+  if (lab) lab.textContent = `验证准备…（共 ${total} 条 · ${modeLabel}）`;
+  showValidationBatchChrome(true, true);
+  setValidationExecButtonsDisabled(true);
+}
+
+function endValidationBatchUI(done, total, modeLabel, cancelled) {
+  stopValidationSegmentProgress();
+  state.validationBatchRunning = false;
+  state.validationBatchPaused = false;
+  const fill = qs("validation-progress-fill");
+  if (fill && total > 0) {
+    if (!cancelled && done >= total) fill.style.width = "100%";
+    else fill.style.width = `${Math.round((done / total) * 100)}%`;
+  }
+  const lab = qs("validation-progress-label");
+  if (lab) {
+    if (cancelled) lab.textContent = `已取消（${done} / ${total}）· ${modeLabel}`;
+    else lab.textContent = `完成（${done} / ${total}）· ${modeLabel}`;
+  }
+  showValidationBatchChrome(true, false);
+  const pauseBtn = qs("btn-validation-batch-pause");
+  const cancelBtn = qs("btn-validation-batch-cancel");
+  if (pauseBtn) pauseBtn.hidden = true;
+  if (cancelBtn) cancelBtn.hidden = true;
+  setValidationExecButtonsDisabled(false);
+  setTimeout(() => {
+    const w = qs("validation-progress-wrap");
+    if (w) w.hidden = true;
+  }, cancelled ? 900 : 500);
+}
+
+async function waitWhileValidationPaused() {
+  while (state.validationBatchPaused && !state.validationBatchCancelled) {
+    await new Promise((r) => setTimeout(r, 120));
   }
 }
 
@@ -524,7 +671,7 @@ function openDeepseekRegionModal(kind) {
       const hint = qs("ds-modal-kind-hint");
       if (hint) {
         hint.textContent =
-          kind === "direct" ? "③ DeepSeek 直接生成" : kind === "text" ? "② 文本抽取（粘贴文本）" : "① 文件抽取（已解析内容）";
+          kind === "direct" ? "③ 直接生成（DeepSeek）" : kind === "text" ? "② 文本抽取（粘贴文本）" : "① 文件抽取（已解析内容）";
       }
       const secFile = qs("ds-section-file-prompt");
       const secDir = qs("ds-section-direct-prompt");
@@ -657,6 +804,8 @@ async function refreshRegionVersions() {
   fillRegionVersionSelect();
   await loadExtractRegionVersionTable(state.regionSelectedVersionId);
   await loadReviewSnapshotVersionTable(state.reviewSnapshotVersionId);
+  // 版本列表与快照加载会覆盖 reviewSnapshotVersionId；在此之后对齐当前选中候选，避免与右侧编辑器错位
+  await syncReviewSnapshotHighlight(state.selectedCandidateId || "");
 }
 
 async function deleteSelectedRegionVersion() {
@@ -691,6 +840,7 @@ async function loadReviewSnapshotVersionTable(versionId) {
   const ver = payload.version || {};
   renderReviewSnapshotTable(ver.items || []);
   pickSnapshotRowForReview(state.selectedCandidateId);
+  scrollSnapshotPickedIntoView();
 }
 
 function pickSnapshotRowForReview(candidateId) {
@@ -701,6 +851,57 @@ function pickSnapshotRowForReview(candidateId) {
   document.querySelectorAll("#review-snapshot-table tbody tr[data-candidate-id]").forEach((tr) => {
     if (tr.dataset.candidateId === candidateId) tr.classList.add("is-snapshot-picked");
   });
+}
+
+function snapshotTableHasCandidateRow(candidateId) {
+  if (!candidateId) return false;
+  let found = false;
+  document.querySelectorAll("#review-snapshot-table tbody tr[data-candidate-id]").forEach((tr) => {
+    if (tr.dataset.candidateId === candidateId) found = true;
+  });
+  return found;
+}
+
+function scrollSnapshotPickedIntoView() {
+  const tr = document.querySelector("#review-snapshot-table tbody tr.is-snapshot-picked");
+  if (tr) tr.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+/** 左侧快照与右侧候选对齐：高亮对应行；若当前快照版本不含该候选则切换到包含它的版本 */
+async function syncReviewSnapshotHighlight(candidateId) {
+  if (!candidateId) {
+    pickSnapshotRowForReview("");
+    return;
+  }
+  pickSnapshotRowForReview(candidateId);
+  if (snapshotTableHasCandidateRow(candidateId)) {
+    scrollSnapshotPickedIntoView();
+    return;
+  }
+  if (!state.selectedFileId) return;
+  try {
+    const res = await api(
+      `/api/region-result-versions/by-candidate?candidate_id=${encodeURIComponent(candidateId)}&file_id=${encodeURIComponent(state.selectedFileId)}`,
+    );
+    const vid = (res.version_id || "").trim();
+    if (!vid) return;
+    if (!state.regionVersionsList.some((x) => x.version_id === vid)) {
+      await refreshRegionVersions();
+    }
+    state.reviewSnapshotVersionId = vid;
+    const sel = qs("review-region-version-select");
+    if (sel && state.regionVersionsList.some((x) => x.version_id === vid)) {
+      sel.value = vid;
+    }
+    updateRegionVersionMeta();
+    const payload = await api(`/api/region-result-versions/${encodeURIComponent(vid)}`);
+    const ver = payload.version || {};
+    renderReviewSnapshotTable(ver.items || []);
+    pickSnapshotRowForReview(candidateId);
+    scrollSnapshotPickedIntoView();
+  } catch {
+    pickSnapshotRowForReview(candidateId);
+  }
 }
 
 function renderRegionExtractTable(items) {
@@ -797,6 +998,18 @@ function parseOntologyCheck(candidate) {
   return null;
 }
 
+/** 抽取阶段写入的 ontology_binding.term_key（便于验收） */
+function parseOntologyBindingTermKey(candidate) {
+  if (!candidate || !candidate.review_note) return "";
+  try {
+    const n = JSON.parse(candidate.review_note);
+    const tk = n?.ontology_binding?.term_key;
+    return typeof tk === "string" ? tk : "";
+  } catch {
+    return "";
+  }
+}
+
 function ontologyBadgeHtml(oc) {
   if (!oc || !oc.issues || !oc.issues.length) {
     return '<span class="ontology-badge ok" title="无本体规则问题">—</span>';
@@ -819,10 +1032,13 @@ const EXTRACT_STATUS_LABEL = {
 
 const METHOD_LABEL = {
   deepseek:        "DeepSeek",
+  kimi:            "Kimi",
+  multi:           "双模型",
   local_rule:      "本地规则",
   region_v2_local: "V2本地",
   region_v2_deepseek: "V2+DS",
-  direct_deepseek: "直接生成",
+  direct_deepseek: "直接生成(DS)",
+  direct_kimi:     "直接生成(Kimi)",
 };
 
 function xbadgeHtml(status) {
@@ -835,6 +1051,8 @@ function methodBadgeHtml(method) {
   const m = (method || "").toLowerCase();
   let cls = "method-unknown";
   if (m.startsWith("deepseek")) cls = "method-deepseek";
+  else if (m === "kimi" || m.startsWith("direct_kimi")) cls = "method-kimi";
+  else if (m === "multi") cls = "method-multi";
   else if (m === "local_rule") cls = "method-local_rule";
   else if (m.startsWith("region_v2")) cls = "method-region_v2";
   const label = METHOD_LABEL[method] || method || "未知";
@@ -876,6 +1094,64 @@ function getFilteredCandidateRows() {
     }
     return true;
   });
+}
+
+/** 当前过滤列表中，用于保存/审核后跳转的下一条 id（末行则回到上一行） */
+function getNextRegionCandidateIdAfterCurrent(currentId) {
+  const rows = getFilteredCandidateRows();
+  const idx = rows.findIndex((r) => r.id === currentId);
+  if (rows.length === 0) return "";
+  if (idx === -1) return rows[0].id;
+  if (idx + 1 < rows.length) return rows[idx + 1].id;
+  if (idx > 0) return rows[idx - 1].id;
+  return rows[0].id;
+}
+
+function getNextCircuitCandidateIdAfterCurrent(currentId) {
+  const rows = state.circuitCandidates || [];
+  const idx = rows.findIndex((r) => r.id === currentId);
+  if (rows.length === 0) return "";
+  if (idx === -1) return rows[0].id;
+  if (idx + 1 < rows.length) return rows[idx + 1].id;
+  if (idx > 0) return rows[idx - 1].id;
+  return rows[0].id;
+}
+
+function getNextConnectionCandidateIdAfterCurrent(currentId) {
+  const rows = state.connectionCandidates || [];
+  const idx = rows.findIndex((r) => r.id === currentId);
+  if (rows.length === 0) return "";
+  if (idx === -1) return rows[0].id;
+  if (idx + 1 < rows.length) return rows[idx + 1].id;
+  if (idx > 0) return rows[idx - 1].id;
+  return rows[0].id;
+}
+
+async function refreshRegionReviewAfterSaveAndSelect(nextId) {
+  state.selectedCandidateId = nextId || "";
+  await refreshCandidates();
+  await refreshUnverified(state.selectedFileId);
+  await refreshTasks();
+  await refreshLogs();
+  renderInspector();
+}
+
+async function refreshCircuitReviewAfterSaveAndSelect(nextId) {
+  state.selectedCircuitCandidateId = nextId || "";
+  await refreshCircuitCandidates();
+  await refreshUnverifiedCircuits(state.selectedFileId);
+  await refreshTasks();
+  await refreshLogs();
+  renderInspector();
+}
+
+async function refreshConnectionReviewAfterSaveAndSelect(nextId) {
+  state.selectedConnectionCandidateId = nextId || "";
+  await refreshConnectionCandidates();
+  await refreshUnverifiedConnections(state.selectedFileId);
+  await refreshTasks();
+  await refreshLogs();
+  renderInspector();
 }
 
 function syncReviewSelectAllCheckbox() {
@@ -921,11 +1197,12 @@ function renderCandidateTable() {
       <td style="font-size:11px;">${uv ? uv.id : "-"}</td>
       <td style="font-size:11px;">${uv ? (uv.validation_status || "-") : "-"}</td>
       <td style="font-size:11px;">${ontologyBadgeHtml(parseOntologyCheck(it))}</td>
+      <td style="font-size:10px;color:#64748b;max-width:8rem;overflow:hidden;text-overflow:ellipsis;" title="${(parseOntologyBindingTermKey(it) || "—").replace(/"/g, "&quot;")}">${parseOntologyBindingTermKey(it) || "—"}</td>
     `;
     tbody.appendChild(tr);
   });
   syncReviewSelectAllCheckbox();
-  pickSnapshotRowForReview(state.selectedCandidateId);
+  void syncReviewSnapshotHighlight(state.selectedCandidateId);
 }
 
 function renderCircuitCandidateTable() {
@@ -1031,6 +1308,7 @@ function fillCandidateEditor(candidate) {
     if (statusBadgeEl) statusBadgeEl.innerHTML = "";
     if (methodBadgeEl) methodBadgeEl.innerHTML = "";
     if (sourceTextEl) sourceTextEl.value = "";
+    void syncReviewSnapshotHighlight("");
     return;
   }
   qs("review-id").value = candidate.id || "";
@@ -1054,6 +1332,7 @@ function fillCandidateEditor(candidate) {
     const oc = parseOntologyCheck(candidate);
     roc.textContent = oc ? JSON.stringify(oc, null, 2) : "(无本体规则命中)";
   }
+  void syncReviewSnapshotHighlight(candidate.id);
 }
 
 function fillCircuitEditor(candidate) {
@@ -1151,6 +1430,11 @@ function syncConfigPanel(runtime) {
   qs("cfg-deepseek-base").value = runtime?.deepseek?.base_url || "";
   qs("cfg-deepseek-model").value = runtime?.deepseek?.model || "";
   qs("cfg-deepseek-temperature").value = runtime?.deepseek?.temperature ?? 0.2;
+  if (qs("cfg-moonshot-enabled")) qs("cfg-moonshot-enabled").checked = !!runtime?.moonshot?.enabled;
+  if (qs("cfg-moonshot-key")) qs("cfg-moonshot-key").value = runtime?.moonshot?.api_key || "";
+  if (qs("cfg-moonshot-base")) qs("cfg-moonshot-base").value = runtime?.moonshot?.base_url || "";
+  if (qs("cfg-moonshot-model")) qs("cfg-moonshot-model").value = runtime?.moonshot?.model || "";
+  if (qs("cfg-moonshot-temperature")) qs("cfg-moonshot-temperature").value = runtime?.moonshot?.temperature ?? 0.2;
   qs("cfg-normalize-mode").value = runtime?.pipeline?.normalize_mode_default || "local";
   qs("cfg-validate-mode").value = runtime?.pipeline?.validate_mode_default || "local";
   const or = runtime?.pipeline?.ontology_rules || {};
@@ -1164,9 +1448,13 @@ function syncExtractSelectors() {
   const select = qs("extract-file-select");
   const circuitSelect = qs("circuit-extract-file-select");
   const connectionSelect = qs("connection-extract-file-select");
+  const finalCircuitSel = qs("final-circuit-file-select");
+  const finalConnSel = qs("final-connection-file-select");
   select.innerHTML = "";
   circuitSelect.innerHTML = "";
   connectionSelect.innerHTML = "";
+  if (finalCircuitSel) finalCircuitSel.innerHTML = "";
+  if (finalConnSel) finalConnSel.innerHTML = "";
   state.files.forEach((f) => {
     const opt = document.createElement("option");
     opt.value = f.file_id;
@@ -1182,11 +1470,474 @@ function syncExtractSelectors() {
     opt3.value = f.file_id;
     opt3.textContent = `${f.filename} (${f.file_type})`;
     connectionSelect.appendChild(opt3);
+
+    if (finalCircuitSel) {
+      const o = document.createElement("option");
+      o.value = f.file_id;
+      o.textContent = `${f.filename} (${f.file_type})`;
+      finalCircuitSel.appendChild(o);
+    }
+    if (finalConnSel) {
+      const o = document.createElement("option");
+      o.value = f.file_id;
+      o.textContent = `${f.filename} (${f.file_type})`;
+      finalConnSel.appendChild(o);
+    }
   });
   if (state.selectedFileId) {
     select.value = state.selectedFileId;
     circuitSelect.value = state.selectedFileId;
     connectionSelect.value = state.selectedFileId;
+    if (finalCircuitSel) finalCircuitSel.value = state.selectedFileId;
+    if (finalConnSel) finalConnSel.value = state.selectedFileId;
+  }
+}
+
+function pickRowField(row, keys) {
+  for (const k of keys) {
+    const v = row[k];
+    if (v != null && v !== "") return v;
+  }
+  return "";
+}
+
+function collectValidationRowPatch(tr) {
+  const patch = {};
+  tr.querySelectorAll(".vr-field[data-field]").forEach((el) => {
+    const f = el.dataset.field;
+    if (f === "alias_candidates") {
+      try {
+        patch.alias_candidates = JSON.parse(el.value || "[]");
+      } catch {
+        throw new Error("alias_candidates 需为合法 JSON 数组");
+      }
+    } else if (f === "confidence") {
+      patch.confidence = Number(el.value || 0);
+    } else {
+      patch[f] = el.value;
+    }
+  });
+  return patch;
+}
+
+function setValidationCenterMode(mode) {
+  if (mode) state.validationCenterMode = mode;
+  const m = state.validationCenterMode || "local";
+  document.querySelectorAll(".validation-mode-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.validationMode === m);
+  });
+  const panels = {
+    local: "validation-panel-local",
+    deepseek: "validation-panel-deepseek",
+    multi: "validation-panel-multi",
+  };
+  Object.entries(panels).forEach(([key, id]) => {
+    const p = qs(id);
+    if (p) p.hidden = key !== m;
+  });
+}
+
+function renderValidationRegionTable() {
+  const tbody = document.querySelector("#validation-region-table tbody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  state.validationRegionCandidates.forEach((row) => {
+    const tr = document.createElement("tr");
+    const cid = row.id || "";
+    tr.dataset.candidateId = cid;
+    const aliases = Array.isArray(row.alias_candidates)
+      ? JSON.stringify(row.alias_candidates)
+      : JSON.stringify(row.alias_candidates || []);
+    tr.innerHTML = `
+      <td class="mono td-shrink">${escapeHtml(cid)}</td>
+      <td class="mono td-shrink">${escapeHtml(row.global_region_id || "")}</td>
+      <td class="mono td-shrink">${escapeHtml(row.file_id || "")}</td>
+      <td class="mono td-shrink">${escapeHtml(row.lane || "")}</td>
+      <td class="mono td-shrink">${escapeHtml(row.parsed_document_id || "")}</td>
+      <td class="mono td-shrink">${escapeHtml(row.chunk_id || "")}</td>
+      <td><textarea class="vr-field" data-field="source_text" rows="2"></textarea></td>
+      <td><input class="vr-field" data-field="en_name_candidate" type="text" /></td>
+      <td><input class="vr-field" data-field="cn_name_candidate" type="text" /></td>
+      <td><textarea class="vr-field" data-field="alias_candidates" rows="2"></textarea></td>
+      <td><input class="vr-field" data-field="laterality_candidate" type="text" /></td>
+      <td><input class="vr-field" data-field="granularity_candidate" type="text" /></td>
+      <td><input class="vr-field" data-field="region_category_candidate" type="text" /></td>
+      <td><input class="vr-field" data-field="parent_region_candidate" type="text" /></td>
+      <td><input class="vr-field" data-field="ontology_source_candidate" type="text" /></td>
+      <td><input class="vr-field" data-field="confidence" type="number" step="0.0001" min="0" max="1" /></td>
+      <td class="mono td-shrink">${escapeHtml(row.extraction_method || "")}</td>
+      <td class="mono td-shrink">${escapeHtml(row.llm_model || "")}</td>
+      <td class="mono td-shrink">${escapeHtml(row.status || "")}</td>
+      <td><textarea class="vr-field vr-field--note" data-field="review_note" rows="2"></textarea></td>
+      <td class="mono td-shrink">${escapeHtml(row.created_at || "")}</td>
+      <td class="mono td-shrink">${escapeHtml(row.updated_at || "")}</td>
+      <td class="vr-actions"><button type="button" class="btn mini" data-vr-action="save">保存</button></td>
+    `;
+    const set = (selector, val) => {
+      const el = tr.querySelector(selector);
+      if (el) el.value = val != null ? String(val) : "";
+    };
+    set("textarea[data-field=source_text]", row.source_text);
+    set("input[data-field=en_name_candidate]", row.en_name_candidate);
+    set("input[data-field=cn_name_candidate]", row.cn_name_candidate);
+    set("textarea[data-field=alias_candidates]", aliases);
+    set("input[data-field=laterality_candidate]", row.laterality_candidate);
+    set("input[data-field=granularity_candidate]", row.granularity_candidate);
+    set("input[data-field=region_category_candidate]", row.region_category_candidate);
+    set("input[data-field=parent_region_candidate]", row.parent_region_candidate);
+    set("input[data-field=ontology_source_candidate]", row.ontology_source_candidate);
+    set("input[data-field=confidence]", row.confidence);
+    set("textarea[data-field=review_note]", row.review_note || "");
+    tbody.appendChild(tr);
+  });
+}
+
+function summarizePipelineRow(data) {
+  if (!data || !data.steps) return null;
+  const s = data.steps;
+  const llm = data.llm || {};
+  return {
+    local_verdict: s.local && s.local.verdict,
+    completeness_ok: s.completeness && s.completeness.ok,
+    missing_fields: s.completeness && s.completeness.missing_fields,
+    needs_llm: s.needs_llm,
+    invoke_llm: s.invoke_llm,
+    llm_skipped: s.llm_skipped,
+    kimi_ok: llm.kimi_ok,
+    deepseek_ok: llm.deepseek_ok,
+    partial: llm.partial,
+    partial_note: llm.partial_note,
+  };
+}
+
+function validationCenterModeToLlmMode(uiMode) {
+  if (uiMode === "local") return "none";
+  if (uiMode === "deepseek") return "deepseek";
+  return "multi";
+}
+
+function showValidationResultModal() {
+  const batch = state.lastValidationBatch;
+  const backdrop = qs("modal-validation-result");
+  const summary = qs("modal-validation-result-summary");
+  const detail = qs("modal-validation-result-detail");
+  const hint = qs("modal-validation-result-suggest-hint");
+  const btnApply = qs("btn-modal-validation-apply");
+  if (!backdrop || !summary || !detail) return;
+  if (!batch || !batch.rows) {
+    backdrop.hidden = true;
+    return;
+  }
+  const { mode, rows, cancelled } = batch;
+  const ok = rows.filter((r) => r.ok).length;
+  const fail = rows.length - ok;
+  const withPatch = rows.filter(
+    (r) => r.ok && r.proposed_patch && Object.keys(r.proposed_patch).length > 0,
+  ).length;
+  const cancelNote = cancelled ? " · 已取消" : "";
+  summary.textContent = `模式：${mode}${cancelNote} · 成功 ${ok} 条 · 失败 ${fail} 条 · 含可同步修改 ${withPatch} 条（先校验→完整性→按需 LLM）`;
+  const compact = rows.map((r) =>
+    r.ok
+      ? {
+          candidate_id: r.candidateId,
+          ok: true,
+          proposed_patch: r.proposed_patch || null,
+          summary: summarizePipelineRow(r.data),
+        }
+      : { candidate_id: r.candidateId, ok: false, error: r.error },
+  );
+  let str = JSON.stringify(compact, null, 2);
+  if (str.length > 14000) str = `${str.slice(0, 14000)}\n…（内容过长已截断）`;
+  detail.textContent = str;
+  if (hint && btnApply) {
+    if (withPatch > 0) {
+      hint.hidden = false;
+      hint.textContent = `有 ${withPatch} 条含模型生成的字段修改建议，确认后「应用」将一次性写入数据库（含 review_note 流水线摘要）。`;
+      btnApply.hidden = false;
+    } else {
+      hint.hidden = true;
+      btnApply.hidden = true;
+    }
+  }
+  backdrop.hidden = false;
+}
+
+function closeValidationResultModal() {
+  const backdrop = qs("modal-validation-result");
+  if (backdrop) backdrop.hidden = true;
+}
+
+async function applyPendingValidationSuggestions() {
+  const batch = state.lastValidationBatch;
+  if (!batch || !batch.rows) return;
+  let n = 0;
+  for (const r of batch.rows) {
+    if (!r.ok || !r.proposed_patch || !Object.keys(r.proposed_patch).length) continue;
+    try {
+      const resp = await fetch(`/api/candidates/${encodeURIComponent(r.candidateId)}/validation-pipeline/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patch: r.proposed_patch,
+          pipeline_meta: { steps: r.data.steps, llm: r.data.llm },
+          reviewer: "user",
+        }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || "apply_failed");
+      n++;
+    } catch (e) {
+      appendClientLog(`[ERROR] apply pipeline id=${r.candidateId} reason=${e.message}`, "error");
+    }
+  }
+  appendClientLog(`[UI] applied validation pipeline patches count=${n}`);
+  closeValidationResultModal();
+  await refreshValidationRegionCandidates();
+}
+
+async function refreshValidationRegionCandidates() {
+  const meta = qs("validation-region-meta");
+  const tbody = document.querySelector("#validation-region-table tbody");
+  if (!tbody) return;
+  const lane = (qs("validation-region-lane-select") && qs("validation-region-lane-select").value) || "local";
+  tbody.innerHTML = "";
+  try {
+    const data = await api(`/api/region-candidates?lane=${encodeURIComponent(lane)}`);
+    state.validationRegionCandidates = data.items || [];
+    if (meta) meta.textContent = `共 ${state.validationRegionCandidates.length} 条（数据库 candidate_region · lane=${lane}）`;
+    renderValidationRegionTable();
+  } catch (err) {
+    if (meta) meta.textContent = `加载失败: ${err.message}`;
+  }
+}
+
+async function saveValidationRegionRow(candidateId, tr) {
+  const patch = collectValidationRowPatch(tr);
+  let res = await saveRegionCandidatePatch(candidateId, patch);
+  if (res.duplicate_conflict) {
+    const choice = await openRegionDuplicateSaveModal(res.duplicate_conflict);
+    if (choice === "replace") {
+      res = await saveRegionCandidatePatch(candidateId, patch, "replace_others");
+    } else if (choice === "keep") {
+      res = await saveRegionCandidatePatch(candidateId, patch, "keep_duplicates");
+    } else {
+      return;
+    }
+    if (!res.ok) throw new Error(res.error || "save_failed");
+  }
+  appendClientLog(`[UI] validation center saved candidate_id=${candidateId}`);
+  await refreshValidationRegionCandidates();
+}
+
+async function runValidationPipelineRow(candidateId, opts = {}) {
+  const skipRefresh = !!opts.skipRefresh;
+  const llmMode = validationCenterModeToLlmMode(state.validationCenterMode || "local");
+  const resp = await fetch(`/api/candidates/${encodeURIComponent(candidateId)}/validation-pipeline`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ llm_mode: llmMode, reviewer: "user" }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.ok === false) {
+    throw new Error(data.error || data.detail || `HTTP_${resp.status}`);
+  }
+  if (!skipRefresh) {
+    appendClientLog(`[UI] validation pipeline candidate_id=${candidateId}`);
+    await refreshValidationRegionCandidates();
+  }
+  return data;
+}
+
+async function runValidationBatch() {
+  const mode = state.validationCenterMode || "local";
+  const ids = state.validationRegionCandidates.map((r) => r.id).filter(Boolean);
+  const meta = qs("validation-region-meta");
+  if (!ids.length) {
+    alert("请先点击「从数据库刷新」加载候选。");
+    return;
+  }
+  const label = mode === "local" ? "本地（无 LLM）" : mode === "deepseek" ? "DeepSeek" : "Kimi+DeepSeek";
+  if (!window.confirm(`将对当前列表共 ${ids.length} 条执行验证流水线（正确性→完整性→按需 ${label}），是否继续？`)) return;
+  beginValidationBatchUI(ids.length, label);
+  const rows = [];
+  let cancelled = false;
+  try {
+    for (let i = 0; i < ids.length; i++) {
+      if (state.validationBatchCancelled) break;
+      await waitWhileValidationPaused();
+      if (state.validationBatchCancelled) break;
+      if (meta) meta.textContent = `验证中 ${i + 1} / ${ids.length} …`;
+      startValidationSegmentProgress(i, ids.length, label);
+      try {
+        const data = await runValidationPipelineRow(ids[i], { skipRefresh: true });
+        stopValidationSegmentProgress();
+        const pp = data.proposed_patch && typeof data.proposed_patch === "object" ? data.proposed_patch : {};
+        rows.push({
+          candidateId: ids[i],
+          ok: true,
+          data,
+          proposed_patch: Object.keys(pp).length ? pp : null,
+        });
+        setValidationBatchProgressDeterministic(rows.length, ids.length, label);
+      } catch (e) {
+        stopValidationSegmentProgress();
+        rows.push({ candidateId: ids[i], ok: false, error: e.message });
+        setValidationBatchProgressDeterministic(rows.length, ids.length, label);
+      }
+    }
+    cancelled = !!state.validationBatchCancelled;
+  } finally {
+    endValidationBatchUI(rows.length, ids.length, label, cancelled);
+  }
+  state.lastValidationBatch = { mode, rows, cancelled };
+  if (meta) {
+    meta.textContent = cancelled
+      ? `已取消 · 已处理 ${rows.length} / ${ids.length} 条，见弹窗`
+      : `「${label}」完成，见弹窗`;
+  }
+  appendClientLog(
+    `[UI] validation pipeline batch mode=${mode} total=${ids.length} done=${rows.length} cancelled=${cancelled}`,
+  );
+  showValidationResultModal();
+  await refreshValidationRegionCandidates();
+}
+
+async function promoteValidationRegionCandidatesToFinal() {
+  const laneEl = qs("validation-region-lane-select");
+  const laneVal = laneEl ? laneEl.value : "local";
+  const granEl = qs("validation-promote-granularity");
+  const granularity = granEl ? granEl.value : "all";
+  const ids = state.validationRegionCandidates.map((r) => r.id).filter(Boolean);
+  const meta = qs("validation-region-meta");
+  if (!ids.length) {
+    alert("请先点击「从数据库刷新」加载候选。");
+    return;
+  }
+  const granLabel =
+    granularity === "all" ? "全部颗粒度（写入顺序 major→sub→allen）" : `仅颗粒度「${granularity}」`;
+  if (
+    !window.confirm(
+      `将对当前列表共 ${ids.length} 条尝试晋升到正式库：${granLabel}。\n\n前提：已「入未验证库」，且在验证与提升中心对未验证记录执行规则校验且通过；不符合的条将跳过。\n\n是否继续？`,
+    )
+  ) {
+    return;
+  }
+  if (meta) meta.textContent = "正在按颗粒度晋升到正式库…";
+  try {
+    const res = await api("/api/region-candidates/promote-to-final", {
+      method: "POST",
+      body: JSON.stringify({
+        lane: laneVal,
+        granularity,
+        candidate_ids: ids,
+        reviewer: "user",
+      }),
+    });
+    const sum = res.summary || {};
+    const sk = (res.skipped || []).length;
+    appendClientLog(
+      `[PROMOTE] validation_center to_final granularity=${granularity} ok=${sum.success_count ?? 0}/${sum.total ?? 0} skipped=${sk}`,
+    );
+    alert(
+      `完成。写入成功 ${sum.success_count ?? 0} / ${sum.total ?? 0}；跳过 ${sk} 条（未入未验证库、未校验通过或已晋升等）。详情见日志。`,
+    );
+    await refreshValidationRegionCandidates();
+  } catch (err) {
+    appendClientLog(`[ERROR] promote to final reason=${err.message}`, "error");
+    alert(err.message);
+    if (meta) meta.textContent = `晋升失败: ${err.message}`;
+  }
+}
+
+async function refreshFinalCircuits() {
+  const meta = qs("final-circuit-meta");
+  const tbody = document.querySelector("#final-circuit-table tbody");
+  if (!tbody) return;
+  const fileId = (qs("final-circuit-file-select") && qs("final-circuit-file-select").value) || state.selectedFileId || "";
+  tbody.innerHTML = "";
+  try {
+    const data = await api(`/api/final/circuits?file_id=${encodeURIComponent(fileId)}&limit=500`);
+    const items = data.items || [];
+    const warn = (data.warnings || []).filter(Boolean);
+    if (meta) {
+      const bits = [`共 ${items.length} 条（生产库终表）`];
+      if (warn.length) bits.push(`警告: ${warn.join("；")}`);
+      meta.textContent = bits.join(" · ");
+    }
+    items.forEach((row) => {
+      const idCol = row._id_column || "id";
+      const pk = row[idCol];
+      const kind = pickRowField(row, ["circuit_kind", "kind", "circuit_kind_candidate"]);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(row._final_granularity)}</td>
+        <td>${escapeHtml(row._final_table)}</td>
+        <td>${escapeHtml(pk)}</td>
+        <td>${escapeHtml(row.circuit_code)}</td>
+        <td>${escapeHtml(row.en_name)}</td>
+        <td>${escapeHtml(row.cn_name)}</td>
+        <td>${escapeHtml(kind)}</td>
+        <td>${escapeHtml(row.data_source)}</td>
+        <td>${escapeHtml(row.updated_at || row.created_at || "")}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    if (meta) meta.textContent = `加载失败: ${err.message}`;
+  }
+}
+
+async function refreshFinalConnections() {
+  const meta = qs("final-connection-meta");
+  const tbody = document.querySelector("#final-connection-table tbody");
+  if (!tbody) return;
+  const fileId = (qs("final-connection-file-select") && qs("final-connection-file-select").value) || state.selectedFileId || "";
+  tbody.innerHTML = "";
+  try {
+    const data = await api(`/api/final/connections?file_id=${encodeURIComponent(fileId)}&limit=500`);
+    const items = data.items || [];
+    const warn = (data.warnings || []).filter(Boolean);
+    if (meta) {
+      const bits = [`共 ${items.length} 条（生产库终表）`];
+      if (warn.length) bits.push(`警告: ${warn.join("；")}`);
+      meta.textContent = bits.join(" · ");
+    }
+    items.forEach((row) => {
+      const idCol = row._id_column || "id";
+      const pk = row[idCol];
+      const modality = pickRowField(row, ["connection_modality", "modality"]);
+      const src = pickRowField(row, [
+        "source_major_region_id",
+        "source_sub_region_id",
+        "source_allen_region_id",
+        "source_region_ref",
+        "source_region",
+      ]);
+      const tgt = pickRowField(row, [
+        "target_major_region_id",
+        "target_sub_region_id",
+        "target_allen_region_id",
+        "target_region_ref",
+        "target_region",
+      ]);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(row._final_granularity)}</td>
+        <td>${escapeHtml(row._final_table)}</td>
+        <td>${escapeHtml(pk)}</td>
+        <td>${escapeHtml(row.connection_code)}</td>
+        <td>${escapeHtml(row.en_name)}</td>
+        <td>${escapeHtml(row.cn_name)}</td>
+        <td>${escapeHtml(modality)}</td>
+        <td>${escapeHtml(src)}</td>
+        <td>${escapeHtml(tgt)}</td>
+        <td>${escapeHtml(row.data_source)}</td>
+        <td>${escapeHtml(row.updated_at || row.created_at || "")}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    if (meta) meta.textContent = `加载失败: ${err.message}`;
   }
 }
 
@@ -1409,6 +2160,12 @@ async function refreshReviewDataForActiveTab() {
     await refreshCircuitCandidates();
   } else if (t === "tab-review-connection") {
     await refreshConnectionCandidates();
+  } else if (t === "tab-validation-region") {
+    await refreshValidationRegionCandidates();
+  } else if (t === "tab-validation-circuit") {
+    await refreshFinalCircuits();
+  } else if (t === "tab-validation-connection") {
+    await refreshFinalConnections();
   }
 }
 
@@ -1487,7 +2244,7 @@ async function runFileAction(action, fileId) {
       const mode = qs("extract-mode-select").value || "local";
       let profileKey = "";
       let deepseekOverride = undefined;
-      if (mode === "deepseek") {
+      if (mode === "deepseek" || mode === "multi") {
         const cfg = await openDeepseekRegionModal("file");
         if (!cfg) return;
         profileKey = cfg.profile_key || "";
@@ -1496,7 +2253,8 @@ async function runFileAction(action, fileId) {
       const body = { mode };
       if (profileKey) body.profile_key = profileKey;
       if (deepseekOverride && Object.keys(deepseekOverride).length) body.deepseek_override = deepseekOverride;
-      await api(`/api/files/${fileId}/extract-regions`, { method: "POST", body: JSON.stringify(body) });
+      const exRes = await api(`/api/files/${fileId}/extract-regions`, { method: "POST", body: JSON.stringify(body) });
+      notifyRegionDuplicateHint(exRes);
       appendClientLog(`[EXTRACT] region_extract triggered file_id=${fileId} mode=${mode}`);
     }
     await bootstrap();
@@ -1531,6 +2289,13 @@ async function saveConfig() {
       model: qs("cfg-deepseek-model").value,
       temperature: Number(qs("cfg-deepseek-temperature").value || 0.2),
     },
+    moonshot: {
+      enabled: qs("cfg-moonshot-enabled")?.checked || false,
+      api_key: qs("cfg-moonshot-key")?.value || "",
+      base_url: (qs("cfg-moonshot-base")?.value || "").trim(),
+      model: (qs("cfg-moonshot-model")?.value || "").trim(),
+      temperature: Number(qs("cfg-moonshot-temperature")?.value || 0.2),
+    },
     pipeline: {
       normalize_mode_default: qs("cfg-normalize-mode").value,
       validate_mode_default: qs("cfg-validate-mode").value,
@@ -1559,6 +2324,81 @@ function currentCandidatePatch() {
     confidence: Number(qs("review-confidence").value || 0),
     review_note: qs("review-note").value.trim(),
   };
+}
+
+/** 保存脑区候选；409 时带 duplicate_conflict，不抛错以便弹窗处理 */
+async function saveRegionCandidatePatch(id, patch, duplicateResolution) {
+  const body = { patch, reviewer: "user" };
+  if (duplicateResolution) body.duplicate_resolution = duplicateResolution;
+  const resp = await fetch(`/api/candidates/${encodeURIComponent(id)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await resp.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { ok: false, error: text };
+  }
+  if (resp.status === 409 && data.duplicate_conflict) {
+    return { ok: false, duplicate_conflict: data.duplicate_conflict, error: data.error };
+  }
+  if (!resp.ok || data.ok === false) {
+    throw new Error(data.error || `HTTP_${resp.status}`);
+  }
+  return { ok: true, ...data };
+}
+
+function openRegionDuplicateSaveModal(dc) {
+  return new Promise((resolve) => {
+    const backdrop = qs("modal-region-dup-save");
+    const msg = qs("modal-region-dup-save-msg");
+    const detail = qs("modal-region-dup-save-detail");
+    if (!backdrop || !msg) {
+      resolve("cancel");
+      return;
+    }
+    const n = (dc.conflicting_ids && dc.conflicting_ids.length) || 0;
+    msg.textContent = `与 ${n} 条已有候选的 EN/CN 相同（英文小写 + 中文），请选择如何处理。`;
+    const en = dc.en || "—";
+    const cn = dc.cn || "—";
+    const ids = (dc.conflicting_ids || []).slice(0, 8).join("\n");
+    detail.textContent = `当前名称：EN「${en}」 CN「${cn}」\n冲突候选 id（共 ${n} 条）：\n${ids}${n > 8 ? "\n…" : ""}`;
+    backdrop.hidden = false;
+    const bReplace = qs("btn-region-dup-replace");
+    const bKeep = qs("btn-region-dup-keep");
+    const bCancel = qs("btn-region-dup-cancel");
+    const cleanup = () => {
+      backdrop.hidden = true;
+      if (bReplace) bReplace.onclick = null;
+      if (bKeep) bKeep.onclick = null;
+      if (bCancel) bCancel.onclick = null;
+    };
+    const done = (v) => {
+      cleanup();
+      resolve(v);
+    };
+    if (bReplace) bReplace.onclick = () => done("replace");
+    if (bKeep) bKeep.onclick = () => done("keep");
+    if (bCancel) bCancel.onclick = () => done("cancel");
+  });
+}
+
+async function resolveDuplicateAndSave(id, patch) {
+  let r = await saveRegionCandidatePatch(id, patch, null);
+  if (r.ok) return r;
+  if (!r.duplicate_conflict) throw new Error(r.error || "save_failed");
+  const choice = await openRegionDuplicateSaveModal(r.duplicate_conflict);
+  if (choice === "cancel") return { ok: false, cancelled: true };
+  const mode = choice === "replace" ? "replace_others" : "keep_duplicates";
+  r = await saveRegionCandidatePatch(id, patch, mode);
+  if (!r.ok) {
+    if (r.duplicate_conflict) throw new Error("仍然冲突，请刷新后重试");
+    throw new Error(r.error || "save_failed");
+  }
+  return r;
 }
 
 function currentCircuitPatch() {
@@ -1590,20 +2430,50 @@ function currentCircuitPatch() {
 }
 
 async function saveCandidateEdit() {
-  const id = qs("review-id").value;
-  if (!id) return;
-  await api(`/api/candidates/${id}`, {
-    method: "POST",
-    body: JSON.stringify({ patch: currentCandidatePatch(), reviewer: "user" }),
-  });
+  const id = qs("review-id")?.value;
+  if (!id) {
+    appendClientLog("[REVIEW] 保存跳过：未选中候选", "warn");
+    return;
+  }
+  const nextId = getNextRegionCandidateIdAfterCurrent(id);
+  const patch = currentCandidatePatch();
+  const r = await resolveDuplicateAndSave(id, patch);
+  if (r.cancelled) return;
+  appendClientLog(`[REVIEW] edit candidate_id=${id}`);
+  await refreshRegionReviewAfterSaveAndSelect(nextId);
+}
+
+/** 仅写入修改并刷新当前行展示，不跳转（供「审核通过/驳回」先保存再审核） */
+async function saveCandidateEditWithoutNavigate() {
+  const id = qs("review-id")?.value;
+  if (!id) return false;
+  const patch = currentCandidatePatch();
+  const r = await resolveDuplicateAndSave(id, patch);
+  if (r.cancelled) return false;
   appendClientLog(`[REVIEW] edit candidate_id=${id}`);
   await refreshCandidates();
   renderInspector();
+  return true;
 }
 
 async function saveCircuitCandidateEdit() {
-  const id = qs("c-review-id").value;
-  if (!id) return;
+  const id = qs("c-review-id")?.value;
+  if (!id) {
+    appendClientLog("[REVIEW] 回路保存跳过：未选中候选", "warn");
+    return;
+  }
+  const nextId = getNextCircuitCandidateIdAfterCurrent(id);
+  await api(`/api/circuit-candidates/${id}`, {
+    method: "POST",
+    body: JSON.stringify({ patch: currentCircuitPatch(), reviewer: "user" }),
+  });
+  appendClientLog(`[REVIEW] edit circuit_candidate_id=${id}`);
+  await refreshCircuitReviewAfterSaveAndSelect(nextId);
+}
+
+async function saveCircuitCandidateEditWithoutNavigate() {
+  const id = qs("c-review-id")?.value;
+  if (!id) return false;
   await api(`/api/circuit-candidates/${id}`, {
     method: "POST",
     body: JSON.stringify({ patch: currentCircuitPatch(), reviewer: "user" }),
@@ -1611,28 +2481,44 @@ async function saveCircuitCandidateEdit() {
   appendClientLog(`[REVIEW] edit circuit_candidate_id=${id}`);
   await refreshCircuitCandidates();
   renderInspector();
+  return true;
 }
 
-async function reviewCandidate(action) {
-  const id = qs("review-id").value;
-  if (!id) return;
+/** 仅调用审核 API，不刷新全局（由调用方设置选中并刷新） */
+async function reviewCandidateOnly(action) {
+  const id = qs("review-id")?.value;
+  if (!id) throw new Error("未选中候选");
   await api(`/api/candidates/${id}/review`, {
     method: "POST",
     body: JSON.stringify({ action, reviewer: "user", note: qs("review-note").value.trim() }),
   });
   appendClientLog(`[REVIEW] ${action} candidate_id=${id}`);
-  await bootstrap();
 }
 
-async function reviewCircuitCandidate(action) {
-  const id = qs("c-review-id").value;
+async function reviewCandidate(action) {
+  const id = qs("review-id")?.value;
   if (!id) return;
+  const nextId = getNextRegionCandidateIdAfterCurrent(id);
+  await reviewCandidateOnly(action);
+  await refreshRegionReviewAfterSaveAndSelect(nextId);
+}
+
+async function reviewCircuitCandidateOnly(action) {
+  const id = qs("c-review-id")?.value;
+  if (!id) throw new Error("未选中回路候选");
   await api(`/api/circuit-candidates/${id}/review`, {
     method: "POST",
     body: JSON.stringify({ action, reviewer: "user", note: qs("c-review-note").value.trim() }),
   });
   appendClientLog(`[REVIEW] ${action} circuit_candidate_id=${id}`);
-  await bootstrap();
+}
+
+async function reviewCircuitCandidate(action) {
+  const id = qs("c-review-id")?.value;
+  if (!id) return;
+  const nextId = getNextCircuitCandidateIdAfterCurrent(id);
+  await reviewCircuitCandidateOnly(action);
+  await refreshCircuitReviewAfterSaveAndSelect(nextId);
 }
 
 async function runRegionExtractFile() {
@@ -1644,7 +2530,7 @@ async function runRegionExtractFile() {
   }
   let profileKey = "";
   let deepseekOverride = undefined;
-  if (mode === "deepseek") {
+  if (mode === "deepseek" || mode === "multi") {
     const cfg = await openDeepseekRegionModal("file");
     if (!cfg) return;
     profileKey = cfg.profile_key || "";
@@ -1666,6 +2552,7 @@ async function runRegionExtractFile() {
     state.regionSelectedVersionId = res.version_id;
     state.reviewSnapshotVersionId = res.version_id;
   }
+  notifyRegionDuplicateHint(res);
   appendClientLog(`[EXTRACT] file file_id=${fileId} mode=${mode} version=${res.version_id || "-"}`);
   await bootstrap();
   await refreshRegionVersions();
@@ -1685,7 +2572,7 @@ async function runRegionExtractText() {
   }
   let profileKey = "";
   let deepseekOverride = undefined;
-  if (mode === "deepseek") {
+  if (mode === "deepseek" || mode === "multi") {
     const cfg = await openDeepseekRegionModal("text");
     if (!cfg) return;
     profileKey = cfg.profile_key || "";
@@ -1707,6 +2594,7 @@ async function runRegionExtractText() {
     state.regionSelectedVersionId = res.version_id;
     state.reviewSnapshotVersionId = res.version_id;
   }
+  notifyRegionDuplicateHint(res);
   appendClientLog(`[EXTRACT] text file_id=${fileId} mode=${mode}`);
   await bootstrap();
   await refreshRegionVersions();
@@ -1745,7 +2633,40 @@ async function runRegionExtractDirect() {
     state.regionSelectedVersionId = res.version_id;
     state.reviewSnapshotVersionId = res.version_id;
   }
+  notifyRegionDuplicateHint(res);
   appendClientLog(`[EXTRACT] direct file_id=${fileId}`);
+  await bootstrap();
+  await refreshRegionVersions();
+}
+
+async function runRegionExtractDirectKimi() {
+  const fileId = qs("extract-file-select").value || state.selectedFileId;
+  if (!fileId) {
+    alert("请先选择文件");
+    return;
+  }
+  const params = {
+    topic: (qs("region-direct-topic").value || "脑区").trim(),
+    species: (qs("region-direct-species").value || "人类").trim(),
+    granularity: (qs("region-direct-granularity").value || "major").trim(),
+    extra_instructions: (qs("region-direct-extra").value || "").trim(),
+  };
+  const body = { params, file_id: fileId, provider: "kimi" };
+
+  const res = await withRegionProgress("Kimi 直接生成", () =>
+    api("/api/generate/regions-direct", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+  state.selectedFileId = fileId;
+  if (qs("extract-file-select")) qs("extract-file-select").value = fileId;
+  if (res.version_id) {
+    state.regionSelectedVersionId = res.version_id;
+    state.reviewSnapshotVersionId = res.version_id;
+  }
+  notifyRegionDuplicateHint(res);
+  appendClientLog(`[EXTRACT] direct_kimi file_id=${fileId}`);
   await bootstrap();
   await refreshRegionVersions();
 }
@@ -1817,6 +2738,7 @@ async function applyRegionSnapshotToCandidates() {
     method: "POST",
     body: JSON.stringify({ version_id: vid }),
   });
+  notifyRegionDuplicateHint(res);
   appendClientLog(`[REVIEW] snapshot→candidates version_id=${vid} count=${res.count ?? "-"}`);
   await refreshCandidates();
 }
@@ -2017,8 +2939,23 @@ function currentConnectionPatch() {
 }
 
 async function saveConnectionCandidateEdit() {
-  const id = qs("conn-review-id").value;
-  if (!id) return;
+  const id = qs("conn-review-id")?.value;
+  if (!id) {
+    appendClientLog("[REVIEW] 连接保存跳过：未选中候选", "warn");
+    return;
+  }
+  const nextId = getNextConnectionCandidateIdAfterCurrent(id);
+  await api(`/api/connection-candidates/${id}`, {
+    method: "POST",
+    body: JSON.stringify({ patch: currentConnectionPatch(), reviewer: "user" }),
+  });
+  appendClientLog(`[REVIEW] edit connection_candidate_id=${id}`);
+  await refreshConnectionReviewAfterSaveAndSelect(nextId);
+}
+
+async function saveConnectionCandidateEditWithoutNavigate() {
+  const id = qs("conn-review-id")?.value;
+  if (!id) return false;
   await api(`/api/connection-candidates/${id}`, {
     method: "POST",
     body: JSON.stringify({ patch: currentConnectionPatch(), reviewer: "user" }),
@@ -2026,17 +2963,25 @@ async function saveConnectionCandidateEdit() {
   appendClientLog(`[REVIEW] edit connection_candidate_id=${id}`);
   await refreshConnectionCandidates();
   renderInspector();
+  return true;
 }
 
-async function reviewConnectionCandidate(action) {
-  const id = qs("conn-review-id").value;
-  if (!id) return;
+async function reviewConnectionCandidateOnly(action) {
+  const id = qs("conn-review-id")?.value;
+  if (!id) throw new Error("未选中连接候选");
   await api(`/api/connection-candidates/${id}/review`, {
     method: "POST",
     body: JSON.stringify({ action, reviewer: "user", note: qs("conn-review-note").value.trim() }),
   });
   appendClientLog(`[REVIEW] ${action} connection_candidate_id=${id}`);
-  await bootstrap();
+}
+
+async function reviewConnectionCandidate(action) {
+  const id = qs("conn-review-id")?.value;
+  if (!id) return;
+  const nextId = getNextConnectionCandidateIdAfterCurrent(id);
+  await reviewConnectionCandidateOnly(action);
+  await refreshConnectionReviewAfterSaveAndSelect(nextId);
 }
 
 async function commitApprovedConnections() {
@@ -2243,6 +3188,132 @@ function bindEvents() {
     }
   });
 
+  const vrl = qs("validation-region-lane-select");
+  if (vrl) {
+    vrl.addEventListener("change", async () => {
+      if (state.activeTab === "tab-validation-region") await refreshValidationRegionCandidates();
+    });
+  }
+  const fcs = qs("final-circuit-file-select");
+  if (fcs) {
+    fcs.addEventListener("change", async () => {
+      if (state.activeTab === "tab-validation-circuit") await refreshFinalCircuits();
+    });
+  }
+  const fns = qs("final-connection-file-select");
+  if (fns) {
+    fns.addEventListener("change", async () => {
+      if (state.activeTab === "tab-validation-connection") await refreshFinalConnections();
+    });
+  }
+  qs("btn-validation-region-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshValidationRegionCandidates();
+    } catch (err) {
+      appendClientLog(`[ERROR] validation region refresh reason=${err.message}`, "error");
+    }
+  });
+  qs("btn-validation-promote-final")?.addEventListener("click", async () => {
+    try {
+      await promoteValidationRegionCandidatesToFinal();
+    } catch (err) {
+      appendClientLog(`[ERROR] validation promote final reason=${err.message}`, "error");
+      alert(err.message);
+    }
+  });
+
+  const vrTbody = document.querySelector("#validation-region-table tbody");
+  if (vrTbody) {
+    vrTbody.addEventListener("click", async (evt) => {
+      const btn = evt.target.closest("button[data-vr-action]");
+      if (!btn || btn.dataset.vrAction !== "save") return;
+      const tr = btn.closest("tr");
+      const id = tr && tr.dataset.candidateId;
+      if (!id) return;
+      try {
+        await saveValidationRegionRow(id, tr);
+      } catch (err) {
+        appendClientLog(`[ERROR] validation center save reason=${err.message}`, "error");
+        alert(err.message);
+      }
+    });
+  }
+
+  document.querySelectorAll(".validation-mode-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const m = btn.dataset.validationMode;
+      if (m) setValidationCenterMode(m);
+    });
+  });
+
+  qs("btn-validation-exec-local")?.addEventListener("click", async () => {
+    try {
+      setValidationCenterMode("local");
+      await runValidationBatch();
+    } catch (err) {
+      appendClientLog(`[ERROR] validation batch local reason=${err.message}`, "error");
+      alert(err.message);
+    }
+  });
+  qs("btn-validation-exec-deepseek")?.addEventListener("click", async () => {
+    try {
+      setValidationCenterMode("deepseek");
+      await runValidationBatch();
+    } catch (err) {
+      appendClientLog(`[ERROR] validation batch deepseek reason=${err.message}`, "error");
+      alert(err.message);
+    }
+  });
+  qs("btn-validation-exec-multi")?.addEventListener("click", async () => {
+    try {
+      setValidationCenterMode("multi");
+      await runValidationBatch();
+    } catch (err) {
+      appendClientLog(`[ERROR] validation batch multi reason=${err.message}`, "error");
+      alert(err.message);
+    }
+  });
+
+  qs("btn-validation-batch-pause")?.addEventListener("click", () => {
+    if (!state.validationBatchRunning) return;
+    state.validationBatchPaused = !state.validationBatchPaused;
+    const btn = qs("btn-validation-batch-pause");
+    if (btn) btn.textContent = state.validationBatchPaused ? "继续" : "暂停";
+  });
+  qs("btn-validation-batch-cancel")?.addEventListener("click", () => {
+    if (!state.validationBatchRunning) return;
+    state.validationBatchCancelled = true;
+    state.validationBatchPaused = false;
+    appendClientLog("[UI] validation batch cancel requested", "info");
+  });
+
+  qs("btn-modal-validation-close")?.addEventListener("click", () => closeValidationResultModal());
+  qs("modal-validation-result")?.addEventListener("click", (evt) => {
+    if (evt.target.id === "modal-validation-result") closeValidationResultModal();
+  });
+  qs("btn-modal-validation-apply")?.addEventListener("click", async () => {
+    try {
+      await applyPendingValidationSuggestions();
+    } catch (err) {
+      appendClientLog(`[ERROR] apply suggestions reason=${err.message}`, "error");
+      alert(err.message);
+    }
+  });
+  qs("btn-final-circuit-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshFinalCircuits();
+    } catch (err) {
+      appendClientLog(`[ERROR] final circuits refresh reason=${err.message}`, "error");
+    }
+  });
+  qs("btn-final-connection-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshFinalConnections();
+    } catch (err) {
+      appendClientLog(`[ERROR] final connections refresh reason=${err.message}`, "error");
+    }
+  });
+
   document.querySelectorAll(".region-mode-btn").forEach((btn) => {
     btn.addEventListener("click", () => setRegionExtractMode(btn.dataset.regionMode));
   });
@@ -2279,6 +3350,18 @@ function bindEvents() {
       } catch (err) {
         appendClientLog(`[ERROR] direct generate failed reason=${err.message}`, "error");
         alert(`直接生成失败: ${err.message}`);
+      }
+    });
+  }
+
+  const brdk = qs("btn-region-run-direct-kimi");
+  if (brdk) {
+    brdk.addEventListener("click", async () => {
+      try {
+        await runRegionExtractDirectKimi();
+      } catch (err) {
+        appendClientLog(`[ERROR] kimi direct generate failed reason=${err.message}`, "error");
+        alert(`Kimi 直接生成失败: ${err.message}`);
       }
     });
   }
@@ -2399,25 +3482,28 @@ function bindEvents() {
     }
   });
 
-  document.querySelector("#candidate-table tbody").addEventListener("change", (evt) => {
-    const cb = evt.target.closest("input.review-cb");
-    if (!cb) return;
-    const id = cb.dataset.candidateId;
-    if (cb.checked) state.reviewBatchIds.add(id);
-    else state.reviewBatchIds.delete(id);
-    syncReviewSelectAllCheckbox();
-  });
+  const candidateTableTbody = document.querySelector("#candidate-table tbody");
+  if (candidateTableTbody) {
+    candidateTableTbody.addEventListener("change", (evt) => {
+      const cb = evt.target.closest("input.review-cb");
+      if (!cb) return;
+      const id = cb.dataset.candidateId;
+      if (cb.checked) state.reviewBatchIds.add(id);
+      else state.reviewBatchIds.delete(id);
+      syncReviewSelectAllCheckbox();
+    });
 
-  document.querySelector("#candidate-table tbody").addEventListener("click", (evt) => {
-    if (evt.target.closest("input.review-cb")) return;
-    if (evt.target.closest("input[type=checkbox]")) return;
-    const row = evt.target.closest("tr[data-candidate-id]");
-    if (!row) return;
-    state.selectedCandidateId = row.dataset.candidateId;
-    renderCandidateTable();
-    fillCandidateEditor(state.candidates.find((it) => it.id === state.selectedCandidateId));
-    renderInspector();
-  });
+    candidateTableTbody.addEventListener("click", (evt) => {
+      if (evt.target.closest("input.review-cb")) return;
+      if (evt.target.closest("input[type=checkbox]")) return;
+      const row = evt.target.closest("tr[data-candidate-id]");
+      if (!row) return;
+      state.selectedCandidateId = row.dataset.candidateId;
+      renderCandidateTable();
+      fillCandidateEditor(state.candidates.find((it) => it.id === state.selectedCandidateId));
+      renderInspector();
+    });
+  }
 
   const reviewSnapTbody = document.querySelector("#review-snapshot-table tbody");
   if (reviewSnapTbody) {
@@ -2536,7 +3622,7 @@ function bindEvents() {
     });
   }
 
-  qs("btn-review-save").addEventListener("click", async () => {
+  qs("btn-review-save")?.addEventListener("click", async () => {
     try {
       await saveCandidateEdit();
     } catch (err) {
@@ -2545,27 +3631,43 @@ function bindEvents() {
     }
   });
 
-  qs("btn-review-approve").addEventListener("click", async () => {
+  qs("btn-review-approve")?.addEventListener("click", async () => {
     try {
-      await saveCandidateEdit();
-      await reviewCandidate("approve");
+      const id = qs("review-id")?.value;
+      if (!id) {
+        alert("请先选择候选");
+        return;
+      }
+      const nextId = getNextRegionCandidateIdAfterCurrent(id);
+      const saved = await saveCandidateEditWithoutNavigate();
+      if (!saved) return;
+      await reviewCandidateOnly("approve");
+      await refreshRegionReviewAfterSaveAndSelect(nextId);
     } catch (err) {
       appendClientLog(`[ERROR] approve failed reason=${err.message}`, "error");
       alert(`审核通过失败: ${err.message}`);
     }
   });
 
-  qs("btn-review-reject").addEventListener("click", async () => {
+  qs("btn-review-reject")?.addEventListener("click", async () => {
     try {
-      await saveCandidateEdit();
-      await reviewCandidate("reject");
+      const id = qs("review-id")?.value;
+      if (!id) {
+        alert("请先选择候选");
+        return;
+      }
+      const nextId = getNextRegionCandidateIdAfterCurrent(id);
+      const saved = await saveCandidateEditWithoutNavigate();
+      if (!saved) return;
+      await reviewCandidateOnly("reject");
+      await refreshRegionReviewAfterSaveAndSelect(nextId);
     } catch (err) {
       appendClientLog(`[ERROR] reject failed reason=${err.message}`, "error");
       alert(`审核驳回失败: ${err.message}`);
     }
   });
 
-  qs("btn-c-review-save").addEventListener("click", async () => {
+  qs("btn-c-review-save")?.addEventListener("click", async () => {
     try {
       await saveCircuitCandidateEdit();
     } catch (err) {
@@ -2574,27 +3676,41 @@ function bindEvents() {
     }
   });
 
-  qs("btn-c-review-approve").addEventListener("click", async () => {
+  qs("btn-c-review-approve")?.addEventListener("click", async () => {
     try {
-      await saveCircuitCandidateEdit();
-      await reviewCircuitCandidate("approve");
+      const id = qs("c-review-id")?.value;
+      if (!id) {
+        alert("请先选择回路候选");
+        return;
+      }
+      const nextId = getNextCircuitCandidateIdAfterCurrent(id);
+      await saveCircuitCandidateEditWithoutNavigate();
+      await reviewCircuitCandidateOnly("approve");
+      await refreshCircuitReviewAfterSaveAndSelect(nextId);
     } catch (err) {
       appendClientLog(`[ERROR] circuit approve failed reason=${err.message}`, "error");
       alert(`回路候选审核通过失败: ${err.message}`);
     }
   });
 
-  qs("btn-c-review-reject").addEventListener("click", async () => {
+  qs("btn-c-review-reject")?.addEventListener("click", async () => {
     try {
-      await saveCircuitCandidateEdit();
-      await reviewCircuitCandidate("reject");
+      const id = qs("c-review-id")?.value;
+      if (!id) {
+        alert("请先选择回路候选");
+        return;
+      }
+      const nextId = getNextCircuitCandidateIdAfterCurrent(id);
+      await saveCircuitCandidateEditWithoutNavigate();
+      await reviewCircuitCandidateOnly("reject");
+      await refreshCircuitReviewAfterSaveAndSelect(nextId);
     } catch (err) {
       appendClientLog(`[ERROR] circuit reject failed reason=${err.message}`, "error");
       alert(`回路候选驳回失败: ${err.message}`);
     }
   });
 
-  qs("btn-conn-review-save").addEventListener("click", async () => {
+  qs("btn-conn-review-save")?.addEventListener("click", async () => {
     try {
       await saveConnectionCandidateEdit();
     } catch (err) {
@@ -2603,20 +3719,34 @@ function bindEvents() {
     }
   });
 
-  qs("btn-conn-review-approve").addEventListener("click", async () => {
+  qs("btn-conn-review-approve")?.addEventListener("click", async () => {
     try {
-      await saveConnectionCandidateEdit();
-      await reviewConnectionCandidate("approve");
+      const id = qs("conn-review-id")?.value;
+      if (!id) {
+        alert("请先选择连接候选");
+        return;
+      }
+      const nextId = getNextConnectionCandidateIdAfterCurrent(id);
+      await saveConnectionCandidateEditWithoutNavigate();
+      await reviewConnectionCandidateOnly("approve");
+      await refreshConnectionReviewAfterSaveAndSelect(nextId);
     } catch (err) {
       appendClientLog(`[ERROR] connection approve failed reason=${err.message}`, "error");
       alert(`连接候选审核通过失败: ${err.message}`);
     }
   });
 
-  qs("btn-conn-review-reject").addEventListener("click", async () => {
+  qs("btn-conn-review-reject")?.addEventListener("click", async () => {
     try {
-      await saveConnectionCandidateEdit();
-      await reviewConnectionCandidate("reject");
+      const id = qs("conn-review-id")?.value;
+      if (!id) {
+        alert("请先选择连接候选");
+        return;
+      }
+      const nextId = getNextConnectionCandidateIdAfterCurrent(id);
+      await saveConnectionCandidateEditWithoutNavigate();
+      await reviewConnectionCandidateOnly("reject");
+      await refreshConnectionReviewAfterSaveAndSelect(nextId);
     } catch (err) {
       appendClientLog(`[ERROR] connection reject failed reason=${err.message}`, "error");
       alert(`连接候选驳回失败: ${err.message}`);

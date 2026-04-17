@@ -262,6 +262,40 @@ class IngestionService:
                 rows = cur.fetchall()
         return [self._row_to_unverified(r) for r in rows]
 
+    def fetch_unverified_regions_for_candidates(
+        self,
+        unverified_cfg: Dict[str, Any],
+        candidate_ids: List[str],
+    ) -> List[Dict[str, Any]]:
+        """按 candidate_region.id 查询未验证库对应行（用于验证中心按颗粒度晋升）。"""
+        if not candidate_ids:
+            return []
+        self._ensure_unverified_schema(unverified_cfg)
+        schema = unverified_cfg.get("schema", "neurokg_unverified")
+        db_cfg = self._db_cfg(unverified_cfg)
+        seen: set[str] = set()
+        uniq: List[str] = []
+        for c in candidate_ids:
+            c = (c or "").strip()
+            if c and c not in seen:
+                seen.add(c)
+                uniq.append(c)
+        if not uniq:
+            return []
+        with psycopg.connect(**db_cfg, row_factory=dict_row) as conn:
+            with conn.cursor() as cur:
+                ph = ",".join(["%s"] * len(uniq))
+                cur.execute(
+                    f"""
+                    select id, source_candidate_region_id, granularity, validation_status, promotion_status
+                    from {schema}.unverified_region
+                    where source_candidate_region_id in ({ph})
+                    """,
+                    uniq,
+                )
+                rows = cur.fetchall()
+        return [dict(r) for r in rows]
+
     def stage_circuits_to_unverified(
         self,
         file_payload: Dict[str, Any],
@@ -3122,3 +3156,103 @@ class IngestionService:
         if parent_col:
             payload[parent_col] = parent_val
         return payload
+
+    # ----- Final catalog (read promoted rows from production neurokg.*) -----
+    def list_final_brain_regions(
+        self,
+        production_cfg: Dict[str, Any],
+        *,
+        limit: int = 200,
+        data_source_substring: str = "",
+    ) -> Dict[str, Any]:
+        return self._list_final_tri_table(
+            production_cfg,
+            [
+                ("major", "major_brain_region", "major_region_id"),
+                ("sub", "sub_brain_region", "sub_region_id"),
+                ("allen", "allen_brain_region", "allen_region_id"),
+            ],
+            limit=limit,
+            data_source_substring=data_source_substring,
+        )
+
+    def list_final_circuits(
+        self,
+        production_cfg: Dict[str, Any],
+        *,
+        limit: int = 200,
+        data_source_substring: str = "",
+    ) -> Dict[str, Any]:
+        return self._list_final_tri_table(
+            production_cfg,
+            [
+                ("major", "major_circuit", "major_circuit_id"),
+                ("sub", "sub_circuit", "sub_circuit_id"),
+                ("allen", "allen_circuit", "allen_circuit_id"),
+            ],
+            limit=limit,
+            data_source_substring=data_source_substring,
+        )
+
+    def list_final_connections(
+        self,
+        production_cfg: Dict[str, Any],
+        *,
+        limit: int = 200,
+        data_source_substring: str = "",
+    ) -> Dict[str, Any]:
+        return self._list_final_tri_table(
+            production_cfg,
+            [
+                ("major", "major_connection", "major_connection_id"),
+                ("sub", "sub_connection", "sub_connection_id"),
+                ("allen", "allen_connection", "allen_connection_id"),
+            ],
+            limit=limit,
+            data_source_substring=data_source_substring,
+        )
+
+    def _list_final_tri_table(
+        self,
+        production_cfg: Dict[str, Any],
+        specs: List[Tuple[str, str, str]],
+        *,
+        limit: int,
+        data_source_substring: str,
+    ) -> Dict[str, Any]:
+        if not (production_cfg or {}).get("dbname"):
+            return {"ok": False, "error": "production_db_not_configured", "items": [], "warnings": []}
+        schema = (production_cfg or {}).get("schema", "neurokg")
+        where_clause = ""
+        params: List[Any] = []
+        if (data_source_substring or "").strip():
+            where_clause = " where coalesce(data_source,'') ilike %s"
+            params.append(f"%{data_source_substring.strip()}%")
+        items: List[Dict[str, Any]] = []
+        warnings: List[str] = []
+        cap = max(1, min(int(limit or 200), 2000))
+        try:
+            with psycopg.connect(**self._db_cfg(production_cfg), row_factory=dict_row) as conn:
+                with conn.cursor() as cur:
+                    for gran, table, id_col in specs:
+                        try:
+                            q = (
+                                f"select * from {schema}.{table} {where_clause} "
+                                f"order by coalesce(updated_at, created_at) desc nulls last limit %s"
+                            )
+                            cur.execute(q, tuple(params + [cap]))
+                            for row in cur.fetchall():
+                                d = dict(row)
+                                d["_final_granularity"] = gran
+                                d["_final_table"] = table
+                                d["_id_column"] = id_col
+                                items.append(d)
+                        except Exception as exc:
+                            warnings.append(f"{schema}.{table}:{exc}")
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "items": [], "warnings": warnings}
+        items.sort(
+            key=lambda r: str(r.get("updated_at") or r.get("created_at") or ""),
+            reverse=True,
+        )
+        return {"ok": True, "error": "", "items": items[:cap], "warnings": warnings}

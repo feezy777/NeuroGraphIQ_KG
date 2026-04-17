@@ -28,11 +28,14 @@
       <aside class="left-nav">
         <button class="nav-item active" data-tab="tab-files">文件中心</button>
         <button class="nav-item" data-tab="tab-extract-region">脑区提取中心</button>
-        <button class="nav-item" data-tab="tab-extract-circuit">回路提取中心</button>
-        <button class="nav-item" data-tab="tab-extract-connection">连接提取中心</button>
         <button class="nav-item" data-tab="tab-review-region">脑区候选审核</button>
+        <button class="nav-item" data-tab="tab-validation-region">脑区验证中心</button>
+        <button class="nav-item" data-tab="tab-extract-circuit">回路提取中心</button>
         <button class="nav-item" data-tab="tab-review-circuit">回路候选审核</button>
+        <button class="nav-item" data-tab="tab-validation-circuit">回路验证中心</button>
+        <button class="nav-item" data-tab="tab-extract-connection">连接提取中心</button>
         <button class="nav-item" data-tab="tab-review-connection">连接候选审核</button>
+        <button class="nav-item" data-tab="tab-validation-connection">连接验证中心</button>
         <button class="nav-item" data-tab="tab-commit">验证与提升中心</button>
         <button class="nav-item" data-tab="tab-rules">规则中心</button>
         <button class="nav-item" data-tab="tab-config">设置 / 配置中心</button>
@@ -43,11 +46,14 @@
         <div class="tab-header tab-header-scroll">
           <button class="tab-btn active" data-tab="tab-files">文件中心</button>
           <button class="tab-btn" data-tab="tab-extract-region">脑区提取</button>
-          <button class="tab-btn" data-tab="tab-extract-circuit">回路提取</button>
-          <button class="tab-btn" data-tab="tab-extract-connection">连接提取</button>
           <button class="tab-btn" data-tab="tab-review-region">脑区审核</button>
+          <button class="tab-btn" data-tab="tab-validation-region">脑区验证</button>
+          <button class="tab-btn" data-tab="tab-extract-circuit">回路提取</button>
           <button class="tab-btn" data-tab="tab-review-circuit">回路审核</button>
+          <button class="tab-btn" data-tab="tab-validation-circuit">回路验证</button>
+          <button class="tab-btn" data-tab="tab-extract-connection">连接提取</button>
           <button class="tab-btn" data-tab="tab-review-connection">连接审核</button>
+          <button class="tab-btn" data-tab="tab-validation-connection">连接验证</button>
           <button class="tab-btn" data-tab="tab-commit">验证与提升</button>
           <button class="tab-btn" data-tab="tab-rules">规则中心</button>
           <button class="tab-btn" data-tab="tab-config">配置</button>
@@ -105,11 +111,12 @@
               </div>
               <span id="region-progress-label" class="region-progress-label">准备中</span>
             </div>
+            <div id="region-duplicate-hint" class="region-duplicate-hint" hidden role="status" aria-live="polite"></div>
 
             <div class="region-mode-switch">
               <button type="button" class="btn region-mode-btn active" data-region-mode="file">① 文件抽取</button>
               <button type="button" class="btn region-mode-btn" data-region-mode="text">② 文本抽取</button>
-              <button type="button" class="btn region-mode-btn" data-region-mode="direct">③ DeepSeek 直接生成</button>
+              <button type="button" class="btn region-mode-btn" data-region-mode="direct">③ 直接生成</button>
             </div>
 
             <div id="region-panel-file" class="region-panel">
@@ -122,11 +129,13 @@
                   <select id="extract-mode-select">
                     <option value="local">本地规则</option>
                     <option value="deepseek">DeepSeek</option>
+                    <option value="kimi">Kimi（Moonshot）</option>
+                    <option value="multi">Kimi + DeepSeek</option>
                   </select>
                 </label>
                 <button type="button" class="btn" id="btn-region-run-file">执行抽取</button>
               </div>
-              <p class="field-hint">仅当本下拉框为 DeepSeek 且点击「执行」时弹出配置（密钥、温度等与设置页一致，默认用全局）。</p>
+              <p class="field-hint">选 DeepSeek 或 Kimi+DeepSeek 并点击「执行」时弹出 DeepSeek 配置；纯 Kimi 使用设置页 Moonshot 密钥。</p>
             </div>
 
             <div id="region-panel-text" class="region-panel" hidden>
@@ -137,23 +146,26 @@
                   <select id="region-text-mode-select">
                     <option value="local">本地规则</option>
                     <option value="deepseek">DeepSeek</option>
+                    <option value="kimi">Kimi（Moonshot）</option>
+                    <option value="multi">Kimi + DeepSeek</option>
                   </select>
                 </label>
                 <button type="button" class="btn" id="btn-region-run-text">从文本抽取</button>
               </div>
-              <p class="field-hint">选 DeepSeek 并点击「从文本抽取」时弹出配置。</p>
+              <p class="field-hint">选 DeepSeek 或 Kimi+DeepSeek 时弹出 DeepSeek 配置；纯 Kimi 使用设置页 Moonshot。</p>
               <label class="block-label">输入文本</label>
               <textarea id="region-text-input" class="region-textarea" rows="10" placeholder="粘贴脑区相关文本…"></textarea>
             </div>
 
             <div id="region-panel-direct" class="region-panel" hidden>
-              <h4>方式③：DeepSeek 直接生成</h4>
-              <p class="field-hint">点击「直接生成」时弹出配置（与设置全局一致）。粒度填 <code>major</code> 时，后端会注入 Allen / Paxinos / 经典教材对齐的<strong>粗颗粒度全脑大体分区清单</strong>（约 28 项），引导模型逐项输出。自定义模板可用 <code>{TOPIC}</code> <code>{ATLAS}</code> 等占位符。结果写入当前文件的 deepseek 轨。</p>
+              <h4>方式③：直接生成（DeepSeek 或 Kimi）</h4>
+              <p class="field-hint">「DeepSeek 直接生成」点击后弹出配置（与设置全局一致）。「Kimi 直接生成」使用设置页中的 Moonshot（Kimi）密钥与模型。粒度填 <code>major</code> 时，后端会注入 Allen / Paxinos / 经典教材对齐的<strong>粗颗粒度全脑大体分区清单</strong>（约 28 项），引导模型逐项输出。自定义模板可用 <code>{TOPIC}</code> <code>{ATLAS}</code> 等占位符。</p>
               <div class="inline-fields region-direct-fields">
                 <label>主题 <input type="text" id="region-direct-topic" value="脑区" /></label>
                 <label>物种 <input type="text" id="region-direct-species" value="人类" placeholder="人类 / 小鼠…" /></label>
                 <label>粒度 <input type="text" id="region-direct-granularity" value="major" placeholder="major/sub/allen" /></label>
-                <button type="button" class="btn" id="btn-region-run-direct">直接生成</button>
+                <button type="button" class="btn" id="btn-region-run-direct">DeepSeek 直接生成</button>
+                <button type="button" class="btn" id="btn-region-run-direct-kimi">Kimi 直接生成</button>
               </div>
               <label class="block-label">补充说明（可选）</label>
               <textarea id="region-direct-extra" class="region-textarea" rows="3" placeholder="额外指令…"></textarea>
@@ -256,7 +268,9 @@
               <select id="review-filter-method" class="ds-select" style="font-size:11px;padding:3px 6px;">
                 <option value="">全部来源</option>
                 <option value="deepseek">deepseek</option>
+                <option value="kimi">kimi</option>
                 <option value="direct_deepseek">direct_deepseek</option>
+                <option value="direct_kimi">direct_kimi</option>
                 <option value="local_rule">local_rule</option>
                 <option value="region_v2_local">region_v2</option>
               </select>
@@ -283,6 +297,7 @@
                 <th>unverified</th>
                 <th>validation</th>
                 <th>本体规则</th>
+                <th title="抽取阶段 ontology_binding.term_key">本体绑定</th>
               </tr>
               </thead>
               <tbody></tbody>
@@ -399,13 +414,119 @@
                       <pre id="review-ontology-check" class="review-ontology-pre review-field-control"></pre>
                     </label>
                     <div class="review-editor-actions">
-                      <button class="btn" id="btn-review-save">保存修改</button>
-                      <button class="btn" id="btn-review-approve">审核通过</button>
-                      <button class="btn btn-danger-soft" id="btn-review-reject">审核驳回</button>
+                      <button type="button" class="btn" id="btn-review-save">保存修改</button>
+                      <button type="button" class="btn" id="btn-review-approve">审核通过</button>
+                      <button type="button" class="btn btn-danger-soft" id="btn-review-reject">审核驳回</button>
                     </div>
                   </div>
                 </div>
               </section>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-validation-region">
+          <div class="panel">
+            <h3>脑区验证中心</h3>
+            <p class="tab-hint">直接读取工作台库 <code>workbench.candidate_region</code>（无需选文件）；可按 lane 筛选。批量验证顺序：<strong>本体正确性 → 字段完整性 → 不完整或告警时按需 LLM 补全</strong>；弹窗确认后「应用」将补丁与流水线摘要写入数据库。</p>
+
+            <div id="validation-progress-wrap" class="region-progress-wrap" hidden>
+              <div class="region-progress-bar">
+                <div id="validation-progress-fill" class="region-progress-fill"></div>
+              </div>
+              <div class="validation-progress-footer">
+                <span id="validation-progress-label" class="region-progress-label">准备中</span>
+                <span class="validation-progress-actions">
+                  <button
+                    type="button"
+                    class="btn mini"
+                    id="btn-validation-batch-pause"
+                    hidden
+                    title="在两条验证之间暂停；当前条请求进行中时须等该条结束后再停"
+                  >
+                    暂停
+                  </button>
+                  <button type="button" class="btn mini" id="btn-validation-batch-cancel" hidden title="结束批量（保留已完成的条目结果）">取消</button>
+                </span>
+              </div>
+            </div>
+
+            <div class="region-mode-switch validation-mode-switch">
+              <button type="button" class="btn validation-mode-btn active" data-validation-mode="local">① 本地验证</button>
+              <button type="button" class="btn validation-mode-btn" data-validation-mode="deepseek">② DeepSeek 验证</button>
+              <button type="button" class="btn validation-mode-btn" data-validation-mode="multi">③ Kimi+DeepSeek 验证</button>
+            </div>
+
+            <div id="validation-panel-local" class="region-panel validation-panel">
+              <h4>方式①：本地规则</h4>
+              <p class="field-hint">使用本体规则引擎（与设置中「规则包」一致）对当前列表中<strong>全部候选</strong>逐条校验。</p>
+              <button type="button" class="btn" id="btn-validation-exec-local">执行本地验证</button>
+            </div>
+            <div id="validation-panel-deepseek" class="region-panel validation-panel" hidden>
+              <h4>方式②：DeepSeek</h4>
+              <p class="field-hint">调用 DeepSeek 对每条候选的原文与名称做一致性判断；将按顺序逐条请求，耗时与条数成正比。</p>
+              <button type="button" class="btn" id="btn-validation-exec-deepseek">执行 DeepSeek 验证</button>
+            </div>
+            <div id="validation-panel-multi" class="region-panel validation-panel" hidden>
+              <h4>方式③：Kimi + DeepSeek</h4>
+              <p class="field-hint">并行调用 Moonshot（Kimi）与 DeepSeek，结果合并对比；请先在「设置」中配置两套 API。</p>
+              <button type="button" class="btn" id="btn-validation-exec-multi">执行 Kimi+DeepSeek 验证</button>
+            </div>
+
+            <div class="inline-fields validation-region-toolbar">
+              <label>lane
+                <select id="validation-region-lane-select" aria-label="lane">
+                  <option value="local">local</option>
+                  <option value="deepseek">deepseek</option>
+                  <option value="all">all</option>
+                </select>
+              </label>
+              <button type="button" class="btn" id="btn-validation-region-refresh">从数据库刷新</button>
+              <label>入正式库颗粒度
+                <select id="validation-promote-granularity" aria-label="按颗粒度晋升">
+                  <option value="all">全部（major→sub→allen）</option>
+                  <option value="major">仅 major</option>
+                  <option value="sub">仅 sub</option>
+                  <option value="allen">仅 allen</option>
+                </select>
+              </label>
+              <button type="button" class="btn btn-primary" id="btn-validation-promote-final" title="需已入未验证库且未验证区规则校验通过">按颗粒度上传到正式库</button>
+            </div>
+            <p id="validation-region-meta" class="region-version-meta" aria-live="polite"></p>
+
+            <h4 class="validation-region-table-title">数据库候选表（candidate_region）</h4>
+            <p class="field-hint" style="margin:4px 0 8px;">可编辑列保存后写回数据库；行末仅「保存」本行。上方「执行××验证」对当前筛选出的<strong>全部行</strong>批量运行。「按颗粒度上传到正式库」仅处理<strong>已入未验证库</strong>且<strong>未验证区规则校验通过</strong>的项，并按 major→sub→allen 写入生产库。</p>
+            <div class="table-scroll validation-region-scroll">
+              <table id="validation-region-table" class="data-table validation-region-table">
+                <thead>
+                  <tr>
+                    <th>id</th>
+                    <th>global_region_id</th>
+                    <th>file_id</th>
+                    <th>lane</th>
+                    <th>parsed_document_id</th>
+                    <th>chunk_id</th>
+                    <th>source_text</th>
+                    <th>en_name_candidate</th>
+                    <th>cn_name_candidate</th>
+                    <th>alias_candidates</th>
+                    <th>laterality</th>
+                    <th>granularity</th>
+                    <th>region_category</th>
+                    <th>parent_region</th>
+                    <th>ontology_source</th>
+                    <th>confidence</th>
+                    <th>extraction_method</th>
+                    <th>llm_model</th>
+                    <th>status</th>
+                    <th>review_note</th>
+                    <th>created_at</th>
+                    <th>updated_at</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -475,11 +596,43 @@
                   <textarea id="c-review-nodes" rows="6"></textarea>
                 </label>
                 <div class="inline-actions">
-                  <button class="btn" id="btn-c-review-save">保存修改</button>
-                  <button class="btn" id="btn-c-review-approve">审核通过</button>
-                  <button class="btn" id="btn-c-review-reject">审核驳回</button>
+                  <button type="button" class="btn" id="btn-c-review-save">保存修改</button>
+                  <button type="button" class="btn" id="btn-c-review-approve">审核通过</button>
+                  <button type="button" class="btn" id="btn-c-review-reject">审核驳回</button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-validation-circuit">
+          <div class="panel">
+            <h3>回路验证中心</h3>
+            <p class="tab-hint">读取<strong>生产库</strong>中已<strong>提升入库</strong>的回路表（major / sub / allen 三轨合并）。可按当前文件的「数据来源」文件名（data_source）筛选。</p>
+            <div class="inline-fields">
+              <label>筛选文件
+                <select id="final-circuit-file-select" aria-label="回路验证中心筛选文件"></select>
+              </label>
+              <button type="button" class="btn" id="btn-final-circuit-refresh">刷新</button>
+            </div>
+            <p id="final-circuit-meta" class="region-version-meta" aria-live="polite"></p>
+            <div class="table-scroll">
+              <table id="final-circuit-table" class="data-table">
+                <thead>
+                  <tr>
+                    <th>粒度</th>
+                    <th>表</th>
+                    <th>主键</th>
+                    <th>circuit_code</th>
+                    <th>EN</th>
+                    <th>CN</th>
+                    <th>kind</th>
+                    <th>data_source</th>
+                    <th>updated_at</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -541,11 +694,45 @@
                 <label>审核备注<textarea id="conn-review-note" rows="2"></textarea></label>
                 <label>本体规则命中<pre id="conn-review-ontology-check" class="review-ontology-pre"></pre></label>
                 <div class="inline-actions">
-                  <button class="btn" id="btn-conn-review-save">保存修改</button>
-                  <button class="btn" id="btn-conn-review-approve">审核通过</button>
-                  <button class="btn" id="btn-conn-review-reject">审核驳回</button>
+                  <button type="button" class="btn" id="btn-conn-review-save">保存修改</button>
+                  <button type="button" class="btn" id="btn-conn-review-approve">审核通过</button>
+                  <button type="button" class="btn" id="btn-conn-review-reject">审核驳回</button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-validation-connection">
+          <div class="panel">
+            <h3>连接验证中心</h3>
+            <p class="tab-hint">读取<strong>生产库</strong>中已<strong>提升入库</strong>的连接表（major / sub / allen 三轨合并）。可按当前文件的「数据来源」文件名（data_source）筛选。</p>
+            <div class="inline-fields">
+              <label>筛选文件
+                <select id="final-connection-file-select" aria-label="连接验证中心筛选文件"></select>
+              </label>
+              <button type="button" class="btn" id="btn-final-connection-refresh">刷新</button>
+            </div>
+            <p id="final-connection-meta" class="region-version-meta" aria-live="polite"></p>
+            <div class="table-scroll">
+              <table id="final-connection-table" class="data-table">
+                <thead>
+                  <tr>
+                    <th>粒度</th>
+                    <th>表</th>
+                    <th>主键</th>
+                    <th>connection_code</th>
+                    <th>EN</th>
+                    <th>CN</th>
+                    <th>modality</th>
+                    <th>source</th>
+                    <th>target</th>
+                    <th>data_source</th>
+                    <th>updated_at</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -719,6 +906,13 @@
                 <label>Base URL <input type="text" id="cfg-deepseek-base"></label>
                 <label>Model Name <input type="text" id="cfg-deepseek-model"></label>
                 <label>Temperature <input type="number" id="cfg-deepseek-temperature" step="0.1" min="0" max="2"></label>
+                <h4>Moonshot（Kimi）· 验证中心</h4>
+                <p class="field-hint">用于「Kimi+DeepSeek」双模型验证；与 DeepSeek 分开配置。</p>
+                <label>启用 <input type="checkbox" id="cfg-moonshot-enabled"></label>
+                <label>API Key <input type="password" id="cfg-moonshot-key"></label>
+                <label>Base URL <input type="text" id="cfg-moonshot-base" placeholder="https://api.moonshot.cn"></label>
+                <label>Model <input type="text" id="cfg-moonshot-model" placeholder="moonshot-v1-8k"></label>
+                <label>Temperature <input type="number" id="cfg-moonshot-temperature" step="0.1" min="0" max="2"></label>
               </div>
               <div>
                 <h4>任务覆盖配置（占位）</h4>
@@ -889,6 +1083,37 @@
       <div class="modal-actions">
         <button type="button" class="btn ghost" id="btn-ds-cancel">取消</button>
         <button type="button" class="btn btn-primary" id="btn-ds-confirm">开始执行</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-validation-result" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="modal-validation-result-title">
+    <div class="modal-dialog modal-dialog-wide">
+      <div class="modal-header">
+        <h3 id="modal-validation-result-title">验证结果</h3>
+      </div>
+      <p id="modal-validation-result-summary" class="modal-subtitle"></p>
+      <pre id="modal-validation-result-detail" class="modal-dup-detail modal-validation-detail-pre"></pre>
+      <p id="modal-validation-result-suggest-hint" class="field-hint" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-primary" id="btn-modal-validation-apply" hidden>应用并同步到数据库</button>
+        <button type="button" class="btn" id="btn-modal-validation-close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-region-dup-save" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="modal-region-dup-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="modal-region-dup-title">脑区名称与已有候选重复</h3>
+      </div>
+      <p id="modal-region-dup-save-msg" class="modal-subtitle"></p>
+      <pre id="modal-region-dup-save-detail" class="modal-dup-detail"></pre>
+      <p class="field-hint">替换：删除其他重复行，仅保留当前编辑条。不替换：保留其他行，仍保存本条（列表中可存在同名多条）。</p>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="btn-region-dup-cancel">取消</button>
+        <button type="button" class="btn" id="btn-region-dup-keep">不替换</button>
+        <button type="button" class="btn btn-primary" id="btn-region-dup-replace">替换</button>
       </div>
     </div>
   </div>

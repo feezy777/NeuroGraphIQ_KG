@@ -5,8 +5,14 @@ import json
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional
 
-from ..common.id_utils import make_id
+from ..common.id_utils import make_region_candidate_id
 from ..common.models import CandidateRegion, utc_now_iso
+from ..validation.ontology_rules import (
+    apply_ontology_binding_gate_to_review_note,
+    load_ruleset_dict,
+    merge_ontology_binding_into_review_note,
+    resolve_term_binding,
+)
 from .region_postprocess_v2 import dedupe_candidates, to_candidate_region_payload
 from .region_recall_v2 import recall_from_cell
 from .region_registry_config import column_role_for_header, load_registry_overlay
@@ -113,21 +119,57 @@ def run_region_extraction_v2(
     merged = dedupe_candidates(raw_candidates)
     _log(log_emit, "[REGION_V2] postprocess_done", {"merged": len(merged)})
 
+    orc = pipeline_config.get("ontology_rules") or {}
+    bind_on = bool(orc.get("bind_on_extract", True))
+    require_binding = bool(orc.get("require_binding_for_confirmed", True))
+    rules_path = str(orc.get("path") or "artifacts/ontology/ruleset.json").replace("\\", "/")
+    ruleset: Dict[str, Any] = {}
+    if bind_on and root_dir:
+        ruleset, rs_err = load_ruleset_dict(root_dir, rules_path)
+        if rs_err and log_emit:
+            _log(log_emit, "[REGION_V2] ruleset_load", {"error": rs_err})
+
     # 可选：DeepSeek 仅对 review_needed / unresolved 精排（Phase4）
     if cfg.get("deepseek_refine") and mode == "deepseek" and deepseek_cfg.get("enabled"):
         _log(log_emit, "[REGION_V2] deepseek_refine_skipped_stub", {"reason": "enable_in_phase4"})
 
     out_rows: List[CandidateRegion] = []
-    for c in merged:
+    em = f"region_v2_{mode}"
+    for i, c in enumerate(merged):
         if c.get("match_type") == "rejected_blacklist" and cfg.get("drop_rejected", False):
             continue
         drow, _note = to_candidate_region_payload(
             c,
             file_id=file_id,
             parsed_document_id=parsed_document_id,
-            extraction_method=f"region_v2_{mode}",
+            extraction_method=em,
         )
-        drow["id"] = make_id("cr")
+        note_str = drow["review_note"]
+        binding: Dict[str, Any] = {}
+        if bind_on:
+            binding = resolve_term_binding(
+                ruleset,
+                str(drow.get("en_name_candidate") or ""),
+                str(drow.get("cn_name_candidate") or ""),
+            )
+            note_str = merge_ontology_binding_into_review_note(note_str, binding)
+        term_key = str(binding.get("term_key") or "")
+        canonical = str(binding.get("canonical") or "")
+        note_str = apply_ontology_binding_gate_to_review_note(
+            note_str,
+            bind_on_extract=bind_on,
+            require_binding_for_confirmed=require_binding,
+        )
+        drow["review_note"] = note_str
+        drow["id"] = make_region_candidate_id(
+            file_id=file_id,
+            en_name=str(drow.get("en_name_candidate") or ""),
+            cn_name=str(drow.get("cn_name_candidate") or ""),
+            source_text=str(drow.get("source_text") or ""),
+            batch_index=i,
+            term_key=term_key,
+            canonical=canonical,
+        )
         drow["created_at"] = utc_now_iso()
         drow["updated_at"] = utc_now_iso()
         out_rows.append(
@@ -160,9 +202,24 @@ def run_region_extraction_v2(
             {"wb_v2": {"extract_status": "unresolved", "reason": "no_candidates_after_recall"}},
             ensure_ascii=False,
         )
+        if bind_on:
+            note = merge_ontology_binding_into_review_note(note, resolve_term_binding(ruleset, "", ""))
+        note = apply_ontology_binding_gate_to_review_note(
+            note,
+            bind_on_extract=bind_on,
+            require_binding_for_confirmed=require_binding,
+        )
         out_rows.append(
             CandidateRegion(
-                id=make_id("cr"),
+                id=make_region_candidate_id(
+                    file_id=file_id,
+                    en_name="",
+                    cn_name="",
+                    source_text=file_payload.get("filename", ""),
+                    batch_index=0,
+                    term_key="",
+                    canonical="",
+                ),
                 file_id=file_id,
                 parsed_document_id=parsed_document_id,
                 chunk_id="",

@@ -598,6 +598,20 @@ textarea {
   color: var(--muted);
 }
 
+.validation-progress-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.validation-progress-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .region-mode-switch {
   display: flex;
   flex-wrap: wrap;
@@ -605,9 +619,20 @@ textarea {
   margin-bottom: 12px;
 }
 
-.region-mode-btn.active {
+.region-mode-btn.active,
+.validation-mode-btn.active {
   border-color: #8fb1f3;
   background: #eaf1ff;
+}
+
+.validation-region-toolbar {
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+
+.validation-region-table-title {
+  margin: 16px 0 0;
+  font-size: 1rem;
 }
 
 .region-panel {
@@ -653,6 +678,18 @@ textarea {
 
 .region-extract-result-hint {
   margin: 12px 0 4px;
+}
+
+.region-duplicate-hint {
+  margin: 8px 0 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  border-radius: 6px;
+  max-width: min(100%, 52rem);
 }
 
 .region-version-toolbar {
@@ -752,6 +789,49 @@ select.region-version-select {
   background: #f0f4fa;
 }
 
+.validation-region-scroll {
+  max-height: min(70vh, 720px);
+}
+
+.validation-region-table .vr-field {
+  min-width: 5rem;
+  max-width: 22rem;
+  font-size: 11px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.validation-region-table textarea.vr-field {
+  min-height: 2.5rem;
+  width: 100%;
+  resize: vertical;
+}
+
+.validation-region-table .td-shrink {
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.validation-region-table .vr-actions {
+  white-space: nowrap;
+  min-width: 4rem;
+  position: sticky;
+  right: 0;
+  background: #fafcfe;
+  box-shadow: -4px 0 6px rgba(31, 42, 60, 0.06);
+}
+
+.validation-region-table .vr-field--note {
+  max-width: 18rem;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.validation-region-table .vr-actions .btn.mini {
+  margin: 2px;
+}
+
 /* 脑区抽取结果表：单独美化，避免与页面横向重合 */
 #region-extract-result-table {
   width: max-content;
@@ -844,6 +924,25 @@ select.region-version-select {
 .modal-dialog h3 {
   margin: 0 0 6px;
   font-size: 1.1rem;
+}
+
+.modal-dup-detail {
+  margin: 8px 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--console);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 12rem;
+  overflow: auto;
+}
+
+.modal-validation-detail-pre {
+  max-height: min(50vh, 420px);
+  font-size: 11px;
 }
 
 .modal-ds-kind-hint {
@@ -1069,6 +1168,8 @@ select.region-version-select {
 }
 
 .method-deepseek   { background: #f3e8ff; color: #7e22ce; border: 1px solid #d8b4fe; }
+.method-kimi       { background: #fff7ed; color: #c2410c; border: 1px solid #fdba74; }
+.method-multi      { background: #fdf4ff; color: #a21caf; border: 1px solid #e879f9; }
 .method-local_rule { background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; }
 .method-region_v2  { background: #ecfdf5; color: #065f46; border: 1px solid #6ee7b7; }
 .method-unknown    { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; }

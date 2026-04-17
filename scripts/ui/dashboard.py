@@ -284,6 +284,38 @@ def create_app() -> Flask:
             return _bad("run_not_found", 404)
         return _ok({"run": run, "logs": SERVICE.store.list_task_logs(run_id=run_id, limit=1000)})
 
+    @app.get("/api/region-candidates")
+    def api_region_candidates_all() -> Any:
+        """List candidate_region rows from DB without file filter (optional lane)."""
+        lane_q = request.args.get("lane", "local").strip()
+        lane = None if lane_q.lower() in ("all", "*") else lane_q
+        return _ok({"items": SERVICE.list_region_candidates("", lane=lane)})
+
+    @app.post("/api/region-candidates/promote-to-final")
+    def api_region_candidates_promote_to_final() -> Any:
+        """按当前 lane 与颗粒度筛选，将已入未验证库且规则校验通过的候选晋升到正式库（major→sub→allen 顺序）。"""
+        body = request.get_json(silent=True) or {}
+        lane_raw = body.get("lane", "local")
+        lane: str | None
+        if isinstance(lane_raw, str) and lane_raw.strip().lower() in ("all", "*"):
+            lane = None
+        else:
+            lane = (lane_raw or "local") if isinstance(lane_raw, str) else "local"
+        granularity = body.get("granularity", "all") or "all"
+        candidate_ids = body.get("candidate_ids")
+        reviewer = body.get("reviewer", "user")
+        result = SERVICE.promote_region_candidates_to_final_by_granularity(
+            lane=lane,
+            granularity=str(granularity),
+            reviewer=reviewer,
+            candidate_ids=candidate_ids if isinstance(candidate_ids, list) else None,
+        )
+        if not result.get("success"):
+            err = result.get("error", "promote_failed")
+            if err in ("invalid_granularity", "no_matching_candidates", "no_ready_to_promote", "no_unverified_regions"):
+                return _bad(err, 400, detail=result)
+        return _ok(result)
+
     @app.get("/api/files/<file_id>/region-candidates")
     def api_file_region_candidates(file_id: str) -> Any:
         lane_q = request.args.get("lane", "local").strip()
@@ -307,9 +339,55 @@ def create_app() -> Flask:
         body = request.get_json(silent=True) or {}
         reviewer = body.get("reviewer", "user")
         patch = body.get("patch", {})
-        result = SERVICE.update_region_candidate(candidate_id, patch, reviewer=reviewer)
+        dup_res = (body.get("duplicate_resolution") or "").strip() or None
+        result = SERVICE.update_region_candidate(
+            candidate_id, patch, reviewer=reviewer, duplicate_resolution=dup_res
+        )
         if not result.get("success"):
-            return _bad(result.get("error", "candidate_update_failed"), 404)
+            err = result.get("error", "candidate_update_failed")
+            if err == "duplicate_name_conflict" and result.get("duplicate_conflict"):
+                return _bad(err, 409, duplicate_conflict=result["duplicate_conflict"])
+            code = 404 if err == "candidate_not_found" else 400
+            return _bad(err, code)
+        return _ok(result)
+
+    @app.post("/api/candidates/<candidate_id>/validation-pipeline")
+    def api_candidate_validation_pipeline(candidate_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        llm_mode = (body.get("llm_mode") or "none").strip().lower()
+        result = SERVICE.run_region_candidate_validation_pipeline(candidate_id, llm_mode=llm_mode, reviewer=body.get("reviewer", "user"))
+        if not result.get("success"):
+            err = result.get("error", "validation_pipeline_failed")
+            rest = {k: v for k, v in result.items() if k != "success"}
+            return jsonify({"ok": False, **rest}), 400
+        return _ok(result)
+
+    @app.post("/api/candidates/<candidate_id>/validation-pipeline/apply")
+    def api_candidate_validation_pipeline_apply(candidate_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        patch = body.get("patch") or {}
+        pipeline_meta = body.get("pipeline_meta") or {}
+        reviewer = body.get("reviewer", "user")
+        result = SERVICE.apply_region_candidate_pipeline_patch(
+            candidate_id, patch=patch, pipeline_meta=pipeline_meta, reviewer=reviewer
+        )
+        if not result.get("success"):
+            err = result.get("error", "apply_failed")
+            code = 404 if err == "candidate_not_found" else 400
+            return _bad(err, code)
+        return _ok(result)
+
+    @app.post("/api/candidates/<candidate_id>/validation-run")
+    def api_candidate_validation_run(candidate_id: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        mode = (body.get("mode") or "").strip()
+        reviewer = body.get("reviewer", "user")
+        result = SERVICE.run_region_candidate_validation(candidate_id, mode=mode, reviewer=reviewer)
+        if not result.get("success"):
+            err = result.get("error", "validation_failed")
+            code = 404 if err == "candidate_not_found" else 400
+            rest = {k: v for k, v in result.items() if k != "success"}
+            return jsonify({"ok": False, **rest}), code
         return _ok(result)
 
     @app.post("/api/candidates/<candidate_id>/review")
@@ -420,6 +498,33 @@ def create_app() -> Flask:
             return _bad(result.get("error", "commit_connection_failed"), 400, detail=result)
         return _ok(result)
 
+    @app.get("/api/final/brain-regions")
+    def api_final_brain_regions() -> Any:
+        file_id = request.args.get("file_id", "").strip()
+        try:
+            limit = int(request.args.get("limit", 200) or 200)
+        except ValueError:
+            limit = 200
+        return _ok(SERVICE.list_final_brain_regions_view(file_id=file_id, limit=limit))
+
+    @app.get("/api/final/circuits")
+    def api_final_circuits() -> Any:
+        file_id = request.args.get("file_id", "").strip()
+        try:
+            limit = int(request.args.get("limit", 200) or 200)
+        except ValueError:
+            limit = 200
+        return _ok(SERVICE.list_final_circuits_view(file_id=file_id, limit=limit))
+
+    @app.get("/api/final/connections")
+    def api_final_connections() -> Any:
+        file_id = request.args.get("file_id", "").strip()
+        try:
+            limit = int(request.args.get("limit", 200) or 200)
+        except ValueError:
+            limit = 200
+        return _ok(SERVICE.list_final_connections_view(file_id=file_id, limit=limit))
+
     @app.get("/api/unverified/regions")
     def api_unverified_regions() -> Any:
         file_id = request.args.get("file_id", "").strip()
@@ -455,7 +560,12 @@ def create_app() -> Flask:
         reviewer = body.get("reviewer", "user")
         file_id = body.get("file_id", "").strip()
         ids = body.get("ids", []) or []
-        result = SERVICE.batch_promote_unverified_regions(reviewer=reviewer, file_id=file_id, ids=ids)
+        gran = (body.get("granularity") or "").strip().lower() or None
+        if gran == "all":
+            gran = None
+        result = SERVICE.batch_promote_unverified_regions(
+            reviewer=reviewer, file_id=file_id, ids=ids, granularity=gran
+        )
         return _ok(result)
 
     @app.post("/api/unverified/batch-retry")
@@ -620,10 +730,17 @@ def create_app() -> Flask:
         file_id = body.get("file_id", "").strip()
         profile_key = body.get("profile_key", "").strip()
         inline_override = body.get("deepseek_override") or None
+        provider = (body.get("provider") or "deepseek").strip().lower()
         if not params.get("topic"):
             params["topic"] = "脑区"
         try:
-            result = SERVICE.generate_regions_direct(params=params, profile_key=profile_key, inline_deepseek_override=inline_override, file_id=file_id)
+            result = SERVICE.generate_regions_direct(
+                params=params,
+                profile_key=profile_key,
+                inline_deepseek_override=inline_override,
+                file_id=file_id,
+                provider=provider,
+            )
             if not result.get("success"):
                 return _bad(result.get("error", "generate_regions_direct_failed"), 400, detail=result)
             return _ok(result)
@@ -645,6 +762,16 @@ def create_app() -> Flask:
         file_id = request.args.get("file_id", "").strip()
         versions = SERVICE.list_region_result_versions(file_id=file_id)
         return _ok({"versions": versions})
+
+    @app.get("/api/region-result-versions/by-candidate")
+    def api_region_result_version_by_candidate() -> Any:
+        """Which snapshot version contains this candidate id (for review UI left/right sync)."""
+        candidate_id = request.args.get("candidate_id", "").strip()
+        file_id = request.args.get("file_id", "").strip()
+        if not candidate_id:
+            return _bad("candidate_id_required", 400)
+        vid = SERVICE.find_region_version_id_for_candidate(candidate_id, file_id=file_id)
+        return _ok({"version_id": vid or ""})
 
     @app.get("/api/region-result-versions/<version_id>")
     def api_get_region_result_version(version_id: str) -> Any:

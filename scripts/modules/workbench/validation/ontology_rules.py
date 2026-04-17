@@ -23,6 +23,156 @@ def _merge_review_note_json(existing: str, extra: Dict[str, Any]) -> str:
     return json.dumps(merged, ensure_ascii=False)
 
 
+def load_ruleset_dict(root_dir: str, rel_path: str) -> Tuple[Dict[str, Any], str]:
+    """Load ruleset JSON once; returns (data, error_string)."""
+    path = (Path(root_dir) / str(rel_path).replace("\\", "/")).resolve()
+    if not path.is_file():
+        return {}, f"missing:{path}"
+    try:
+        return json.loads(path.read_text(encoding="utf-8")), ""
+    except Exception as exc:
+        return {}, f"parse_error:{exc}"
+
+
+def _build_term_label_index(term_map: Dict[str, Any]) -> Dict[str, Tuple[str, str]]:
+    """norm_label -> (iri_key, canonical_display)."""
+    idx: Dict[str, Tuple[str, str]] = {}
+    for iri_key, meta in (term_map or {}).items():
+        if not isinstance(meta, dict):
+            continue
+        can = str(meta.get("canonical", "")).strip()
+        labs = [can] + [str(x) for x in (meta.get("labels") or [])]
+        for lab in labs:
+            nk = _norm_key(lab)
+            if nk and nk not in idx:
+                idx[nk] = (str(iri_key), can or lab)
+    return idx
+
+
+def _synonym_expand_keys(syn_map: Dict[str, Any], start: str) -> List[str]:
+    """Return [start_norm, ...resolved] following synonymMap edges (bounded)."""
+    out: List[str] = []
+    cur = _norm_key(start)
+    if not cur:
+        return out
+    out.append(cur)
+    for _ in range(8):
+        nxt_val: Optional[str] = None
+        if cur in syn_map:
+            nxt_val = str(syn_map[cur])
+        else:
+            for sk, sv in syn_map.items():
+                if _norm_key(str(sk)) == cur:
+                    nxt_val = str(sv)
+                    break
+        if not nxt_val:
+            break
+        nxt = _norm_key(nxt_val)
+        if not nxt or nxt in out:
+            break
+        out.append(nxt)
+        cur = nxt
+    return out
+
+
+def resolve_term_binding(ruleset: Dict[str, Any], en: str, cn: str) -> Dict[str, Any]:
+    """Map EN/CN to a termMap key; used at extract time."""
+    version = str(ruleset.get("version", ""))
+    term_map = ruleset.get("termMap") or {}
+    if not term_map:
+        return {"term_key": "", "canonical": "", "match": "none", "rules_version": version}
+
+    idx = _build_term_label_index(term_map)
+    syn_map = ruleset.get("synonymMap") or {}
+    if not isinstance(syn_map, dict):
+        syn_map = {}
+
+    def try_text(text: str) -> Optional[Dict[str, Any]]:
+        if not (text or "").strip():
+            return None
+        nk = _norm_key(text)
+        if nk in idx:
+            ir, can = idx[nk]
+            return {"term_key": ir, "canonical": can, "match": "label", "rules_version": version}
+        for cand in _synonym_expand_keys(syn_map, text):
+            if cand in idx:
+                ir, can = idx[cand]
+                mt = "label" if cand == nk else "synonym"
+                return {"term_key": ir, "canonical": can, "match": mt, "rules_version": version}
+        return None
+
+    for s in (en, cn):
+        hit = try_text(s)
+        if hit:
+            return hit
+
+    return {"term_key": "", "canonical": "", "match": "none", "rules_version": version}
+
+
+def apply_binding_confirmed_gate(
+    extract_status: str,
+    binding: Optional[Dict[str, Any]],
+    *,
+    bind_on_extract: bool,
+    require_binding_for_confirmed: bool,
+) -> str:
+    """If strict: confirmed requires non-empty term_key when bind_on_extract is on."""
+    es = (extract_status or "").strip()
+    if not bind_on_extract or not require_binding_for_confirmed:
+        return es
+    if es != "confirmed":
+        return es
+    tk = (binding or {}).get("term_key") or ""
+    if not str(tk).strip():
+        return "review_needed"
+    return es
+
+
+def merge_ontology_binding_into_review_note(existing_note: str, binding: Dict[str, Any]) -> str:
+    return _merge_review_note_json(existing_note, {"ontology_binding": binding})
+
+
+def apply_ontology_binding_gate_to_review_note(
+    review_note_json: str,
+    *,
+    bind_on_extract: bool,
+    require_binding_for_confirmed: bool,
+) -> str:
+    """Downgrade confirmed → review_needed in nested or top-level extract_status when binding is strict and term_key is empty."""
+    if not (review_note_json or "").strip():
+        return review_note_json
+    try:
+        base = json.loads(review_note_json)
+    except json.JSONDecodeError:
+        return review_note_json
+    if not isinstance(base, dict):
+        return review_note_json
+    binding = base.get("ontology_binding")
+    if not isinstance(binding, dict):
+        binding = {}
+
+    def gate_one(es: str) -> str:
+        return apply_binding_confirmed_gate(
+            es,
+            binding,
+            bind_on_extract=bind_on_extract,
+            require_binding_for_confirmed=require_binding_for_confirmed,
+        )
+
+    es_top = base.get("extract_status")
+    if isinstance(es_top, str):
+        base["extract_status"] = gate_one(es_top)
+
+    for key in ("wb_v2", "local_rule"):
+        blk = base.get(key)
+        if isinstance(blk, dict):
+            es = blk.get("extract_status")
+            if isinstance(es, str):
+                blk["extract_status"] = gate_one(es)
+
+    return json.dumps(base, ensure_ascii=False)
+
+
 def _issue(
     code: str,
     message: str,

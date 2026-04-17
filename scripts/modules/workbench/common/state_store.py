@@ -10,6 +10,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from ..config.runtime_config import db_config, load_runtime
+from .id_utils import derive_global_region_id_for_row
 from .models import utc_now_iso
 
 
@@ -761,7 +762,7 @@ class StateStore:
         out = [r for r in rows if (not file_id or r.get("file_id") == file_id)]
         if lane is not None:
             out = [r for r in out if r.get("lane", "local") == lane]
-        return out
+        return [self._row_to_candidate(r) for r in out]
 
     def get_region_candidates(self, file_id: str, lane: Optional[str] = "local") -> List[Dict[str, Any]]:
         return self.list_region_candidates(file_id, lane=lane)
@@ -778,7 +779,7 @@ class StateStore:
                 self._event("pg_read_failed", f"get_region_candidate fallback: {exc}", "warning")
         for row in self._load_json().get("candidate_regions", []):
             if row.get("id") == candidate_id:
-                return row
+                return self._row_to_candidate(row)
         return None
 
     def update_region_candidate(self, candidate_id: str, **kwargs: Any) -> Dict[str, Any]:
@@ -789,7 +790,7 @@ class StateStore:
             except Exception as exc:
                 self._event("pg_write_failed", f"update_region_candidate fallback: {exc}", "warning")
         state = self._load_json()
-        out = {}
+        out: Dict[str, Any] = {}
         new_rows = []
         for row in state.get("candidate_regions", []):
             if row.get("id") == candidate_id:
@@ -798,7 +799,23 @@ class StateStore:
             new_rows.append(row)
         state["candidate_regions"] = new_rows
         self._save_json(state)
-        return out
+        return self._row_to_candidate(out) if out else {}
+
+    def delete_region_candidate(self, candidate_id: str) -> bool:
+        """按主键删除一条脑区候选（用于合并重复名称等场景）。"""
+        if self._pg_enabled:
+            try:
+                with self._conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(f"delete from {self._schema}.candidate_region where id=%s", (candidate_id,))
+                    conn.commit()
+                return True
+            except Exception as exc:
+                self._event("pg_write_failed", f"delete_region_candidate fallback: {exc}", "warning")
+        state = self._load_json()
+        state["candidate_regions"] = [r for r in state.get("candidate_regions", []) if r.get("id") != candidate_id]
+        self._save_json(state)
+        return True
 
     def append_review_record(self, record: Any) -> None:
         payload = self._to_dict(record)
@@ -890,6 +907,7 @@ class StateStore:
 
     def _update_region_candidate_pg(self, candidate_id: str, patch: Dict[str, Any]) -> None:
         mapping = {
+            "source_text": "source_text",
             "en_name_candidate": "en_name_candidate",
             "cn_name_candidate": "cn_name_candidate",
             "alias_candidates": "alias_candidates",
@@ -954,15 +972,19 @@ class StateStore:
             conn.commit()
 
     def _row_to_candidate(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        en = row.get("en_name_candidate", "")
+        cn = row.get("cn_name_candidate", "")
+        note = row.get("review_note", "")
         return {
             "id": row.get("id", ""),
+            "global_region_id": derive_global_region_id_for_row(note, en, cn),
             "file_id": row.get("file_id", ""),
             "parsed_document_id": row.get("parsed_document_id", ""),
             "lane": row.get("lane", "local"),
             "chunk_id": row.get("chunk_id", ""),
             "source_text": row.get("source_text", ""),
-            "en_name_candidate": row.get("en_name_candidate", ""),
-            "cn_name_candidate": row.get("cn_name_candidate", ""),
+            "en_name_candidate": en,
+            "cn_name_candidate": cn,
             "alias_candidates": self._as_list(row.get("alias_candidates")),
             "laterality_candidate": row.get("laterality_candidate", "unknown"),
             "region_category_candidate": row.get("region_category_candidate", "brain_region"),
@@ -973,7 +995,7 @@ class StateStore:
             "extraction_method": row.get("extraction_method", "local_rule"),
             "llm_model": row.get("llm_model", ""),
             "status": row.get("status", "pending_review"),
-            "review_note": row.get("review_note", ""),
+            "review_note": note,
             "created_at": self._ts(row.get("created_at")),
             "updated_at": self._ts(row.get("updated_at")),
         }
@@ -1800,6 +1822,21 @@ class StateStore:
         for v in state.get("region_result_versions", []):
             if v.get("version_id") == version_id:
                 return v
+        return None
+
+    def find_region_version_id_for_candidate(self, candidate_id: str, file_id: Optional[str] = None) -> Optional[str]:
+        """Return the snapshot version_id that contains this candidate id in items (newest matching version first)."""
+        if not candidate_id:
+            return None
+        state = self._load_json()
+        versions: List[Dict[str, Any]] = list(state.get("region_result_versions", []))
+        if file_id:
+            versions = [v for v in versions if v.get("file_id") == file_id or not v.get("file_id")]
+        for ver in versions:
+            for it in ver.get("items") or []:
+                if isinstance(it, dict) and it.get("id") == candidate_id:
+                    vid = ver.get("version_id")
+                    return str(vid) if vid else None
         return None
 
     def delete_region_result_version(self, version_id: str) -> bool:
