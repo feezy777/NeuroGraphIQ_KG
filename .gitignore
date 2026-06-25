@@ -1,0 +1,20 @@
+# Local secrets — never commit real passwords
+backend/.env
+.env
+.env.local
+.env.*.local
+backend/data/runtime/settings.local.json
+backend/data/runtime/*.local.json
+
+# Python / Node
+__pycache__/
+*.py[cod]
+.venv/
+node_modules/
+dist/
+*.log
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store

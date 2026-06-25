@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<atlas>
+  <data>
+    <label index="1" x="-38.5" y="-5.2" z="52.1" xmin="-45" xmax="-32" ymin="-12" ymax="2" zmin="48" zmax="58">Precentral_L</label>
+    <label index="2" x="38.2" y="-5.0" z="52.0">Precentral_R</label>
+    <label index="3" x="-12.0" y="45.0" z="28.0">Frontal_Sup_2_L</label>
+  </data>
+</atlas>
