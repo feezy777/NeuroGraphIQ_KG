@@ -6,8 +6,10 @@ Does NOT write final_* / kg_*; does NOT auto approve/promote.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -48,6 +50,7 @@ from app.services.llm_extraction_prompt_engineering import (
     make_pair_id,
     normalize_connection_extraction_payload,
     normalize_projection_extraction_response,
+    order_pairs_by_priority,
     pack_pair_records,
     prompt_display_name,
 )
@@ -56,11 +59,11 @@ from app.services.llm_json_utils import (
     parse_connection_completion_response,
     raw_response_preview,
 )
-from app.services.llm_prompt_defaults import DEFAULT_TEMPLATES, render_user_prompt
+from app.services.llm_prompt_defaults import CONNECTION_PATHWAY_HINTS, DEFAULT_TEMPLATES, render_user_prompt
 from app.services.llm_providers import UnknownProviderError, get_llm_provider
 from app.services import mirror_kg_service
 from app.services.llm_workflow_artifact_tagging import tag_raw_payload
-from app.services.llm_workflow_cancel_registry import is_cancelling
+from app.services.llm_workflow_cancel_registry import is_cancelling, is_pause_requested
 from app.services.llm_workflow_event_log import safe_append_workflow_event
 from app.services.llm_connection_parse_diagnostics import (
     FAIL_FAST_DEFAULT_ENABLED,
@@ -85,6 +88,8 @@ from app.services.settings_service import get_deepseek_runtime_config, get_kimi_
 
 # No hard cap on candidate count or pair count — large selections produce warnings only.
 LARGE_PAIR_COUNT_WARNING_THRESHOLD = 200
+DEFAULT_CONCURRENT_PACKS = 1  # sequential — one pack at a time (safe for shared DB session)
+DEFAULT_PAIRS_PER_PACK_OVERRIDE = 30  # Balanced: prompt size vs throughput
 DEFAULT_MAX_CANDIDATE_PAIRS = 200  # retained for request compatibility; not used as a blocker
 CONNECTION_TEMPLATE_KEY = "same_granularity_connection_completion_v1"
 logger = logging.getLogger(__name__)
@@ -283,20 +288,143 @@ def validate_candidates_homogeneous(
             raise ScopeMismatchError("resource_id", str(scope_resource_id), str(c.id))
 
 
+def _fill_connection_names_from_pairs(
+    connections: list[dict[str, Any]],
+    pair_records: list[dict[str, Any]],
+    candidates: list[Any],
+) -> None:
+    """Fill missing name fields in connections from the pair records sent to LLM.
+
+    If the LLM didn't return source/target names or name_en/name_cn, this function
+    derives them from the pair context (build_compact_pair_records).
+    """
+    pair_by_ids: dict[tuple[str, str], dict[str, Any]] = {}
+    for pr in pair_records:
+        src = str(pr.get("source_region_candidate_id", ""))
+        tgt = str(pr.get("target_region_candidate_id", ""))
+        # Also index by pair_id
+        pid = str(pr.get("pair_id", ""))
+        pair_by_ids[(src, tgt)] = pr
+        if pid:
+            # store under pair_id for easy lookup
+            pair_by_ids[(pid, pid)] = pr  # marker key
+
+    cand_lookup = {str(c.id): c for c in candidates}
+
+    for conn in connections:
+        src_id = str(conn.get("source_candidate_id", ""))
+        tgt_id = str(conn.get("target_candidate_id", ""))
+        pid = str(conn.get("pair_id", ""))
+
+        # Find the pair record
+        pr = pair_by_ids.get((src_id, tgt_id))
+        if pr is None and pid:
+            pr = pair_by_ids.get((pid, pid))
+
+        src_name_en = conn.get("source_region_name_en")
+        src_name_cn = conn.get("source_region_name_cn")
+        tgt_name_en = conn.get("target_region_name_en")
+        tgt_name_cn = conn.get("target_region_name_cn")
+
+        # Fill from pair record
+        if not src_name_en:
+            src_name_en = pr.get("source_region_name_en") if pr else None
+        if not src_name_cn:
+            src_name_cn = pr.get("source_region_name_cn") if pr else None
+        if not tgt_name_en:
+            tgt_name_en = pr.get("target_region_name_en") if pr else None
+        if not tgt_name_cn:
+            tgt_name_cn = pr.get("target_region_name_cn") if pr else None
+
+        # Fill from candidate lookup as last resort
+        if not src_name_en:
+            sc = cand_lookup.get(src_id)
+            src_name_en = sc.en_name if sc else None
+        if not src_name_cn:
+            sc = cand_lookup.get(src_id)
+            src_name_cn = sc.cn_name if sc else None
+        if not tgt_name_en:
+            tc = cand_lookup.get(tgt_id)
+            tgt_name_en = tc.en_name if tc else None
+        if not tgt_name_cn:
+            tc = cand_lookup.get(tgt_id)
+            tgt_name_cn = tc.cn_name if tc else None
+
+        # Fallback: use ID shortcode
+        def _short(uid: str) -> str:
+            return uid[:8] if len(uid) > 8 else uid
+
+        if not src_name_en:
+            src_name_en = _short(src_id)
+        if not src_name_cn:
+            src_name_cn = _short(src_id)
+        if not tgt_name_en:
+            tgt_name_en = _short(tgt_id)
+        if not tgt_name_cn:
+            tgt_name_cn = _short(tgt_id)
+
+        # Derive name_en / name_cn
+        name_en = conn.get("name_en")
+        name_cn = conn.get("name_cn")
+        if not name_en:
+            name_en = f"{src_name_en} → {tgt_name_en} projection"
+        if not name_cn:
+            name_cn = f"{src_name_cn} → {tgt_name_cn}连接"
+
+        conn["source_region_name_en"] = src_name_en
+        conn["source_region_name_cn"] = src_name_cn
+        conn["target_region_name_en"] = tgt_name_en
+        conn["target_region_name_cn"] = tgt_name_cn
+        conn["name_en"] = name_en
+        conn["name_cn"] = name_cn
+
+
+def _build_batch_context_json(
+    candidates: list[CandidateBrainRegion],
+    pair_records: list[dict[str, Any]],
+    pack_index: int,
+    total_packs: int,
+    total_pairs: int,
+) -> str:
+    """Build a compact batch context summary for the prompt."""
+    region_list = "\n".join(
+        f"  - {c.cn_name or c.en_name} ({c.en_name or ''}) laterality={c.laterality or '?'}"
+        for c in candidates
+    )
+
+    return (
+        f"全量脑区池概览：\n"
+        f"  本池共 {len(candidates)} 个脑区，全量配对 {total_pairs} 对，共 {total_packs} 包\n"
+        f"  当前为第 {pack_index + 1}/{total_packs} 包，本包 {len(pair_records)} 对\n\n"
+        f"池内全部脑区：\n{region_list}\n\n"
+        f"提示：可利用池内全部脑区的拓扑关系辅助判断——"
+        f"如果某对脑区之间虽无直接文献但解剖邻近或参与同一网络，"
+        f"应标记为低置信度候选而非 no_connection。"
+    )
+
+
 def build_connection_completion_prompt(
     candidates: list[CandidateBrainRegion],
     pair_records: list[dict[str, Any]],
     template_key: str = CONNECTION_TEMPLATE_KEY,
+    *,
+    pack_index: int = 0,
+    total_packs: int = 1,
+    total_pairs: int | None = None,
 ) -> tuple[str, str, dict[str, Any]]:
     tpl = _resolve_template(template_key)
     first = candidates[0]
     pairs_json = json.dumps(pair_records, ensure_ascii=False, indent=2)
+    total = total_pairs if total_pairs is not None else len(pair_records)
+    batch_context = _build_batch_context_json(candidates, pair_records, pack_index, total_packs, total)
 
     values = {
         "source_atlas": first.source_atlas,
         "granularity_level": first.granularity_level,
         "granularity_family": first.granularity_family or "",
         "pairs_json": pairs_json,
+        "pathway_hints": CONNECTION_PATHWAY_HINTS,
+        "batch_context": batch_context,
     }
     user_prompt = render_user_prompt(tpl, values)
     prompt_json = {
@@ -460,6 +588,11 @@ async def persist_connection_mirror_records(
     created_ids: list[uuid.UUID] = []
     seen = session_seen or set()
 
+    # Build name lookup from candidate_map for populating source/target region names
+    cand_name_map: dict[uuid.UUID, tuple[str | None, str | None]] = {
+        c.id: (c.cn_name, c.en_name) for c in candidate_map.values()
+    }
+
     for conn in connections:
         if composite_workflow_run_id and is_cancelling(composite_workflow_run_id):
             warnings.append("Mirror persist skipped — workflow cancelled")
@@ -489,6 +622,10 @@ async def persist_connection_mirror_records(
         payload = MirrorRegionConnectionCreate(
             source_region_candidate_id=src,
             target_region_candidate_id=tgt,
+            source_region_name_cn=cand_name_map.get(src, (None, None))[0],
+            source_region_name_en=cand_name_map.get(src, (None, None))[1],
+            target_region_name_cn=cand_name_map.get(tgt, (None, None))[0],
+            target_region_name_en=cand_name_map.get(tgt, (None, None))[1],
             resource_id=run.resource_id,
             batch_id=run.batch_id,
             llm_run_id=run.id,
@@ -671,8 +808,11 @@ async def run_same_granularity_connection_extraction(
         pair_strategy=pair_strategy,
         center_candidate_id=center_candidate_id,
     )
+    # Order by priority: same-hemisphere pairs first, cross-hemisphere later
+    cand_map = {c.id: c for c in candidates}
+    pairs = order_pairs_by_priority(pairs, cand_map)
     pair_records = build_compact_pair_records(candidates, pairs)
-    packs = pack_pair_records(pair_records, pairs_per_pack=DEFAULT_PAIRS_PER_PACK)
+    packs = pack_pair_records(pair_records, pairs_per_pack=DEFAULT_PAIRS_PER_PACK_OVERRIDE)
     original_pack_count = len(packs)
     resolved_debug_max_packs = debug_max_packs
     if debug_single_pack:
@@ -690,7 +830,10 @@ async def run_same_granularity_connection_extraction(
     )
     allowed_types = frozenset(allowed_connection_types) if allowed_connection_types else DEFAULT_ALLOWED_CONNECTION_TYPES
     system_prompt, user_prompt, prompt_json = build_connection_completion_prompt(
-        candidates, pair_records[: min(len(pair_records), DEFAULT_PAIRS_PER_PACK)], prompt_template_key
+        candidates, pair_records[: min(len(pair_records), DEFAULT_PAIRS_PER_PACK)], prompt_template_key,
+        pack_index=0,
+        total_packs=len(packs),
+        total_pairs=len(pairs),
     )
 
     result = ConnectionExtractionResult(
@@ -824,7 +967,7 @@ async def run_same_granularity_connection_extraction(
             event=event,
             message=message,
             data=data,
-            commit=commit_progress,
+            commit=False,
         )
 
     if on_progress:
@@ -849,10 +992,10 @@ async def run_same_granularity_connection_extraction(
     await _log_event(
         "info",
         "packs_built",
-        f"Built {len(packs)} prompt packs (size={DEFAULT_PAIRS_PER_PACK})",
+        f"Built {len(packs)} prompt packs (size={DEFAULT_PAIRS_PER_PACK_OVERRIDE})",
         {
             "pack_count": len(packs),
-            "pack_size": DEFAULT_PAIRS_PER_PACK,
+            "pack_size": DEFAULT_PAIRS_PER_PACK_OVERRIDE,
             "estimated_input_tokens_total": preview.get("estimated_input_tokens", 0),
         },
     )
@@ -863,11 +1006,23 @@ async def run_same_granularity_connection_extraction(
     processed_pair_ids: set[str] = set()
     tpl = _resolve_template(prompt_template_key)
     display_name = prompt_display_name(prompt_template_key)
+    last_progress_commit_at = 0.0
 
-    async def _emit_progress(extra: dict[str, Any] | None = None) -> None:
+    async def _emit_progress(extra: dict[str, Any] | None = None, *, force: bool = False) -> None:
+        nonlocal last_progress_commit_at
         merged_extra = {**debug_extra, **(extra or {})}
         summary = build_execution_summary(audit, pack_traces, extra=merged_extra)
         provider_audit = summary.get("provider_audit") or {}
+        # Enrich with "why no connections" diagnostic
+        if summary.get("parsed_projection_count", 0) == 0 and summary.get("processed_pack_count", 0) > 0:
+            diagnostics = []
+            if summary.get("parsed_no_connection_count", 0) > 0:
+                diagnostics.append("Model判定全部为no_connection（模型认为所有pair均无可追溯连接）")
+            if summary.get("rejected_item_count", 0) > 0:
+                diagnostics.append(f"解析被拒 {summary['rejected_item_count']} 条（schema不符）")
+            if summary.get("parse_error_count", 0) > 0:
+                diagnostics.append(f"解析失败 {summary['parse_error_count']} 包")
+            summary["connection_zero_diagnostics"] = diagnostics or ["未检测到连接，请检查LLM返回的raw_response"]
         reassign_jsonb(
             run,
             "scope_json",
@@ -888,13 +1043,15 @@ async def run_same_granularity_connection_extraction(
             },
         )
         if on_progress:
-            await on_progress(run, audit, summary)
-        if commit_progress:
+            now = time.monotonic()
+            should_persist = force or (now - last_progress_commit_at) >= 1.0
+            await on_progress(run, audit, summary, persist=should_persist)
+            if commit_progress and should_persist:
+                last_progress_commit_at = now
+        elif commit_progress:
             try:
                 await session.commit()
             except StaleDataError:
-                # Cleanup of a cancelled workflow may have changed our rows. Ignore
-                # the late write instead of raising to the user.
                 if composite_workflow_run_id and is_cancelling(composite_workflow_run_id):
                     logger.warning(
                         "[connection-extraction] late progress commit ignored after cancel run=%s",
@@ -906,9 +1063,13 @@ async def run_same_granularity_connection_extraction(
 
     async def _persist_pack_trace(trace: dict[str, Any], extra: dict[str, Any] | None = None) -> None:
         upsert_pack_trace(pack_traces, trace)
-        await _emit_progress(extra)
+        await _emit_progress(extra, force=True)
 
     provider = get_llm_provider(provider_key)
+    if provider_key == "deepseek":
+        provider_timeout_seconds = get_deepseek_runtime_config().timeout_seconds
+    else:
+        provider_timeout_seconds = get_kimi_runtime_config().timeout_seconds
 
     packs_completed_before_cancel = 0
     packs_cancelled = 0
@@ -916,13 +1077,9 @@ async def run_same_granularity_connection_extraction(
     consecutive_parse_failures = 0
     fail_fast_triggered = False
     remaining_pack_count_skipped = 0
-    max_provider_attempts = 1 if debug_mode else 2
+    max_provider_attempts = 2  # Always allow one retry, even in debug mode
 
-    for pack_index, pack in enumerate(packs):
-        if composite_workflow_run_id and is_cancelling(composite_workflow_run_id):
-            packs_cancelled = len(packs) - pack_index
-            all_warnings.append("Workflow cancelled by user — stopping new provider packs")
-            break
+    async def _process_one_pack(pack: list[dict[str, Any]], pack_index: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], set[str], int]:
         pack_pair_ids = {str(r["pair_id"]) for r in pack}
         pair_id_to_endpoints = {
             str(r["pair_id"]): (
@@ -932,7 +1089,10 @@ async def run_same_granularity_connection_extraction(
             for r in pack
         }
         pack_system, pack_user, _ = build_connection_completion_prompt(
-            candidates, pack, prompt_template_key
+            candidates, pack, prompt_template_key,
+            pack_index=pack_index,
+            total_packs=len(packs),
+            total_pairs=len(pairs),
         )
         audit.prompt_built_count += 1
         await _log_event(
@@ -960,8 +1120,7 @@ async def run_same_granularity_connection_extraction(
                 "parsed_no_connection_count": 0,
                 "provider_error": "empty prompt",
             })
-            await _emit_progress()
-            continue
+            return [], [], [], set(), 0
 
         trace = build_initial_pack_summary(
             pack_id=pack_index,
@@ -1018,6 +1177,10 @@ async def run_same_granularity_connection_extraction(
                         len(pack),
                         audit.provider_call_count,
                     )
+                    await _emit_progress(
+                        {"active_pack_id": pack_index, "active_pack_index": pack_index + 1},
+                        force=True,
+                    )
 
                 text_result = await provider.complete_text(
                     model=resolved_model,
@@ -1025,6 +1188,7 @@ async def run_same_granularity_connection_extraction(
                     user_prompt=pack_user,
                     temperature=temperature,
                     max_tokens=pack_max_tokens,
+                    timeout_seconds=provider_timeout_seconds,
                     json_mode=True,
                 )
                 if composite_workflow_run_id and is_cancelling(composite_workflow_run_id):
@@ -1070,6 +1234,12 @@ async def run_same_granularity_connection_extraction(
                 pack_persisted = True
 
                 if not text_result.transport_ok:
+                    logger.error(
+                        "[connection-extraction] provider transport error pack=%s/%s error=%s",
+                        pack_index + 1,
+                        len(packs),
+                        text_result.error or "transport_error",
+                    )
                     audit.provider_transport_error_count += 1
                     audit.provider_error_count += 1
                     trace["provider_error"] = text_result.error or "transport_error"
@@ -1089,9 +1259,14 @@ async def run_same_granularity_connection_extraction(
                         },
                     )
                     parsed = None
-                    break
+                    continue
 
                 if not raw_text.strip():
+                    logger.warning(
+                        "[connection-extraction] provider empty response pack=%s/%s",
+                        pack_index + 1,
+                        len(packs),
+                    )
                     audit.provider_empty_response_count += 1
                     trace["provider_error"] = RAW_TEXT_MISSING_CODE
                     trace["parse_error_type"] = "empty_response"
@@ -1106,7 +1281,7 @@ async def run_same_granularity_connection_extraction(
                         {"pack_id": pack_index, "error_code": RAW_TEXT_MISSING_CODE},
                     )
                     parsed = None
-                    break
+                    continue
 
                 audit.provider_success_count += 1
                 await _log_event(
@@ -1147,17 +1322,24 @@ async def run_same_granularity_connection_extraction(
                     if attempt == 0:
                         continue
                 except Exception as exc:  # noqa: BLE001
+                    logger.exception(
+                        "[connection-extraction] unexpected error parsing pack %s/%s attempt=%s",
+                        pack_index + 1,
+                        len(packs),
+                        attempt,
+                    )
                     trace["parse_error"] = str(exc)
-                    trace["parse_error_type"] = "json_decode_error"
+                    trace["parse_error_type"] = "unexpected_error"
                     if attempt >= 1:
-                        all_warnings.append(f"pack[{pack_index}] parse error: {exc}")
+                        all_warnings.append(f"pack[{pack_index}] unexpected error: {exc}")
                         await _log_event(
                             "error",
-                            "provider_response_parse_error",
-                            f"Parse error for pack {pack_index + 1}",
+                            "provider_response_unexpected_error",
+                            f"Unexpected error parsing pack {pack_index + 1}",
                             {
                                 "pack_id": pack_index,
                                 "parse_error": str(exc),
+                                "parse_error_type": "unexpected_error",
                                 "raw_response_preview": trace.get("raw_response_preview"),
                                 "retry_count": attempt,
                             },
@@ -1171,46 +1353,16 @@ async def run_same_granularity_connection_extraction(
         if parsed is None:
             if trace.get("parse_error_type") not in {"transport_error", "empty_response"}:
                 audit.parse_error_count += 1
-                consecutive_parse_failures += 1
+                audit.processed_pack_count += 1
+                audit.failed_pack_count += 1
                 trace["status"] = "parse_error"
                 await _persist_pack_trace(trace)
-                if should_trigger_parse_fail_fast(
-                    consecutive_parse_failures=consecutive_parse_failures,
-                    parsed_projection_count=audit.parsed_projection_count,
-                    parsed_no_connection_count=audit.parsed_no_connection_count,
-                    enabled=parse_error_fail_fast_enabled and not debug_mode,
-                    threshold=parse_error_fail_fast_threshold,
-                ):
-                    fail_fast_triggered = True
-                    remaining_pack_count_skipped = len(packs) - pack_index - 1
-                    all_warnings.append(
-                        "First "
-                        f"{consecutive_parse_failures} provider responses could not be parsed as JSON. "
-                        "Stopping remaining packs to avoid token waste."
-                    )
-                    await _log_event(
-                        "error",
-                        "parse_fail_fast_triggered",
-                        "Parse fail-fast triggered after consecutive parse errors",
-                        {
-                            "consecutive_parse_failures": consecutive_parse_failures,
-                            "remaining_pack_count_skipped": remaining_pack_count_skipped,
-                            "fail_fast_reason": FAIL_FAST_DEFAULT_REASON,
-                            "raw_response_preview": trace.get("raw_response_preview"),
-                        },
-                    )
-                    await _persist_pack_trace(
-                        trace,
-                        extra={
-                            "fail_fast_triggered": True,
-                            "remaining_pack_count_skipped": remaining_pack_count_skipped,
-                            "fail_fast_reason": FAIL_FAST_DEFAULT_REASON,
-                        },
-                    )
-                    break
+                return [], [], [], set(), 1
             else:
+                audit.processed_pack_count += 1
+                audit.failed_pack_count += 1
                 await _persist_pack_trace(trace)
-            continue
+                return [], [], [], set(), 0
 
         consecutive_parse_failures = 0
 
@@ -1233,7 +1385,6 @@ async def run_same_granularity_connection_extraction(
             trace["schema_error"] = str(exc)
             trace["parse_error"] = str(exc)
             trace["parse_error_type"] = "schema_error"
-            all_warnings.append(f"pack[{pack_index}] schema error: {exc}")
             await _log_event(
                 "warning",
                 "provider_response_schema_error",
@@ -1242,7 +1393,7 @@ async def run_same_granularity_connection_extraction(
             )
             trace["status"] = "schema_error"
             await _persist_pack_trace(trace)
-            continue
+            return [], [], [f"pack[{pack_index}] schema error: {exc}"], set(), 0
 
         rejected_in_pack = sum(1 for w in pack_warnings if "rejected" in w)
         audit.rejected_item_count += rejected_in_pack
@@ -1266,12 +1417,93 @@ async def run_same_granularity_connection_extraction(
             },
         )
 
-        all_warnings.extend(pack_warnings)
-        normalized_connections.extend(pack_connections)
-        all_no_connections.extend(pack_no)
-        processed_pair_ids.update(handled)
-        packs_completed_before_cancel += 1
+        audit.processed_pack_count += 1
+        if pack_connections:
+            audit.succeeded_pack_count += 1
+        else:
+            audit.no_connection_pack_count += 1
         await _persist_pack_trace(trace)
+        return pack_connections, pack_no, pack_warnings, handled, 0
+
+    pack_durations_sec: list[float] = []
+
+    for pack_index, pack in enumerate(packs):
+        if composite_workflow_run_id and is_cancelling(composite_workflow_run_id):
+            packs_cancelled = len(packs) - pack_index
+            break
+        if composite_workflow_run_id and is_pause_requested(composite_workflow_run_id):
+            packs_cancelled = len(packs) - pack_index
+            break
+
+        pack_t0 = time.monotonic()
+        try:
+            _res = await _process_one_pack(pack, pack_index)
+        except Exception as exc:
+            logger.exception(
+                "[connection-extraction] pack raised exception run=%s pack=%s",
+                run.id,
+                pack_index + 1,
+            )
+            all_warnings.append(f"Pack exception: {exc}")
+            audit.provider_error_count += 1
+            consecutive_parse_failures += 1
+            _res = None
+
+        if _res is not None:
+            _pn, _nc, _pw, _pi, _pf = _res
+            normalized_connections.extend(_pn)
+            all_no_connections.extend(_nc)
+            all_warnings.extend(_pw)
+            processed_pair_ids.update(_pi)
+            consecutive_parse_failures += _pf
+            packs_completed_before_cancel += 1
+
+        if should_trigger_parse_fail_fast(
+            consecutive_parse_failures=consecutive_parse_failures,
+            parsed_projection_count=audit.parsed_projection_count,
+            parsed_no_connection_count=audit.parsed_no_connection_count,
+            enabled=parse_error_fail_fast_enabled,
+            threshold=parse_error_fail_fast_threshold,
+        ):
+            fail_fast_triggered = True
+            remaining_pack_count_skipped = max(0, len(packs) - (pack_index + 1))
+            all_warnings.append(
+                f"FAIL_FAST: stopping after {consecutive_parse_failures} consecutive parse failures"
+            )
+            await _emit_progress(
+                {
+                    "fail_fast_triggered": True,
+                    "remaining_pack_count_skipped": remaining_pack_count_skipped,
+                },
+                force=True,
+            )
+            break
+
+        pack_elapsed = time.monotonic() - pack_t0
+        for trace in pack_traces:
+            if trace.get("pack_id") == pack_index and trace.get("provider_call_finished"):
+                trace["pack_duration_sec"] = round(pack_elapsed, 2)
+                pack_durations_sec.append(pack_elapsed)
+                break
+
+        avg_pack = (
+            sum(pack_durations_sec) / len(pack_durations_sec) if pack_durations_sec else None
+        )
+        remaining = max(0, len(packs) - (pack_index + 1))
+        est_remaining = (avg_pack * remaining) if avg_pack is not None else None
+        await _emit_progress(
+            {
+                "concurrency": 1,
+                "average_pack_sec": round(avg_pack, 2) if avg_pack is not None else None,
+                "estimated_remaining_sec": round(est_remaining, 1) if est_remaining is not None else None,
+                "active_pack_index": pack_index + 1,
+            },
+            force=True,
+        )
+
+    # Fill in missing name fields from pair records (LLM may omit them)
+    if normalized_connections and pair_records:
+        _fill_connection_names_from_pairs(normalized_connections, pair_records, candidates)
 
     if composite_workflow_run_id and is_cancelling(composite_workflow_run_id):
         run.status = LlmRunStatus.cancelled
@@ -1355,6 +1587,10 @@ async def run_same_granularity_connection_extraction(
             mirror_created = mc
             created_connection_ids = created_ids
             audit.created_projection_count = mc
+            audit.updated_projection_count = mirror_updated
+            audit.merged_projection_count = mirror_updated
+            audit.skipped_duplicate_count = skip
+            audit.no_connection_count = len(all_no_connections)
             result.mirror_connection_created_count = mc
             result.mirror_connection_skipped_duplicate_count = skip
             result.triple_created_count = tr
@@ -1370,6 +1606,11 @@ async def run_same_granularity_connection_extraction(
                 },
             )
         except Exception as exc:
+            logger.exception(
+                "[connection-extraction] mirror persist failed run=%s connection_count=%s",
+                run.id,
+                len(normalized_connections),
+            )
             all_warnings.append(str(exc))
             run.error_message = f"mirror persist failed: {exc}"
 
@@ -1426,6 +1667,7 @@ async def run_same_granularity_connection_extraction(
     if is_semantic_failure(semantic_outcome):
         item.status = LlmItemStatus.failed
         item.error_message = status_warnings[0] if status_warnings else semantic_outcome
+        run.error_message = item.error_message
         run.error_count = max(int(run.error_count or 0), 1)
     elif is_semantic_no_edges(semantic_outcome):
         item.status = LlmItemStatus.needs_review
@@ -1446,6 +1688,10 @@ async def run_same_granularity_connection_extraction(
             "fail_fast_triggered": fail_fast_triggered,
             "fail_fast_reason": FAIL_FAST_DEFAULT_REASON if fail_fast_triggered else None,
             "remaining_pack_count_skipped": remaining_pack_count_skipped,
+            "packs_cancelled": packs_cancelled if packs_cancelled else None,
+            "pause_requested": bool(
+                composite_workflow_run_id and is_pause_requested(composite_workflow_run_id)
+            ),
         },
     )
     result.execution_summary = execution_summary
