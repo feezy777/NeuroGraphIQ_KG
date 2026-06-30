@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.candidate import CandidateBrainRegion
@@ -447,24 +447,13 @@ async def _projection_function_exists(
         MirrorProjectionFunction.promotion_status.notin_(blocked),
         MirrorProjectionFunction.review_status != MirrorReviewStatus.rejected,
         MirrorProjectionFunction.mirror_status != MirrorStatus.superseded,
+        func.lower(MirrorProjectionFunction.function_term) == function_term_key,
     )
     if resource_id:
         q = q.where(MirrorProjectionFunction.resource_id == resource_id)
     if batch_id:
         q = q.where(MirrorProjectionFunction.batch_id == batch_id)
-
-    rows = (await session.execute(q)).scalars().all()
-    if not rows:
-        return False
-    existing = (
-        await session.execute(
-            select(MirrorProjectionFunction).where(MirrorProjectionFunction.id.in_(rows))
-        )
-    ).scalars().all()
-    for row in existing:
-        if (row.function_term or "").lower().strip() == function_term_key:
-            return True
-    return False
+    return (await session.execute(q.limit(1))).scalar_one_or_none() is not None
 
 
 def _projection_label(

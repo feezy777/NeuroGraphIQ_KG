@@ -156,29 +156,24 @@ async def _find_existing_function_for_merge(
     blocked_review = frozenset({MirrorReviewStatus.rejected})
     blocked_promo = frozenset({MirrorPromotionStatus.failed, MirrorPromotionStatus.promoted})
 
+    func_term_norm = function_term.strip().lower()
+
     base = select(MirrorRegionFunction).where(
         MirrorRegionFunction.region_candidate_id == region_candidate_id,
         MirrorRegionFunction.function_category == function_category,
         MirrorRegionFunction.relation_type == relation_type,
         MirrorRegionFunction.review_status.notin_(blocked_review),
         MirrorRegionFunction.promotion_status.notin_(blocked_promo),
+        MirrorRegionFunction.function_term.isnot(None),
+        MirrorRegionFunction.function_term != "",
+        func.lower(MirrorRegionFunction.function_term) == func_term_norm,
     )
     if source_atlas:
         base = base.where(MirrorRegionFunction.source_atlas == source_atlas)
     if granularity_level:
         base = base.where(MirrorRegionFunction.granularity_level == granularity_level)
 
-    rows = (
-        await session.execute(
-            base.order_by(MirrorRegionFunction.created_at.desc())
-        )
-    ).scalars().all()
-
-    func_term_norm = function_term.strip().lower()
-    for row in rows:
-        if row.function_term and row.function_term.strip().lower() == func_term_norm:
-            return row
-    return None
+    return (await session.execute(base.order_by(MirrorRegionFunction.created_at.desc()).limit(1))).scalar_one_or_none()
 
 
 def _extract_provenance(

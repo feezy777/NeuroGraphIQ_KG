@@ -303,7 +303,10 @@ def test_mock_deepseek_creates_run_item():
     session.flush = AsyncMock()
     session.commit = AsyncMock()
     session.refresh = AsyncMock()
-    session.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
+    session.execute = AsyncMock(return_value=MagicMock(
+        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))),
+        scalar_one_or_none=MagicMock(return_value=None),
+    ))
 
     llm_json = {
         "projection_functions": [{
@@ -375,7 +378,10 @@ def test_mock_kimi_creates_run_item():
     session.flush = AsyncMock()
     session.commit = AsyncMock()
     session.refresh = AsyncMock()
-    session.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
+    session.execute = AsyncMock(return_value=MagicMock(
+        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))),
+        scalar_one_or_none=MagicMock(return_value=None),
+    ))
 
     llm_json = {
         "projection_functions": [{

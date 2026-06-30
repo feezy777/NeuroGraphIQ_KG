@@ -183,6 +183,9 @@ def test_create_circuit_step_service():
 def test_circuit_step_circuit_not_found():
     session = AsyncMock()
     session.get = AsyncMock(return_value=None)
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    )
     payload = MirrorCircuitStepCreate(
         circuit_id=uuid.uuid4(),
         granularity_level="macro",
@@ -198,6 +201,9 @@ def test_circuit_step_cross_atlas_rejected():
     circuit = _circuit(source_atlas="Macro96")
     session = AsyncMock()
     session.get = AsyncMock(return_value=circuit)
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    )
     payload = MirrorCircuitStepCreate(
         circuit_id=circuit.id,
         granularity_level="macro",
@@ -223,6 +229,9 @@ def test_circuit_step_cross_granularity_with_candidate_rejected():
         return None
 
     session.get = AsyncMock(side_effect=_get)
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    )
     payload = MirrorCircuitStepCreate(
         circuit_id=circuit.id,
         region_candidate_id=cand.id,
@@ -240,9 +249,10 @@ def test_circuit_step_duplicate_order_rejected():
     circuit = _circuit()
     session = AsyncMock()
     session.get = AsyncMock(return_value=circuit)
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=uuid.uuid4()))
-    )
+    session.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # dedup check → no match
+        MagicMock(scalar_one_or_none=MagicMock(return_value=uuid.uuid4())),  # step_order check → match
+    ])
     payload = MirrorCircuitStepCreate(
         circuit_id=circuit.id,
         granularity_level="macro",
@@ -351,6 +361,9 @@ def test_membership_cross_granularity_rejected():
         return None
 
     session.get = AsyncMock(side_effect=_get)
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    )
     payload = MirrorCircuitProjectionMembershipCreate(
         circuit_id=circuit.id,
         projection_id=projection.id,
@@ -378,6 +391,9 @@ def test_membership_source_step_wrong_circuit():
         return None
 
     session.get = AsyncMock(side_effect=_get)
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    )
     payload = MirrorCircuitProjectionMembershipCreate(
         circuit_id=circuit.id,
         projection_id=projection.id,
@@ -406,6 +422,9 @@ def test_membership_same_source_target_step_rejected():
         return None
 
     session.get = AsyncMock(side_effect=_get)
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    )
     payload = MirrorCircuitProjectionMembershipCreate(
         circuit_id=circuit.id,
         projection_id=projection.id,
@@ -432,9 +451,10 @@ def test_membership_duplicate_rejected():
         return None
 
     session.get = AsyncMock(side_effect=_get)
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=uuid.uuid4()))
-    )
+    session.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # dedup check → no match
+        MagicMock(scalar_one_or_none=MagicMock(return_value=uuid.uuid4())),  # step_id check → match
+    ])
     payload = MirrorCircuitProjectionMembershipCreate(
         circuit_id=circuit.id,
         projection_id=projection.id,

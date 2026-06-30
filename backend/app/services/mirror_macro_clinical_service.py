@@ -10,6 +10,7 @@ import uuid
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models.candidate import CandidateBrainRegion
 from app.models.mirror_kg import MirrorKgTriple, MirrorRegionCircuit, MirrorRegionConnection
@@ -176,10 +177,43 @@ async def _validate_circuit_step_refs(
     return circuit
 
 
+async def _find_existing_circuit_step(
+    session: AsyncSession,
+    payload: MirrorCircuitStepCreate,
+) -> MirrorCircuitStep | None:
+    """Find existing circuit step with the same canonical key.
+
+    Canonical key: (circuit_id, region_candidate_id, region_final_id, role).
+    Excludes records that are rejected, failed/promoted, or superseded.
+    """
+    blocked_review = frozenset({MirrorReviewStatus.rejected})
+    blocked_promo = frozenset({MirrorPromotionStatus.failed, MirrorPromotionStatus.promoted})
+
+    base = select(MirrorCircuitStep).where(
+        MirrorCircuitStep.circuit_id == payload.circuit_id,
+        MirrorCircuitStep.role == payload.role,
+        MirrorCircuitStep.review_status.notin_(blocked_review),
+        MirrorCircuitStep.promotion_status.notin_(blocked_promo),
+    )
+    if payload.region_candidate_id is not None:
+        base = base.where(MirrorCircuitStep.region_candidate_id == payload.region_candidate_id)
+    else:
+        base = base.where(MirrorCircuitStep.region_candidate_id.is_(None))
+    if payload.region_final_id is not None:
+        base = base.where(MirrorCircuitStep.region_final_id == payload.region_final_id)
+    else:
+        base = base.where(MirrorCircuitStep.region_final_id.is_(None))
+
+    return (await session.execute(base.order_by(MirrorCircuitStep.created_at.desc()).limit(1))).scalar_one_or_none()
+
+
 async def create_circuit_step(
     session: AsyncSession,
     payload: MirrorCircuitStepCreate,
 ) -> MirrorCircuitStep:
+    existing = await _find_existing_circuit_step(session, payload)
+    if existing is not None:
+        return existing
     await _validate_circuit_step_refs(session, payload)
     data = payload.model_dump()
     data["promotion_status"] = MirrorPromotionStatus.not_promoted
@@ -436,10 +470,72 @@ async def _validate_membership_refs(
     return circuit, projection
 
 
+async def _find_existing_circuit_projection_membership(
+    session: AsyncSession,
+    payload: MirrorCircuitProjectionMembershipCreate,
+) -> MirrorCircuitProjectionMembership | None:
+    """Find existing membership with the same canonical key.
+
+    Canonical key: (circuit_id, projection_id, source_step_order, target_step_order).
+    Resolves step IDs to step orders for semantic comparison.
+    Excludes records that are rejected or failed/promoted.
+    """
+    blocked_review = frozenset({MirrorReviewStatus.rejected})
+    blocked_promo = frozenset({MirrorPromotionStatus.failed, MirrorPromotionStatus.promoted})
+
+    # Resolve step orders from step IDs in payload
+    source_step_order: int | None = None
+    if payload.source_step_id is not None:
+        src_step = await session.get(MirrorCircuitStep, payload.source_step_id)
+        if src_step is not None:
+            source_step_order = src_step.step_order
+
+    target_step_order: int | None = None
+    if payload.target_step_id is not None:
+        tgt_step = await session.get(MirrorCircuitStep, payload.target_step_id)
+        if tgt_step is not None:
+            target_step_order = tgt_step.step_order
+
+    # Aliased joins to resolve step orders for existing memberships
+    SrcStepAlias = aliased(MirrorCircuitStep)
+    TgtStepAlias = aliased(MirrorCircuitStep)
+
+    base = (
+        select(MirrorCircuitProjectionMembership)
+        .outerjoin(SrcStepAlias, SrcStepAlias.id == MirrorCircuitProjectionMembership.source_step_id)
+        .outerjoin(TgtStepAlias, TgtStepAlias.id == MirrorCircuitProjectionMembership.target_step_id)
+        .where(
+            MirrorCircuitProjectionMembership.circuit_id == payload.circuit_id,
+            MirrorCircuitProjectionMembership.projection_id == payload.projection_id,
+            MirrorCircuitProjectionMembership.review_status.notin_(blocked_review),
+            MirrorCircuitProjectionMembership.promotion_status.notin_(blocked_promo),
+        )
+    )
+
+    # Match source step order (NULL-safe)
+    if payload.source_step_id is not None:
+        if source_step_order is not None:
+            base = base.where(SrcStepAlias.step_order == source_step_order)
+    else:
+        base = base.where(MirrorCircuitProjectionMembership.source_step_id.is_(None))
+
+    # Match target step order (NULL-safe)
+    if payload.target_step_id is not None:
+        if target_step_order is not None:
+            base = base.where(TgtStepAlias.step_order == target_step_order)
+    else:
+        base = base.where(MirrorCircuitProjectionMembership.target_step_id.is_(None))
+
+    return (await session.execute(base.limit(1))).scalar_one_or_none()
+
+
 async def create_circuit_projection_membership(
     session: AsyncSession,
     payload: MirrorCircuitProjectionMembershipCreate,
 ) -> MirrorCircuitProjectionMembership:
+    existing = await _find_existing_circuit_projection_membership(session, payload)
+    if existing is not None:
+        return existing
     await _validate_membership_refs(session, payload)
     data = payload.model_dump()
     data["promotion_status"] = MirrorPromotionStatus.not_promoted
