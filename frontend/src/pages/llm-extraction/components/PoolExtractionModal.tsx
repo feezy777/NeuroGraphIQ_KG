@@ -1924,7 +1924,7 @@ export function PoolExtractionModal({
         className="modal-panel wide"
         onClick={e => e.stopPropagation()}
         style={{
-          minHeight: wizardStep === 2 ? lockedPanelHeight : 520,
+          minHeight: wizardStep !== 1 ? lockedPanelHeight : 520,
           maxHeight: '85vh',
           display: 'flex',
           flexDirection: 'column',
