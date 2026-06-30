@@ -1040,15 +1040,34 @@ async def run_same_granularity_circuit_extraction(
         run.status = LlmRunStatus.failed
         run.error_count = 1
     elif response.parsed_json is None:
-        try:
-            parsed = parse_circuit_completion_response(response.raw_text or "")
-        except Exception as exc:
+        raw_text = response.raw_text or ""
+        parsed = None
+        last_error = None
+        max_provider_attempts = 2
+        for attempt in range(max_provider_attempts):
+            try:
+                parsed = parse_circuit_completion_response(raw_text)
+                if parsed is not None:
+                    break
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                last_error = str(exc)
+                if attempt < max_provider_attempts - 1:
+                    response = await provider.complete_json(
+                        model=resolved_model,
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
+                    raw_text = response.raw_text or ""
+                    item.raw_response_text = raw_text
+                    run.usage_json = response.usage.as_dict() if response.usage else {}
+        if parsed is None:
             item.status = LlmItemStatus.failed
-            item.error_message = f"failed to parse model JSON: {exc}"
+            item.error_message = f"failed to parse model JSON after {max_provider_attempts} attempts: {last_error}"
             run.status = LlmRunStatus.failed
             run.error_count = 1
-            parsed = None
-        if parsed is not None:
+        else:
             response.parsed_json = parsed
 
     if response.parsed_json is not None and item.status != LlmItemStatus.failed:
