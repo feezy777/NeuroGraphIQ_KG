@@ -72,7 +72,11 @@
       "Bash(git commit -m 'fix: audit pack counters, retry on transport/empty, propagate run error_message *)",
       "Bash(./.venv/Scripts/python.exe -m pytest tests/test_llm_composite_workflow.py -q)",
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); items=d.get\\('items',d if isinstance\\(d,list\\) else []\\); print\\(json.dumps\\(items[0] if items else {}, indent=2, default=str\\)[:1500]\\)\")",
-      "Bash(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest tests/test_llm_connection_prompt_engineering.py tests/test_llm_field_completion.py -q)"
+      "Bash(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest tests/test_llm_connection_prompt_engineering.py tests/test_llm_field_completion.py -q)",
+      "Bash(git -C \"D:/Tool/Coding/IDE/PyCharm/NeuroGraphIQ_KG_V3_1\" add frontend/src/pages/llm-extraction/components/PoolExtractionModal.tsx)",
+      "Bash(git -C D:/Tool/Coding/IDE/PyCharm/NeuroGraphIQ_KG_V3_1 commit -m 'feat: thread temperature/maxTokens/prompt params into extraction API calls *)",
+      "Bash(git -C 'D:/Tool/Coding/IDE/PyCharm/NeuroGraphIQ_KG_V3_1' rev-parse --short HEAD)",
+      "Bash(echo \"Task 3: complete $\\(git -C 'D:/Tool/Coding/IDE/PyCharm/NeuroGraphIQ_KG_V3_1' rev-parse --short HEAD\\)\")"
     ]
   }
 }
