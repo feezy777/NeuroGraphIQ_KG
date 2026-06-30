@@ -601,6 +601,9 @@ export function PoolExtractionModal({
           create_mirror_records: !dryRun,
           create_triples: !dryRun,
           create_evidence: !dryRun,
+          temperature: temperature !== 0.7 ? temperature : undefined,
+          max_tokens: maxTokens !== 4096 ? maxTokens : undefined,
+          prompt_template_key: primaryTemplateKey || undefined,
         })
 
         const fnStatus = fnResponse.status ?? (dryRun ? 'dry_run' : 'succeeded')
@@ -638,6 +641,12 @@ export function PoolExtractionModal({
         granularity_family: scope.granularity_family,
         create_mirror_records: !dryRun,
         create_evidence: !dryRun,
+        temperature: temperature !== 0.7 ? temperature : undefined,
+        max_tokens: maxTokens !== 4096 ? maxTokens : undefined,
+        prompt_template_key: primaryTemplateKey || undefined,
+        prompt_overrides: editingPrompt && primaryTemplateKey
+          ? { [primaryTemplateKey]: customUserPrompt }
+          : undefined,
       }
 
       const response: CompositeWorkflowStartResponse = await startCompositeWorkflow(payload)
@@ -1104,6 +1113,13 @@ export function PoolExtractionModal({
     setSearchTerm('')
     setSelectedMemberCandidateIds(new Set())
     setDryRun(false)
+    setTemperature(0.7)
+    setMaxTokens(4096)
+    setShowPromptPreview(false)
+    setEditingPrompt(false)
+    setCustomSystemPrompt('')
+    setCustomUserPrompt('')
+    setPromptTemplates([])
     setCancelling(false)
     setShowErrors(false)
     setLocalPoolId(null)
