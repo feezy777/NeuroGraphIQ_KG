@@ -700,7 +700,7 @@ async def run_same_granularity_function_extraction(
                 result.triple_created_count = tr
                 result.evidence_created_count = ev
                 all_warnings.extend(pw)
-            except Exception as exc:
+            except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
                 run.status = LlmRunStatus.partially_succeeded
                 run.error_message = f"mirror persist failed: {exc}"
                 all_warnings.append(str(exc))

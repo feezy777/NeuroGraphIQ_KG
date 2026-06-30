@@ -409,10 +409,8 @@ def normalize_projection_extraction_response(
     *,
     allowed_pair_ids: set[str],
     pair_id_to_endpoints: dict[str, tuple[uuid.UUID, uuid.UUID]],
-    allowed_connection_types: frozenset[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], set[str]]:
     """Return connections, no_connections, warnings, handled_pair_ids."""
-    del allowed_connection_types  # legacy compat; mapping uses projection_type
     warnings: list[str] = []
     connections: list[dict[str, Any]] = []
     no_connections: list[dict[str, Any]] = []

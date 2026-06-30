@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.candidate import CandidateBrainRegion
 from app.models.llm_extraction import LlmExtractionItem, LlmExtractionRun
-from app.models.mirror_kg import MirrorRegionCircuit, MirrorRegionConnection, MirrorRegionFunction
+from app.models.mirror_kg import MirrorCircuitRegion, MirrorRegionCircuit, MirrorRegionConnection, MirrorRegionFunction
 from app.schemas.llm_extraction import LlmItemStatus, LlmRunStatus, LlmScopeType, LlmTaskType
 from app.schemas.mirror_kg import (
     CircuitRegionRole,
@@ -697,7 +697,16 @@ async def _circuit_exists(
         if (circuit.circuit_name or "").lower().strip() != circuit_name_key:
             continue
         norm = circuit.normalized_payload_json or {}
-        existing_set = set(norm.get("region_set_key") or norm.get("involved_region_candidate_ids") or [])
+        region_ids_from_norm = norm.get("region_set_key") or norm.get("involved_region_candidate_ids")
+        if region_ids_from_norm:
+            existing_set = set(region_ids_from_norm)
+        else:
+            # Fallback: derive involved_region_candidate_ids from MirrorCircuitRegion children
+            regions_q = select(MirrorCircuitRegion.region_candidate_id).where(
+                MirrorCircuitRegion.circuit_id == circuit.id
+            )
+            region_rows = (await session.execute(regions_q)).scalars().all()
+            existing_set = set(str(r) for r in region_rows if r is not None)
         if existing_set == target_set:
             return True
     return False
@@ -1116,7 +1125,7 @@ async def run_same_granularity_circuit_extraction(
                 result.triple_created_count = tr
                 result.evidence_created_count = ev
                 all_warnings.extend(pw)
-            except Exception as exc:
+            except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
                 run.status = LlmRunStatus.partially_succeeded
                 run.error_message = f"mirror persist failed: {exc}"
                 all_warnings.append(str(exc))

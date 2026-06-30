@@ -1321,9 +1321,9 @@ async def run_same_granularity_connection_extraction(
                         )
                     if attempt == 0:
                         continue
-                except Exception as exc:  # noqa: BLE001
+                except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
                     logger.exception(
-                        "[connection-extraction] unexpected error parsing pack %s/%s attempt=%s",
+                        "[connection-extraction] error parsing pack %s/%s attempt=%s",
                         pack_index + 1,
                         len(packs),
                         attempt,
@@ -1375,7 +1375,6 @@ async def run_same_granularity_connection_extraction(
                 parsed,
                 allowed_pair_ids=pack_pair_ids,
                 pair_id_to_endpoints=pair_id_to_endpoints,
-                allowed_connection_types=allowed_types,
             )
         except ValueError as exc:
             # JSON parsed but did not match schema → schema error, not transport.
