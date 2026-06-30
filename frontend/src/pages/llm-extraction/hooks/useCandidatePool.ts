@@ -132,7 +132,12 @@ export function useCandidatePool(scope: PoolScope | null) {
 
   /** Replace pool contents with exactly these candidates (no accumulation). */
   const setPoolCandidates = useCallback(async (candidateIds: string[]) => {
-    if (!scope || candidateIds.length < 2) return
+    if (candidateIds.length < 2) return
+    if (!scope) {
+      const msg = '[useCandidatePool] setPoolCandidates: scope is null — poolScope not initialized yet'
+      console.warn(msg)
+      throw new Error(msg)
+    }
 
     ++fetchGenRef.current  // invalidate any in-flight background fetch
     try {

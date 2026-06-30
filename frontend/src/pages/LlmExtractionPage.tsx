@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { ChevronLeft, Sparkles, AlertTriangle } from 'lucide-react'
 import { PageHeader } from '../components/PageHeader'
 import { DataTable, type Column } from '../components/DataTable'
@@ -30,6 +30,9 @@ import { useWorkbenchLog } from '../logging/useWorkbenchLog'
 import { CircuitToFunctionsPendingBanner } from './llm-extraction/components/CircuitToFunctionsPendingBanner'
 import { formatExtractionApiError } from './llm-extraction/utils/formatExtractionApiError'
 import { FieldCompletionTab } from './llm-extraction/components/FieldCompletionTab'
+import { QuickExtractionCards } from './llm-extraction/components/QuickExtractionCards'
+import { PoolExtractionModal } from './llm-extraction/components/PoolExtractionModal'
+import { useCandidatePool, type PoolScope } from './llm-extraction/hooks/useCandidatePool'
 import {
   type LlmDataTabId,
   type MirrorSubTabId,
@@ -5772,6 +5775,44 @@ function getPairCountForTask(taskId: string, selectedCount: number): number | un
   return undefined
 }
 
+// ── Error boundary (local, does not affect global routing) ─────────────────────
+
+class LlmErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error }
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 40, textAlign: 'center' }}>
+          <h2 style={{ color: '#cf1322', marginBottom: 12 }}>LLM 提取页面加载异常</h2>
+          <p style={{ color: '#666', marginBottom: 16, fontSize: 14 }}>
+            页面渲染时发生错误，已自动隔离，不影响其他页面。
+          </p>
+          <details style={{ textAlign: 'left', maxWidth: 600, margin: '0 auto' }}>
+            <summary style={{ cursor: 'pointer', color: '#888', fontSize: 13 }}>错误详情</summary>
+            <pre style={{ background: '#fff2f0', padding: 12, borderRadius: 6, fontSize: 12, overflow: 'auto', marginTop: 8 }}>
+              {this.state.error?.message ?? 'Unknown error'}
+            </pre>
+          </details>
+          <button
+            className="llm-btn llm-btn-primary"
+            style={{ marginTop: 20 }}
+            onClick={() => this.setState({ hasError: false, error: null })}
+          >
+            重试
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 // ── LlmExtractionPage ─────────────────────────────────────────────────────────
 
 export function LlmExtractionPage() {
@@ -5813,6 +5854,9 @@ export function LlmExtractionPage() {
   const [debugSinglePack, setDebugSinglePack] = useState(false)
   // New simplified run modal
   const [showRunModal, setShowRunModal] = useState(false)
+  const [showFullExtractModal, setShowFullExtractModal] = useState(false)
+  const [poolWorkflowType, setPoolWorkflowType] = useState('connection_with_function')
+
   const { setExpanded: setLogConsoleExpanded, errorCount: logErrorCount } = useWorkbenchLog()
   const prevLogErrorCountRef = useRef(0)
   const DISMISSED_RUNS_STORAGE_KEY = 'llm.dismissedWorkflowRunIds'
@@ -5833,36 +5877,6 @@ export function LlmExtractionPage() {
   const providers = providersData?.providers ?? []
   const taskTypes = taskTypesData?.task_types ?? []
 
-  const switchDataTab = useCallback((tabId: LlmDataTabId) => {
-    setActiveDataTab(tabId)
-    setLegacyFinalTab(null)
-  }, [])
-
-  const handleBatchExtract = useCallback(() => {
-    const tooFewError = getCandidateTooFewError(selectedTask, selectedCandidateIds.length)
-    if (tooFewError) { setCandidateMinError(tooFewError); return }
-    setCandidateMinError(null)
-    setCompositeResult(null)
-    setCompositeSubsteps([])
-    setShowRunModal(true)
-  }, [selectedTask, selectedCandidateIds.length])
-
-  const handleRunCreated = useCallback((runId: string) => {
-    setHighlightRunId(runId)
-  }, [])
-
-  const runCompositeTask = useCallback(() => {
-    if (!isCompositeTask(selectedTask)) return
-    setCompositeConfirmOpen(false)
-    setShowRunModal(true)
-  }, [selectedTask])
-
-    const navigateToRuns = () => switchDataTab('runs')
-  const navigateToItems = (runId: string) => {
-    setItemsRunFilter(runId)
-    switchDataTab('items')
-  }
-
   const DATA_TAB_LABELS: Record<LlmDataTabId, string> = useMemo(() => ({
     candidates: t('llm.dataFirst.candidates'),
     mirror: t('llm.dataFirst.mirrorExtraction'),
@@ -5880,9 +5894,88 @@ export function LlmExtractionPage() {
     triples: t('mirror.triples'),
   }), [t])
 
+  // ── Candidate pool ──────────────────────────────────────────────────
+  // Derived synchronously (useMemo) so it is never null on first paint
+  // when session scope is already loaded — avoids a race where
+  // openPoolExtractModal calls setPoolCandidates before the useEffect
+  // that used to set poolScope has committed.
+  const poolScope: PoolScope | null = useMemo(() => {
+    const sourceAtlas = scope.source_atlas || ''
+    const granularityLevel = scope.granularity_level || ''
+    if (sourceAtlas && granularityLevel) {
+      return { sourceAtlas, granularityLevel, granularityFamily: scope.granularity_family || null }
+    }
+    return null
+  }, [scope.source_atlas, scope.granularity_level, scope.granularity_family])
+
+  const {
+    pool,
+    pooledCandidateIds,
+    addCandidates,
+    setPoolCandidates,
+    clearPool,
+    refresh,
+  } = useCandidatePool(poolScope)
+
+  const openPoolExtractModal = useCallback(async (
+    workflowType: string,
+    task: string,
+  ) => {
+    if (selectedCandidateIds.length < 2) {
+      setCandidateMinError('请至少选择 2 个脑区后再提取')
+      return
+    }
+    setCandidateMinError(null)
+    setSelectedTask(task)
+    setDryRun(false)
+    setPoolWorkflowType(workflowType)
+    try {
+      await setPoolCandidates(selectedCandidateIds)
+      setShowFullExtractModal(true)
+    } catch (err) {
+      console.error('[LlmExtractionPage] setPoolCandidates failed:', err)
+      setCandidateMinError('设置提取池失败，请重试')
+    }
+  }, [selectedCandidateIds, setPoolCandidates])
+
+  const switchDataTab = useCallback((tabId: LlmDataTabId) => {
+    setActiveDataTab(tabId)
+    setLegacyFinalTab(null)
+  }, [])
+
+  const handleBatchExtract = useCallback(() => {
+    const tooFewError = getCandidateTooFewError(selectedTask, selectedCandidateIds.length)
+    if (tooFewError) { setCandidateMinError(tooFewError); return }
+    setCandidateMinError(null)
+    setCompositeResult(null)
+    setCompositeSubsteps([])
+    // Auto-add selected candidates to pool (silent, fire-and-forget)
+    if (selectedCandidateIds.length > 0) {
+      addCandidates(selectedCandidateIds).catch(() => {})
+    }
+    setShowRunModal(true)
+  }, [selectedTask, selectedCandidateIds.length, selectedCandidateIds, addCandidates])
+
+  const handleRunCreated = useCallback((runId: string) => {
+    setHighlightRunId(runId)
+  }, [])
+
+  const runCompositeTask = useCallback(() => {
+    if (!isCompositeTask(selectedTask)) return
+    setCompositeConfirmOpen(false)
+    setShowRunModal(true)
+  }, [selectedTask])
+
+  const navigateToRuns = useCallback(() => switchDataTab('runs'), [switchDataTab])
+  const navigateToItems = useCallback((runId: string) => {
+    setItemsRunFilter(runId)
+    switchDataTab('items')
+  }, [switchDataTab])
+
   const currentProvider = providers.find(p => p.name === provider)
 
   return (
+    <LlmErrorBoundary>
     <div className="llm-data-first-page">
       <div className="llm-data-first-header card">
         <div className="llm-data-first-header-left">
@@ -5930,47 +6023,74 @@ export function LlmExtractionPage() {
         batchLoading={batchLoading}
       />
 
-      {/* Quick extraction cards */}
-      {activeDataTab === 'candidates' && selectedCandidateIds.length >= 2 && (
-        <div className="llm-quick-extract-row">
-          <button
-            className="llm-quick-card llm-quick-card-fn"
-            onClick={() => {
-              setSelectedTask('same_granularity_function_completion')
-              setDryRun(false)
-              setShowRunModal(true)
-            }}
-          >
-            <span className="llm-quick-icon">🏷️</span>
-            <span className="llm-quick-label">脑区功能提取</span>
-            <span className="llm-quick-desc">为选中的 {selectedCandidateIds.length} 个脑区提取功能</span>
-          </button>
-          <button
-            className="llm-quick-card llm-quick-card-conn"
-            onClick={() => {
-              setSelectedTask('same_granularity_connection_completion')
-              setDryRun(false)
-              setShowRunModal(true)
-            }}
-          >
-            <span className="llm-quick-icon">🔗</span>
-            <span className="llm-quick-label">连接提取</span>
-            <span className="llm-quick-desc">{selectedCandidateIds.length} 个脑区 all_pairs 连接提取</span>
-          </button>
-          <button
-            className="llm-quick-card llm-quick-card-circuit"
-            onClick={() => {
-              setSelectedTask('composite_circuit_with_function_and_steps')
-              setDryRun(false)
-              setShowRunModal(true)
-            }}
-          >
-            <span className="llm-quick-icon">⭕</span>
-            <span className="llm-quick-label">回路+步骤+功能提取</span>
-            <span className="llm-quick-desc">从选中脑区提取回路、步骤和功能</span>
-          </button>
+      {/* Quick extraction cards — always visible */}
+      {activeDataTab === 'candidates' && (
+        <QuickExtractionCards
+          selectedCount={selectedCount}
+          onExtractFunction={() => {
+            void openPoolExtractModal('same_granularity_function_completion', 'same_granularity_function_completion')
+          }}
+          onExtractConnection={() => {
+            void openPoolExtractModal('connection_with_function', 'same_granularity_connection_completion')
+          }}
+          onExtractCircuit={() => {
+            void openPoolExtractModal('circuit_with_function_steps', 'composite_circuit_with_function_and_steps')
+          }}
+        />
+      )}
+
+      {/* Pool indicator — appears when there are pooled candidates */}
+      {activeDataTab === 'candidates' && pool && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '10px 16px', marginBottom: 12,
+          background: 'linear-gradient(135deg, #eef4ff, #f0f5ff)',
+          border: '1px solid #d6e4ff', borderRadius: 10, fontSize: 14,
+        }}>
+          <span>
+            🧠 <strong>{pool.source_atlas}</strong> · {pool.granularity_level}
+            &nbsp;当前池 <strong style={{ color: '#2563eb' }}>{pool.candidate_count}</strong> 脑区
+            &nbsp;· 预估 <strong>{pool.pair_count?.toLocaleString()}</strong> 对
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="llm-btn llm-btn-ghost"
+              style={{ fontSize: 12 }}
+              onClick={async () => {
+                if (selectedCount < 2) {
+                  setCandidateMinError('请至少选择 2 个脑区')
+                  return
+                }
+                try {
+                  await setPoolCandidates(selectedCandidateIds)
+                } catch {
+                  setCandidateMinError('设置提取池失败，请重试')
+                }
+              }}
+              disabled={selectedCount < 2}
+            >
+              设为提取池 ({selectedCount})
+            </button>
+            <button
+              className="llm-btn"
+              style={{ fontSize: 12, background: '#2563eb', color: '#fff', border: 'none', padding: '4px 14px', borderRadius: 6, fontWeight: 500, cursor: 'pointer' }}
+              onClick={async () => {
+                await openPoolExtractModal('connection_with_function', 'same_granularity_connection_completion')
+              }}
+            >
+              ⚡ 全量提取
+            </button>
+            <button
+              className="llm-btn llm-btn-ghost"
+              style={{ fontSize: 12, color: '#cf1322' }}
+              onClick={() => { if (confirm('清空候选池？')) clearPool() }}
+            >
+              清空
+            </button>
+          </div>
         </div>
       )}
+
 
       {candidateMinError && (
         <div className="llm-validation-error">
@@ -6043,6 +6163,7 @@ export function LlmExtractionPage() {
             onBatchEnd={() => setBatchLoading(false)}
             onSelectionChange={setSelectedCount}
             onSelectionIdsChange={setSelectedCandidateIds}
+            pooledCandidateIds={pooledCandidateIds}
           />
         )}
         {!legacyFinalTab && activeDataTab === 'runs' && (
@@ -6110,6 +6231,24 @@ export function LlmExtractionPage() {
           onViewItems={() => { setShowRunModal(false); switchDataTab('items') }}
         />
       )}
+
+      <PoolExtractionModal
+        open={showFullExtractModal}
+        pool={pool}
+        pooledCandidateIds={pooledCandidateIds}
+        provider={provider}
+        modelName={modelName}
+        providers={providers}
+        workflowType={poolWorkflowType}
+        onProviderChange={setProvider}
+        onModelChange={setModelName}
+        onPoolRefresh={refresh}
+        onSetPoolCandidates={setPoolCandidates}
+        selectedCandidateIds={selectedCandidateIds}
+        candidateLabels={{}}
+        onClose={() => setShowFullExtractModal(false)}
+      />
     </div>
+    </LlmErrorBoundary>
   )
 }
