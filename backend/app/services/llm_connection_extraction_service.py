@@ -206,6 +206,8 @@ class ConnectionExtractionResult:
     no_connection_count: int = 0
     created_connection_ids: list[uuid.UUID] = field(default_factory=list)
     execution_summary: dict[str, Any] | None = None
+    estimated_input_tokens: int | None = None
+    estimated_output_tokens: int | None = None
     provider_call_count: int = 0
     provider_success_count: int = 0
     provider_error_count: int = 0
@@ -869,6 +871,11 @@ async def run_same_granularity_connection_extraction(
     result.prompt_preview = preview
 
     if dry_run:
+        from app.services.field_completion_prompt_engineering import estimate_prompt_tokens
+        est_input = estimate_prompt_tokens(system_prompt) + estimate_prompt_tokens(user_prompt)
+        est_output = len(pairs) * 48
+        result.estimated_input_tokens = est_input
+        result.estimated_output_tokens = est_output
         result.system_prompt = system_prompt
         result.user_prompt = user_prompt
         result.unprocessed_pair_count = len(pairs)

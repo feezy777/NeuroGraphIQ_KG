@@ -80,6 +80,7 @@ class CompositeWorkflowRunRequest(BaseModel):
     max_circuits: int | None = Field(default=None, ge=1, le=5000)
     max_tokens: int | None = Field(default=None, ge=256, le=8192)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    dry_run_sample_pack: bool = False
     prompt_template_key: str | None = None
     prompt_overrides: dict[str, str] | None = None
     parse_error_fail_fast_enabled: bool = True

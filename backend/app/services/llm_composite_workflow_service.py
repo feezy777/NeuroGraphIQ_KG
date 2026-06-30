@@ -1808,6 +1808,36 @@ async def run_connection_with_function_workflow(
             on_progress=_connection_progress,
             commit_progress=commit_progress,
         )
+
+        # Dry-run sample pack: execute the first pack against the real LLM for preview
+        if request.dry_run and request.dry_run_sample_pack:
+            try:
+                provider_instance = get_llm_provider(request.provider)
+                sample_prompt = result.user_prompt or ""
+                sample_system = result.system_prompt or ""
+                raw_result = await provider_instance.complete_text(
+                    model=request.model_name or "",
+                    system_prompt=sample_system,
+                    user_prompt=sample_prompt,
+                    json_mode=True,
+                )
+                from app.services.llm_json_utils import parse_llm_json_response
+                from app.services.llm_extraction_prompt_engineering import normalize_connection_extraction_payload
+                parsed = parse_llm_json_response(raw_result.raw_text if raw_result else "")
+                normalized = normalize_connection_extraction_payload(parsed)
+                exec_summary = dict(result.execution_summary or {})
+                exec_summary["dry_run_sample"] = {
+                    "projections": normalized.get("projections", [])[:3],
+                    "total_parsed": len(normalized.get("projections", [])),
+                    "raw_response_preview": (raw_result.raw_text or "")[:2000] if raw_result else "",
+                }
+                result.execution_summary = exec_summary
+            except Exception as exc:
+                logger.warning("[composite] dry_run_sample_pack failed: %s", exc)
+                exec_summary = dict(result.execution_summary or {})
+                exec_summary["dry_run_sample"] = {"error": str(exc)}
+                result.execution_summary = exec_summary
+
         if result.warnings:
             warnings.extend(result.warnings)
         conn_step_status = _connection_step_status(result)

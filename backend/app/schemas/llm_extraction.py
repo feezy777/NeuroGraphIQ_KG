@@ -424,6 +424,8 @@ class SameGranularityConnectionExtractionResponse(BaseModel):
     no_connection_count: int = 0
     created_connection_ids: list[uuid.UUID] = Field(default_factory=list)
     execution_summary: dict[str, Any] | None = None
+    estimated_input_tokens: int | None = None
+    estimated_output_tokens: int | None = None
     provider_call_count: int = 0
     provider_success_count: int = 0
     provider_error_count: int = 0

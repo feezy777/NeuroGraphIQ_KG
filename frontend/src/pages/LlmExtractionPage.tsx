@@ -236,7 +236,6 @@ function CircuitToStepsWorkbench({ onRefreshSteps }: { onRefreshSteps: () => voi
   const [maxSteps, setMaxSteps] = useState(12)
   const [includeCircuitRegions, setIncludeCircuitRegions] = useState(true)
   const [createMirrorSteps, setCreateMirrorSteps] = useState(true)
-  const [dryRun, setDryRun] = useState(false)
   const [batchFilter, setBatchFilter] = useState(sess.batch_id ?? '')
   const [resourceFilter, setResourceFilter] = useState('')
   const [running, setRunning] = useState(false)
@@ -289,7 +288,6 @@ function CircuitToStepsWorkbench({ onRefreshSteps }: { onRefreshSteps: () => voi
         provider,
         model_name: modelName || undefined,
         circuit_id: selectedCircuitId!,
-        dry_run: previewOnly,
         max_steps: maxSteps,
         include_circuit_regions: includeCircuitRegions,
         create_mirror_records: createMirrorSteps,
@@ -343,7 +341,7 @@ function CircuitToStepsWorkbench({ onRefreshSteps }: { onRefreshSteps: () => voi
       <div className="circuit-to-steps-warning">{t('mirror.macroClinical.stepsMirrorOnlyWarning')}</div>
       <div className="circuit-to-steps-warning">{t('mirror.macroClinical.notFinalWarning')}</div>
       <div className="circuit-to-steps-warning">{t('mirror.macroClinical.notKgWarning')}</div>
-      {!dryRun && !currentProvider?.configured && (
+      {!currentProvider?.configured && (
         <div className="circuit-to-steps-warning">{t('llm.providerNotConfigured')}</div>
       )}
       {notice && <Notice notice={notice} onClose={() => setNotice(null)} />}
@@ -371,10 +369,6 @@ function CircuitToStepsWorkbench({ onRefreshSteps }: { onRefreshSteps: () => voi
           <input type="checkbox" checked={createMirrorSteps} onChange={e => setCreateMirrorSteps(e.target.checked)} />
           {t('mirror.macroClinical.createMirrorSteps')}
         </label>
-        <label className="checkbox-label">
-          <input type="checkbox" checked={dryRun} onChange={e => setDryRun(e.target.checked)} />
-          dry_run
-        </label>
         <div className="filter-bar">
           <input className="filter-input" placeholder="resource_id" value={resourceFilter} onChange={e => setResourceFilter(e.target.value)} />
           <input className="filter-input" placeholder="batch_id" value={batchFilter} onChange={e => setBatchFilter(e.target.value)} />
@@ -385,7 +379,7 @@ function CircuitToStepsWorkbench({ onRefreshSteps }: { onRefreshSteps: () => voi
           <ActionButton
             label={t('mirror.macroClinical.runCircuitToSteps')}
             onClick={() => runExtraction(false)}
-            disabled={running || (!dryRun && !currentProvider?.configured)}
+            disabled={running || !currentProvider?.configured}
             loading={running}
             variant="primary"
           />
@@ -446,7 +440,6 @@ function CircuitStepsToProjectionsWorkbench({
   const [createMemberships, setCreateMemberships] = useState(true)
   const [createTriples, setCreateTriples] = useState(true)
   const [createEvidence, setCreateEvidence] = useState(true)
-  const [dryRun, setDryRun] = useState(false)
   const [batchFilter, setBatchFilter] = useState(sess.batch_id ?? '')
   const [resourceFilter, setResourceFilter] = useState('')
   const [running, setRunning] = useState(false)
@@ -505,7 +498,6 @@ function CircuitStepsToProjectionsWorkbench({
         provider,
         model_name: modelName || undefined,
         circuit_id: selectedCircuitId!,
-        dry_run: previewOnly,
         max_projections: maxProjections,
         include_existing_projections: includeExisting,
         create_mirror_records: createMirror,
@@ -568,7 +560,7 @@ function CircuitStepsToProjectionsWorkbench({
       <div className="circuit-steps-to-projections-warning">{t('mirror.macroClinical.membershipMeaning')}</div>
       <div className="circuit-steps-to-projections-warning">{t('mirror.macroClinical.notFinalWarning')}</div>
       <div className="circuit-steps-to-projections-warning">{t('mirror.macroClinical.notKgWarning')}</div>
-      {!dryRun && !currentProvider?.configured && (
+      {!currentProvider?.configured && (
         <div className="circuit-steps-to-projections-warning">{t('llm.providerNotConfigured')}</div>
       )}
       {notice && <Notice notice={notice} onClose={() => setNotice(null)} />}
@@ -605,10 +597,6 @@ function CircuitStepsToProjectionsWorkbench({
           <input type="checkbox" checked={createEvidence} onChange={e => setCreateEvidence(e.target.checked)} />
           {t('mirror.macroClinical.createProjectionEvidence')}
         </label>
-        <label className="checkbox-label">
-          <input type="checkbox" checked={dryRun} onChange={e => setDryRun(e.target.checked)} />
-          dry_run
-        </label>
         <div className="filter-bar">
           <input className="filter-input" placeholder="resource_id" value={resourceFilter} onChange={e => setResourceFilter(e.target.value)} />
           <input className="filter-input" placeholder="batch_id" value={batchFilter} onChange={e => setBatchFilter(e.target.value)} />
@@ -618,7 +606,7 @@ function CircuitStepsToProjectionsWorkbench({
           <ActionButton
             label={t('mirror.macroClinical.runCircuitStepsToProjections')}
             onClick={() => runExtraction(false)}
-            disabled={running || (!dryRun && !currentProvider?.configured)}
+            disabled={running || !currentProvider?.configured}
             loading={running}
             variant="primary"
           />
@@ -684,7 +672,6 @@ function ProjectionToFunctionsWorkbench({
   const [createMirror, setCreateMirror] = useState(true)
   const [createTriples, setCreateTriples] = useState(true)
   const [createEvidence, setCreateEvidence] = useState(true)
-  const [dryRun, setDryRun] = useState(false)
   const [batchFilter, setBatchFilter] = useState(sess.batch_id ?? '')
   const [resourceFilter, setResourceFilter] = useState('')
   const [running, setRunning] = useState(false)
@@ -773,7 +760,6 @@ function ProjectionToFunctionsWorkbench({
         provider,
         model_name: modelName || undefined,
         projection_ids: selectedProjectionIds,
-        dry_run: previewOnly,
         max_functions_per_projection: maxFunctionsPerProjection,
         include_circuit_context: includeCircuitContext,
         include_region_context: includeRegionContext,
@@ -837,7 +823,7 @@ function ProjectionToFunctionsWorkbench({
       <h3 className="panel-title">{t('mirror.macroClinical.projectionToFunctions')}</h3>
       <p className="macro-clinical-alignment-body">{t('mirror.macroClinical.projectionToFunctionsDescription')}</p>
       <div className="projection-to-functions-warning">{t('mirror.macroClinical.projectionFunctionMirrorOnlyWarning')}</div>
-      {!dryRun && !currentProvider?.configured && (
+      {!currentProvider?.configured && (
         <div className="projection-to-functions-warning">{t('llm.providerNotConfigured')}</div>
       )}
       {notice && <Notice notice={notice} onClose={() => setNotice(null)} />}
@@ -874,10 +860,6 @@ function ProjectionToFunctionsWorkbench({
           <input type="checkbox" checked={createEvidence} onChange={e => setCreateEvidence(e.target.checked)} />
           {t('mirror.macroClinical.createProjectionFunctionEvidence')}
         </label>
-        <label className="checkbox-label">
-          <input type="checkbox" checked={dryRun} onChange={e => setDryRun(e.target.checked)} />
-          dry_run
-        </label>
         <div className="filter-bar">
           <input className="filter-input" placeholder="resource_id" value={resourceFilter} onChange={e => setResourceFilter(e.target.value)} />
           <input className="filter-input" placeholder="batch_id" value={batchFilter} onChange={e => setBatchFilter(e.target.value)} />
@@ -888,7 +870,7 @@ function ProjectionToFunctionsWorkbench({
           <ActionButton
             label={t('mirror.macroClinical.projectionToFunctions')}
             onClick={() => runExtraction(false)}
-            disabled={running || (!dryRun && !currentProvider?.configured)}
+            disabled={running || !currentProvider?.configured}
             loading={running}
             variant="primary"
           />
@@ -991,7 +973,6 @@ function ProjectionsToCircuitsWorkbench({
   const [createMemberships, setCreateMemberships] = useState(true)
   const [createTriples, setCreateTriples] = useState(true)
   const [createEvidence, setCreateEvidence] = useState(true)
-  const [dryRun, setDryRun] = useState(false)
   const [batchFilter, setBatchFilter] = useState(sess.batch_id ?? '')
   const [resourceFilter, setResourceFilter] = useState('')
   const [running, setRunning] = useState(false)
@@ -1091,7 +1072,6 @@ function ProjectionsToCircuitsWorkbench({
         provider,
         model_name: modelName || undefined,
         projection_ids: selectedProjectionIds,
-        dry_run: previewOnly,
         max_circuits: maxCircuits,
         max_steps_per_circuit: maxStepsPerCircuit,
         include_existing_circuits: includeExistingCircuits,
@@ -1142,7 +1122,7 @@ function ProjectionsToCircuitsWorkbench({
       <h3 className="panel-title">{t('mirror.macroClinical.projectionsToCircuits')}</h3>
       <p className="macro-clinical-alignment-body">{t('mirror.macroClinical.projectionsToCircuitsDescription')}</p>
       <div className="projections-to-circuits-warning">{t('mirror.macroClinical.projectionsToCircuitsMirrorOnlyWarning')}</div>
-      {!dryRun && !currentProvider?.configured && (
+      {!currentProvider?.configured && (
         <div className="projections-to-circuits-warning">{t('llm.providerNotConfigured')}</div>
       )}
       {notice && <Notice notice={notice} onClose={() => setNotice(null)} />}
@@ -1167,7 +1147,6 @@ function ProjectionsToCircuitsWorkbench({
         <label className="checkbox-label"><input type="checkbox" checked={createMemberships} onChange={e => setCreateMemberships(e.target.checked)} />{t('mirror.macroClinical.createInferredMemberships')}</label>
         <label className="checkbox-label"><input type="checkbox" checked={createTriples} onChange={e => setCreateTriples(e.target.checked)} />{t('mirror.macroClinical.createProjectionTriples')}</label>
         <label className="checkbox-label"><input type="checkbox" checked={createEvidence} onChange={e => setCreateEvidence(e.target.checked)} />{t('mirror.macroClinical.createProjectionEvidence')}</label>
-        <label className="checkbox-label"><input type="checkbox" checked={dryRun} onChange={e => setDryRun(e.target.checked)} />dry_run</label>
         <div className="filter-bar">
           <input className="filter-input" placeholder="resource_id" value={resourceFilter} onChange={e => setResourceFilter(e.target.value)} />
           <input className="filter-input" placeholder="batch_id" value={batchFilter} onChange={e => setBatchFilter(e.target.value)} />
@@ -1175,7 +1154,7 @@ function ProjectionsToCircuitsWorkbench({
         </div>
         <div className="action-row">
           <ActionButton label={t('mirror.macroClinical.previewPrompt')} onClick={() => runExtraction(true)} disabled={running} />
-          <ActionButton label={t('mirror.macroClinical.projectionsToCircuits')} onClick={() => runExtraction(false)} disabled={running || (!dryRun && !currentProvider?.configured)} loading={running} variant="primary" />
+          <ActionButton label={t('mirror.macroClinical.projectionsToCircuits')} onClick={() => runExtraction(false)} disabled={running || !currentProvider?.configured} loading={running} variant="primary" />
           <ActionButton label={t('common.refresh')} onClick={() => { setProjTick(x => x + 1); onRefreshAll() }} />
         </div>
       </div>
@@ -1237,7 +1216,6 @@ function CircuitProjectionCrossValidationWorkbench({
   const [projectionIdsText, setProjectionIdsText] = useState('')
   const [includeUnverified, setIncludeUnverified] = useState(true)
   const [includeConflicts, setIncludeConflicts] = useState(true)
-  const [dryRun, setDryRun] = useState(true)
   const [applyUpdates, setApplyUpdates] = useState(false)
   const [updateBidirectional, setUpdateBidirectional] = useState(true)
   const [updateConflicts, setUpdateConflicts] = useState(false)
@@ -1292,10 +1270,9 @@ function CircuitProjectionCrossValidationWorkbench({
     setRunning(true)
     setNotice(null)
     try {
-      const effectiveDryRun = previewOnly || dryRun
+      const effectiveDryRun = previewOnly
       const resp = await runCircuitProjectionCrossValidation({
         scope: buildScope(),
-        dry_run: effectiveDryRun,
         apply_updates: applyUpdates && !effectiveDryRun,
         update_bidirectional: updateBidirectional,
         update_conflicts: updateConflicts,
@@ -1328,7 +1305,7 @@ function CircuitProjectionCrossValidationWorkbench({
       setNotice({ type: 'error', message: err })
       return
     }
-    if (!previewOnly && !dryRun && applyUpdates) {
+    if (!previewOnly && applyUpdates) {
       setShowConfirm(true)
       return
     }
@@ -1369,7 +1346,6 @@ function CircuitProjectionCrossValidationWorkbench({
   const runCols: Column<MirrorCircuitProjectionCrossValidationRun>[] = useMemo(() => [
     { key: 'id', header: 'run_id', render: r => <><code className="text-mono" style={{ fontSize: 11 }}>{r.id.slice(0, 10)}…</code><CopyButton value={r.id} label="" /></> },
     { key: 'status', header: 'status', render: r => <StatusBadge status={r.status} /> },
-    { key: 'dry_run', header: 'dry_run', render: r => r.dry_run ? 'yes' : 'no' },
     { key: 'apply_updates', header: 'apply', render: r => r.apply_updates ? 'yes' : 'no' },
     { key: 'membership_count', header: 'groups', render: r => r.membership_count },
     { key: 'bidirectional', header: 'bidir', render: r => r.bidirectionally_supported_count },
@@ -1408,8 +1384,7 @@ function CircuitProjectionCrossValidationWorkbench({
         <label>{t('mirror.validation.limit')}<input type="number" min={1} max={5000} value={limit} onChange={e => setLimit(Number(e.target.value))} /></label>
         <label className="checkbox-label"><input type="checkbox" checked={includeUnverified} onChange={e => setIncludeUnverified(e.target.checked)} />{t('mirror.macroClinical.includeUnverified')}</label>
         <label className="checkbox-label"><input type="checkbox" checked={includeConflicts} onChange={e => setIncludeConflicts(e.target.checked)} />{t('mirror.macroClinical.includeConflicts')}</label>
-        <label className="checkbox-label"><input type="checkbox" checked={dryRun} onChange={e => setDryRun(e.target.checked)} />dry_run</label>
-        <label className="checkbox-label"><input type="checkbox" checked={applyUpdates} disabled={dryRun} onChange={e => setApplyUpdates(e.target.checked)} />{t('mirror.macroClinical.applyCrossValidationUpdates')}</label>
+        <label className="checkbox-label"><input type="checkbox" checked={applyUpdates} onChange={e => setApplyUpdates(e.target.checked)} />{t('mirror.macroClinical.applyCrossValidationUpdates')}</label>
         <label className="checkbox-label"><input type="checkbox" checked={updateBidirectional} onChange={e => setUpdateBidirectional(e.target.checked)} />{t('mirror.macroClinical.updateBidirectional')}</label>
         <label className="checkbox-label"><input type="checkbox" checked={updateConflicts} onChange={e => setUpdateConflicts(e.target.checked)} />{t('mirror.macroClinical.updateConflicts')}</label>
         <div className="filter-bar">
