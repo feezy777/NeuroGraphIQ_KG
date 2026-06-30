@@ -115,6 +115,31 @@ async def start_composite_workflow(
         ) from exc
 
 
+@router.post(
+    "/composite-workflows/{workflow_run_id}/retry-failed",
+    response_model=CompositeWorkflowStartResponse,
+)
+async def retry_failed_composite_workflow(
+    workflow_run_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+):
+    try:
+        pending = await composite_svc.retry_failed_packs(session, workflow_run_id)
+        return _start_response_from_run(pending)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Composite workflow run not found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except Exception as exc:
+        logger.exception("[llm-composite-workflow][retry-failed] unhandled")
+        await session.rollback()
+        raise HTTPException(status_code=500, detail={
+            "code": "COMPOSITE_WORKFLOW_RETRY_ERROR",
+            "message": "Failed to retry composite workflow.",
+            "error": str(exc)[:500],
+        }) from exc
+
+
 @router.get("/composite-workflows/runs", response_model=CompositeWorkflowRunListResponse)
 async def list_composite_workflow_runs(
     workflow_type: str | None = None,

@@ -7,6 +7,7 @@ import {
   cancelCompositeWorkflow,
   pauseCompositeWorkflow,
   resumeCompositeWorkflow,
+  retryFailedCompositeWorkflow,
   removePoolMembers,
   getCandidatePool,
   createCandidatePool,
@@ -1909,6 +1910,41 @@ export function PoolExtractionModal({
 
       {/* Footer */}
       <div className="modal-footer">
+        {progress.failedPacks > 0 && (
+          <button
+            className="llm-btn llm-btn-primary"
+            onClick={async () => {
+              try {
+                const resp = await retryFailedCompositeWorkflow(progress.workflowRunId)
+                setProgress(prev => ({
+                  ...prev,
+                  workflowRunId: resp.workflow_run_id,
+                  workflowStatus: resp.status,
+                  progressPercent: 0,
+                  processedPacks: 0,
+                  totalPacks: resp.pair_count ? Math.ceil(resp.pair_count / 40) : prev.totalPacks,
+                  successPacks: 0,
+                  failedPacks: 0,
+                  connectionsFound: 0,
+                  createdCount: 0,
+                  updatedCount: 0,
+                  errors: [],
+                  elapsedSec: 0,
+                  startedAt: new Date().toISOString(),
+                }))
+                startTimeRef.current = Date.now()
+                setModalState('progress')
+              } catch (err: any) {
+                setProgress(prev => ({
+                  ...prev,
+                  errors: [...prev.errors, `重试失败: ${err?.message || err}`],
+                }))
+              }
+            }}
+          >
+            重试失败包 ({progress.failedPacks})
+          </button>
+        )}
         <button className="llm-btn llm-btn-primary" onClick={handleClose}>
           关闭
         </button>

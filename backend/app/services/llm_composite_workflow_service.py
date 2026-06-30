@@ -2428,6 +2428,133 @@ async def run_composite_workflow(
         ) from exc
 
 
+async def retry_failed_packs(
+    session: AsyncSession,
+    workflow_run_id: uuid.UUID,
+) -> CompositeWorkflowRunResponse:
+    """Retry failed packs from a previous composite workflow run.
+
+    Identifies packs whose status is not ``succeeded`` (parse errors, schema errors,
+    transport errors, etc.) and creates a *new* composite workflow run with the
+    original candidate IDs so the LLM re-processes only the needed pairs.  Mirror KG
+    dedup/merge handles already-created records, so re-processing a small number of
+    already-successful pairs is harmless.
+
+    Raises
+    ------
+    KeyError
+        *workflow_run_id* not found.
+    ValueError
+        No failed packs to retry, or the original run has fewer than 2 candidates.
+    """
+    run = await session.get(LlmCompositeWorkflowRun, workflow_run_id)
+    if run is None:
+        raise KeyError("Composite workflow run not found")
+
+    # ── Locate the connection-extraction step ──────────────────────────────
+    steps_q = (
+        select(LlmCompositeWorkflowStep)
+        .where(LlmCompositeWorkflowStep.workflow_run_id == run.id)
+        .order_by(LlmCompositeWorkflowStep.step_order)
+    )
+    steps = list((await session.execute(steps_q)).scalars().all())
+
+    conn_step = next((s for s in steps if s.step_key == "extract_connections"), None)
+    if conn_step is None:
+        raise ValueError("No connection extraction step found in workflow run")
+
+    # ── Read pack summaries ────────────────────────────────────────────────
+    response_json = conn_step.response_json or {}
+    execution_summary = response_json.get("execution_summary") or {}
+    pack_summaries = (
+        execution_summary.get("pack_summaries")
+        or response_json.get("pack_summaries")
+        or []
+    )
+    if not pack_summaries:
+        raise ValueError("No pack summaries available; cannot determine failed packs")
+
+    # ── Identify failed packs ──────────────────────────────────────────────
+    # Packs with status ``succeeded`` or ``no_connection`` are considered OK.
+    # Everything else (parse_error, schema_error, transport_error, etc.) is a failure.
+    failed_pack_ids = [
+        p.get("pack_id")
+        for p in pack_summaries
+        if p.get("status") not in ("succeeded", "no_connection")
+    ]
+    failed_pack_ids = [p for p in failed_pack_ids if p is not None]
+
+    if not failed_pack_ids:
+        raise ValueError("No failed packs to retry")
+
+    # ── Reconstruct candidate IDs from the original run ────────────────────
+    # Pack summaries do not store individual pair_ids, so we reconstruct the
+    # candidate set from the original run's candidate list.  Pairs are computed
+    # with the default ``all_pairs`` strategy and then chunked into packs of
+    # DEFAULT_PAIRS_PER_PACK_OVERRIDE (30).  Because the original pack ordering
+    # used hemisphere-priority sorting (which requires candidate metadata we do
+    # not have here), the reconstructed pack boundaries are an approximation.
+    # Mirror KG dedup/merge ensures correctness regardless.
+    raw_ids = run.candidate_ids_json or []
+    candidate_ids: list[uuid.UUID] = []
+    for raw in raw_ids:
+        try:
+            candidate_ids.append(uuid.UUID(str(raw)))
+        except (TypeError, ValueError):
+            continue
+    if len(candidate_ids) < 2:
+        raise ValueError("Original run has fewer than 2 candidate IDs, cannot retry")
+
+    sorted_cids = sorted(candidate_ids)
+    pairs: list[tuple[uuid.UUID, uuid.UUID]] = []
+    for i in range(len(sorted_cids)):
+        for j in range(i + 1, len(sorted_cids)):
+            pairs.append((sorted_cids[i], sorted_cids[j]))
+
+    # Build pair_id strings and sort deterministically
+    pair_id_list: list[str] = []
+    for src, tgt in pairs:
+        a, b = sorted((str(src), str(tgt)))
+        pair_id_list.append(f"{a}::{b}")
+
+    sorted_pairs = [p for _, p in sorted(zip(pair_id_list, pairs))]
+    sorted_pair_ids = sorted(pair_id_list)
+
+    # Chunk into packs using the same size as the connection extraction service
+    PACK_SIZE = conn_svc.DEFAULT_PAIRS_PER_PACK_OVERRIDE
+    pack_pair_buckets: list[list[str]] = [
+        sorted_pair_ids[i : i + PACK_SIZE]
+        for i in range(0, len(sorted_pair_ids), PACK_SIZE)
+    ]
+
+    # Collect pair_ids from every failed pack and extract unique candidate IDs
+    retry_candidate_ids: set[uuid.UUID] = set()
+    for pid in failed_pack_ids:
+        if pid is not None and isinstance(pid, int) and pid < len(pack_pair_buckets):
+            for pair_str in pack_pair_buckets[pid]:
+                parts = pair_str.split("::")
+                if len(parts) == 2:
+                    try:
+                        retry_candidate_ids.add(uuid.UUID(parts[0]))
+                        retry_candidate_ids.add(uuid.UUID(parts[1]))
+                    except (TypeError, ValueError):
+                        continue
+
+    if len(retry_candidate_ids) < 2:
+        # Fallback: if reconstruction yielded too few IDs, use all original candidates
+        retry_candidate_ids = set(candidate_ids)
+
+    # ── Build new request from original run data ───────────────────────────
+    request_data = dict(run.request_json or {})
+    request_data["candidate_ids"] = [str(cid) for cid in retry_candidate_ids]
+    request_data.pop("candidate_pool_id", None)  # explicit IDs, no pool
+    request_data.pop("debug_max_packs", None)  # retry should process all packs
+    request_data.pop("debug_single_pack", None)
+
+    new_request = CompositeWorkflowRunRequest.model_validate(request_data)
+    return await start_composite_workflow(session, new_request)
+
+
 async def start_composite_workflow(
     session: AsyncSession,
     request: CompositeWorkflowRunRequest,

@@ -3455,6 +3455,12 @@ export const resumeCompositeWorkflow = (workflowRunId: string) =>
     {},
   )
 
+export const retryFailedCompositeWorkflow = (workflowRunId: string) =>
+  postJson<CompositeWorkflowStartResponse>(
+    `/api/llm-extraction/composite-workflows/${workflowRunId}/retry-failed`,
+    {},
+  )
+
 export interface SameGranularityFunctionExtractionRequest {
   provider: string
   model_name?: string | null
