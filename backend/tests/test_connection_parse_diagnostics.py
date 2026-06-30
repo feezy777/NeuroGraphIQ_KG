@@ -181,7 +181,7 @@ def test_fail_fast_stops_after_three_packs():
     session = _mock_session([c1, c2, c3, c4])
     with patch("app.services.llm_connection_extraction_service.get_llm_provider", return_value=mock_provider), \
          patch("app.services.llm_connection_extraction_service.get_deepseek_runtime_config") as cfg, \
-         patch("app.services.llm_connection_extraction_service.DEFAULT_PAIRS_PER_PACK", 1):
+         patch("app.services.llm_connection_extraction_service.DEFAULT_PAIRS_PER_PACK_OVERRIDE", 1):
         cfg.return_value = MagicMock(api_key="sk-test", default_model="deepseek-chat")
         result = asyncio.run(
             run_same_granularity_connection_extraction(
@@ -195,9 +195,11 @@ def test_fail_fast_stops_after_three_packs():
             )
         )
     summary = result.execution_summary
+    # Sequential mode: fail-fast stops after threshold consecutive parse failures.
     assert summary.get("fail_fast_triggered") is True
-    assert summary.get("remaining_pack_count_skipped", 0) >= 1
-    assert mock_provider.complete_text.call_count <= 6
+    assert summary.get("remaining_pack_count_skipped", 0) > 0
+    assert mock_provider.complete_text.call_count == 6  # 3 packs × 2 parse retries each
+    assert result.connection_count == 0
 
 
 def test_prompt_requires_json_even_when_no_connections():
@@ -213,3 +215,62 @@ def test_replay_connection_parse_response_no_db():
     )
     assert out["parsed"] is True
     assert out["parsed_projection_count"] == 0
+
+
+def test_audit_failed_pack_count_increments_on_transport_error():
+    """When provider returns transport_ok=False, failed_pack_count increments."""
+    c1 = _candidate()
+    c2 = _candidate(batch_id=c1.batch_id, resource_id=c1.resource_id)
+    response = _text_result("")
+    response.transport_ok = False
+    response.error = "timeout"
+    mock_provider = AsyncMock()
+    mock_provider.complete_text = AsyncMock(return_value=response)
+    session = _mock_session([c1, c2])
+    with patch("app.services.llm_connection_extraction_service.get_llm_provider", return_value=mock_provider), \
+         patch("app.services.llm_connection_extraction_service.get_deepseek_runtime_config") as cfg:
+        cfg.return_value = MagicMock(api_key="sk-test", default_model="deepseek-chat")
+        result = asyncio.run(
+            run_same_granularity_connection_extraction(
+                session,
+                provider_name="deepseek",
+                model_name="deepseek-chat",
+                candidate_ids=[c1.id, c2.id],
+                dry_run=False,
+                create_mirror_records=False,
+                debug_single_pack=True,
+            )
+        )
+    summary = result.execution_summary
+    assert summary["failed_pack_count"] > 0
+    assert summary["processed_pack_count"] > 0
+    assert summary["succeeded_pack_count"] == 0
+
+
+def test_run_outcome_is_failure_on_provider_failure():
+    """When semantic outcome is failure, the result outcome indicates failure."""
+    c1 = _candidate()
+    c2 = _candidate(batch_id=c1.batch_id, resource_id=c1.resource_id)
+    response = _text_result("")
+    response.transport_ok = False
+    response.error = "timeout"
+    mock_provider = AsyncMock()
+    mock_provider.complete_text = AsyncMock(return_value=response)
+    session = _mock_session([c1, c2])
+    with patch("app.services.llm_connection_extraction_service.get_llm_provider", return_value=mock_provider), \
+         patch("app.services.llm_connection_extraction_service.get_deepseek_runtime_config") as cfg:
+        cfg.return_value = MagicMock(api_key="sk-test", default_model="deepseek-chat")
+        result = asyncio.run(
+            run_same_granularity_connection_extraction(
+                session,
+                provider_name="deepseek",
+                model_name="deepseek-chat",
+                candidate_ids=[c1.id, c2.id],
+                dry_run=False,
+                create_mirror_records=False,
+                debug_single_pack=True,
+            )
+        )
+    assert result.outcome is not None
+    assert result.outcome.startswith("failed")
+    assert result.execution_summary.get("provider_transport_error_count", 0) > 0
