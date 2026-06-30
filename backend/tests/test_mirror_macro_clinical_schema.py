@@ -271,7 +271,11 @@ def test_create_projection_function_service():
         function_term="memory relay",
         function_category="memory",
     )
-    row = asyncio.run(svc.create_projection_function(session, payload))
+    with patch(
+        "app.services.mirror_macro_clinical_service._find_existing_projection_function_for_merge",
+        AsyncMock(return_value=None),
+    ):
+        row = asyncio.run(svc.create_projection_function(session, payload))
     assert isinstance(row, MirrorProjectionFunction)
     assert row.review_status == "pending"
 
@@ -558,7 +562,8 @@ def test_mirror_kg_service_still_works():
         source_atlas="AAL3",
         connection_type="projection",
     )
-    row = asyncio.run(mirror_kg_service.create_mirror_connection(session, payload))
+    with patch("app.services.mirror_kg_service._find_existing_connection_for_merge", AsyncMock(return_value=None)):
+        row = asyncio.run(mirror_kg_service.create_mirror_connection(session, payload))
     assert isinstance(row, MirrorRegionConnection)
 
 

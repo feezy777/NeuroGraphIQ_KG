@@ -198,7 +198,8 @@ def test_create_mirror_triple_service():
         granularity_level="macro",
         source_atlas="AAL3",
     )
-    row = asyncio.run(mirror_kg_service.create_mirror_triple(session, payload))
+    with patch("app.services.mirror_kg_service._find_existing_triple_for_merge", AsyncMock(return_value=None)):
+        row = asyncio.run(mirror_kg_service.create_mirror_triple(session, payload))
     assert isinstance(row, MirrorKgTriple)
 
 

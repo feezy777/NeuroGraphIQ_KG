@@ -263,11 +263,60 @@ async def _validate_projection_function_refs(
     return projection
 
 
+async def _find_existing_projection_function_for_merge(
+    session: AsyncSession,
+    payload: MirrorProjectionFunctionCreate,
+) -> MirrorProjectionFunction | None:
+    """Find existing projection function with the same canonical key.
+
+    Canonical key: (projection_id, function_term_key, function_category, relation_type)
+    where function_term_key is function_term_en.strip().lower().
+    Excludes records that are rejected, failed/promoted, or superseded.
+    """
+    blocked_review = frozenset({MirrorReviewStatus.rejected})
+    blocked_promo = frozenset({MirrorPromotionStatus.failed, MirrorPromotionStatus.promoted})
+
+    base = select(MirrorProjectionFunction).where(
+        MirrorProjectionFunction.projection_id == payload.projection_id,
+        MirrorProjectionFunction.function_category == payload.function_category,
+        MirrorProjectionFunction.relation_type == payload.relation_type,
+        MirrorProjectionFunction.review_status.notin_(blocked_review),
+        MirrorProjectionFunction.promotion_status.notin_(blocked_promo),
+    )
+    rows = (
+        await session.execute(
+            base.order_by(MirrorProjectionFunction.created_at.desc())
+        )
+    ).scalars().all()
+
+    func_term_norm = payload.function_term.strip().lower()
+    for row in rows:
+        if row.function_term and row.function_term.strip().lower() == func_term_norm:
+            return row
+    return None
+
+
 async def create_projection_function(
     session: AsyncSession,
     payload: MirrorProjectionFunctionCreate,
 ) -> MirrorProjectionFunction:
     await _validate_projection_function_refs(session, payload)
+
+    existing = await _find_existing_projection_function_for_merge(session, payload)
+    if existing is not None:
+        old_conf = existing.confidence or 0.0
+        new_conf = payload.confidence or 0.0
+        if new_conf > old_conf:
+            existing.confidence = payload.confidence
+            existing.evidence_text = payload.evidence_text
+            existing.uncertainty_reason = payload.uncertainty_reason
+            existing.llm_run_id = payload.llm_run_id
+            existing.llm_item_id = payload.llm_item_id
+            existing.mirror_status = MirrorStatus.llm_suggested
+            await session.flush()
+            await session.refresh(existing)
+        return existing
+
     data = payload.model_dump()
     data["promotion_status"] = MirrorPromotionStatus.not_promoted
     data.setdefault("mirror_status", MirrorStatus.llm_suggested)
@@ -738,11 +787,69 @@ async def _validate_circuit_function_refs(
     return circuit
 
 
+async def _find_existing_circuit_function_for_merge(
+    session: AsyncSession,
+    payload: MirrorCircuitFunctionCreate,
+) -> MirrorCircuitFunction | None:
+    """Find existing circuit function with the same canonical key.
+
+    Canonical key: (circuit_id, function_term_key, function_domain, function_role, effect_type)
+    where function_term_key is function_term_en.strip().lower().
+    Excludes records that are rejected, failed/promoted, or superseded.
+    """
+    blocked_review = frozenset({MirrorReviewStatus.rejected})
+    blocked_promo = frozenset({MirrorPromotionStatus.failed, MirrorPromotionStatus.promoted})
+
+    base = select(MirrorCircuitFunction).where(
+        MirrorCircuitFunction.circuit_id == payload.circuit_id,
+        MirrorCircuitFunction.function_domain == payload.function_domain,
+        MirrorCircuitFunction.function_role == payload.function_role,
+        MirrorCircuitFunction.effect_type == payload.effect_type,
+        MirrorCircuitFunction.review_status.notin_(blocked_review),
+        MirrorCircuitFunction.promotion_status.notin_(blocked_promo),
+    )
+    rows = (
+        await session.execute(
+            base.order_by(MirrorCircuitFunction.created_at.desc())
+        )
+    ).scalars().all()
+
+    func_term_norm = (payload.function_term_en or "").strip().lower()
+    for row in rows:
+        if row.function_term_en and row.function_term_en.strip().lower() == func_term_norm:
+            return row
+    return None
+
+
 async def create_circuit_function(
     session: AsyncSession,
     payload: MirrorCircuitFunctionCreate,
 ) -> MirrorCircuitFunction:
     await _validate_circuit_function_refs(session, payload)
+
+    existing = await _find_existing_circuit_function_for_merge(session, payload)
+    if existing is not None:
+        old_conf = existing.confidence or 0.0
+        new_conf = payload.confidence or 0.0
+        if new_conf > old_conf:
+            existing.function_term_en = payload.function_term_en
+            existing.function_term_cn = payload.function_term_cn
+            existing.function_domain = payload.function_domain
+            existing.function_role = payload.function_role
+            existing.effect_type = payload.effect_type
+            existing.confidence_score = payload.confidence_score
+            existing.confidence = payload.confidence
+            existing.evidence_text = payload.evidence_text
+            existing.uncertainty_reason = payload.uncertainty_reason
+            existing.description = payload.description
+            existing.remark = payload.remark
+            existing.llm_run_id = payload.llm_run_id
+            existing.llm_item_id = payload.llm_item_id
+            existing.mirror_status = MirrorStatus.llm_suggested
+            await session.flush()
+            await session.refresh(existing)
+        return existing
+
     data = payload.model_dump()
     data["promotion_status"] = MirrorPromotionStatus.not_promoted
     data.setdefault("mirror_status", MirrorStatus.llm_suggested)

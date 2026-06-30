@@ -462,6 +462,18 @@ def circuit_function_dedup_key(circuit_id: uuid.UUID, fn: dict[str, Any]) -> tup
     return (str(circuit_id), term_cn, domain, role)
 
 
+def _circuit_function_merge_key(circuit_id: uuid.UUID, fn: dict[str, Any]) -> tuple[Any, ...]:
+    """Canonical key for circuit function merge: (circuit_id, function_term_en, function_domain, function_role, effect_type).
+
+    Includes effect_type for finer-grained dedup within a single LLM response.
+    """
+    term = (fn.get("function_term_en") or "").strip().lower()
+    domain = (fn.get("function_domain") or "unknown").strip().lower()
+    role = (fn.get("function_role") or "unknown").strip().lower()
+    effect = (fn.get("effect_type") or "unknown").strip().lower()
+    return (str(circuit_id), term, domain, role, effect)
+
+
 def _is_empty_value(value: Any) -> bool:
     if value is None:
         return True
@@ -523,6 +535,7 @@ async def upsert_mirror_circuit_function(
     run: LlmExtractionRun | None,
     item: LlmExtractionItem | None,
     warnings: list[str],
+    _session_seen: set[tuple[Any, ...]] | None = None,
 ) -> tuple[str, uuid.UUID | None]:
     if overwrite_policy == "suggest_only":
         warnings.append(f"suggest_only: not persisting function for circuit {circuit.id}")
@@ -530,6 +543,13 @@ async def upsert_mirror_circuit_function(
 
     if overwrite_policy == "overwrite_with_review":
         warnings.append("overwrite_with_review treated as fill_missing_only for circuit_function extraction")
+
+    # Session-scoped dedup: skip if we've already processed this key in this session
+    if _session_seen is not None:
+        key = _circuit_function_merge_key(circuit.id, parsed_function)
+        if key in _session_seen:
+            return "skipped", None
+        _session_seen.add(key)
 
     existing = await _find_existing_circuit_function(session, circuit.id, parsed_function)
     attrs = _build_attributes(
@@ -875,6 +895,7 @@ async def run_circuit_to_functions_extraction(
         item.normalized_output_json = {"circuit_functions": functions}
         item.status = LlmItemStatus.succeeded
 
+        session_seen: set[tuple[Any, ...]] = set()
         for fn in functions:
             try:
                 action, row_id = await upsert_mirror_circuit_function(
@@ -887,6 +908,7 @@ async def run_circuit_to_functions_extraction(
                     run=run,
                     item=item,
                     warnings=result.warnings,
+                    _session_seen=session_seen,
                 )
             except Exception as exc:
                 result.failed_count += 1

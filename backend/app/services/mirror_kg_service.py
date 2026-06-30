@@ -849,10 +849,51 @@ async def delete_mirror_circuit(
     await session.flush()
 
 
+async def _find_existing_triple_for_merge(
+    session: AsyncSession,
+    payload: MirrorKgTripleCreate,
+) -> MirrorKgTriple | None:
+    """Find existing triple with the same canonical key.
+
+    Canonical key: (subject_type, subject_id, predicate, object_type, object_id, triple_scope).
+    Excludes records that are rejected, failed/promoted, or superseded.
+    Triples are deterministic — no confidence merge needed.
+    """
+    blocked_review = frozenset({MirrorReviewStatus.rejected})
+    blocked_promo = frozenset({MirrorPromotionStatus.failed, MirrorPromotionStatus.promoted})
+
+    base = select(MirrorKgTriple).where(
+        MirrorKgTriple.subject_type == payload.subject_type,
+        MirrorKgTriple.predicate == payload.predicate,
+        MirrorKgTriple.object_type == payload.object_type,
+        MirrorKgTriple.triple_scope == payload.triple_scope,
+        MirrorKgTriple.review_status.notin_(blocked_review),
+        MirrorKgTriple.promotion_status.notin_(blocked_promo),
+    )
+
+    # Handle NULL-safe UUID comparison
+    if payload.subject_id is not None:
+        base = base.where(MirrorKgTriple.subject_id == payload.subject_id)
+    else:
+        base = base.where(MirrorKgTriple.subject_id.is_(None))
+
+    if payload.object_id is not None:
+        base = base.where(MirrorKgTriple.object_id == payload.object_id)
+    else:
+        base = base.where(MirrorKgTriple.object_id.is_(None))
+
+    row = (await session.execute(base.order_by(MirrorKgTriple.created_at.desc()).limit(1))).scalar_one_or_none()
+    return row
+
+
 async def create_mirror_triple(
     session: AsyncSession,
     payload: MirrorKgTripleCreate,
 ) -> MirrorKgTriple:
+    existing = await _find_existing_triple_for_merge(session, payload)
+    if existing is not None:
+        return existing
+
     data = payload.model_dump()
     data["promotion_status"] = MirrorPromotionStatus.not_promoted
     row = MirrorKgTriple(**data)
