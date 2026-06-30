@@ -11,10 +11,12 @@ import {
   getCandidatePool,
   createCandidatePool,
   fetchCandidates,
+  getExtractionPromptTemplates,
   type CandidatePool,
   type CandidatePoolMember,
   type CompositeWorkflowRunRead,
   type CompositeWorkflowStartResponse,
+  type ExtractionPromptTemplate,
 } from '../../../api/endpoints'
 import { getJson } from '../../../api/client'
 
@@ -65,9 +67,10 @@ interface Props {
   onProviderChange: (p: string) => void
   onModelChange: (m: string) => void
   onPoolRefresh: () => void
-  onSetPoolCandidates?: (candidateIds: string[]) => Promise<void>
+  onSetPoolCandidates?: (candidateIds: string[]) => Promise<unknown>
   selectedCandidateIds: string[]
   candidateLabels?: Record<string, string>
+  skipInitialPoolSync?: boolean
   onClose: () => void
   workflowType?: string
 }
@@ -201,6 +204,7 @@ export function PoolExtractionModal({
   onSetPoolCandidates,
   selectedCandidateIds,
   candidateLabels = {},
+  skipInitialPoolSync = false,
   onClose,
   workflowType = 'connection_with_function',
 }: Props) {
@@ -213,6 +217,15 @@ export function PoolExtractionModal({
   const [addingMembers, setAddingMembers] = useState(false)
   const [showErrors, setShowErrors] = useState(false)
   const [localPoolId, setLocalPoolId] = useState<string | null>(null)
+
+  // ── Prompt engineering ──────────────────────────────────────────────────────
+  const [temperature, setTemperature] = useState(0.7)
+  const [maxTokens, setMaxTokens] = useState(4096)
+  const [showPromptPreview, setShowPromptPreview] = useState(false)
+  const [editingPrompt, setEditingPrompt] = useState(false)
+  const [customSystemPrompt, setCustomSystemPrompt] = useState('')
+  const [customUserPrompt, setCustomUserPrompt] = useState('')
+  const [promptTemplates, setPromptTemplates] = useState<ExtractionPromptTemplate[]>([])
 
   // ── Pool member selection ─────────────────────────────────────────────────
   const [searchTerm, setSearchTerm] = useState('')
@@ -265,6 +278,51 @@ export function PoolExtractionModal({
   const openSyncDoneRef = useRef(false)
   const [pausing, setPausing] = useState(false)
   const [resuming, setResuming] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [lockedPanelHeight, setLockedPanelHeight] = useState<number>(520)
+
+  // Lock panel height from step 1 so step 2 uses the same size
+  useEffect(() => {
+    if (modalState === 'prepare' && wizardStep === 1 && panelRef.current) {
+      const raf = requestAnimationFrame(() => {
+        if (panelRef.current) {
+          setLockedPanelHeight(panelRef.current.offsetHeight)
+        }
+      })
+      return () => cancelAnimationFrame(raf)
+    }
+  }, [modalState, wizardStep, open])
+
+  // ── Prompt template key mapping ─────────────────────────────────────────────
+  const WORKFLOW_PRIMARY_TEMPLATE: Record<string, string> = {
+    connection_with_function: 'same_granularity_connection_completion_v1',
+    circuit_with_function_steps: 'same_granularity_circuit_completion_v1',
+    same_granularity_function_completion: 'same_granularity_function_completion_v1',
+  }
+
+  const primaryTemplateKey = WORKFLOW_PRIMARY_TEMPLATE[workflowType] ?? ''
+
+  // Load prompt templates on open
+  useEffect(() => {
+    if (!open || promptTemplates.length > 0) return
+    getExtractionPromptTemplates('extraction')
+      .then(res => setPromptTemplates(res.items ?? []))
+      .catch(err => console.error('[PoolExtractionModal] Failed to load templates:', err))
+  }, [open, promptTemplates.length])
+
+  // Primary template from fetched templates
+  const primaryTemplate = useMemo(
+    () => promptTemplates.find(t => t.key === primaryTemplateKey),
+    [promptTemplates, primaryTemplateKey],
+  )
+
+  // Populate custom prompts when template loads
+  useEffect(() => {
+    if (primaryTemplate) {
+      setCustomSystemPrompt(primaryTemplate.system_prompt)
+      setCustomUserPrompt(primaryTemplate.template)
+    }
+  }, [primaryTemplate?.key])
 
   // Keep localMembers in sync with pool.memberships
   useEffect(() => {
@@ -329,6 +387,10 @@ export function PoolExtractionModal({
       openSyncDoneRef.current = false
       return
     }
+    if (skipInitialPoolSync) {
+      openSyncDoneRef.current = true
+      return
+    }
     if (modalState !== 'prepare' || openSyncDoneRef.current) return
     if (selectedCandidateIds.length < 2 || !onSetPoolCandidates) return
 
@@ -352,6 +414,7 @@ export function PoolExtractionModal({
     pool?.memberships,
     onSetPoolCandidates,
     onPoolRefresh,
+    skipInitialPoolSync,
   ])
 
   const displayMembers: DisplayMember[] = useMemo(() => {
@@ -1037,6 +1100,7 @@ export function PoolExtractionModal({
     }
     setModalState('prepare')
     setWizardStep(1)
+    setLockedPanelHeight(520)
     setSearchTerm('')
     setSelectedMemberCandidateIds(new Set())
     setDryRun(false)
@@ -1187,7 +1251,7 @@ export function PoolExtractionModal({
                         <input
                           type="checkbox"
                           checked={selectedMemberCandidateIds.has(m.candidate_id)}
-                          onChange={() => handleToggleMember(m.candidate_id)}
+                          onChange={(e) => { e.stopPropagation(); handleToggleMember(m.candidate_id) }}
                         />
                       </td>
                       <td style={{ padding: '6px', color: '#888' }}>{idx + 1}</td>
@@ -1667,10 +1731,11 @@ export function PoolExtractionModal({
   return (
     <div className="modal-overlay pool-extraction-modal" style={{ zIndex: 10000 }} onClick={() => {}}>
       <div
+        ref={panelRef}
         className="modal-panel wide"
         onClick={e => e.stopPropagation()}
         style={{
-          minHeight: 520,
+          minHeight: wizardStep === 2 ? lockedPanelHeight : 520,
           maxHeight: '85vh',
           display: 'flex',
           flexDirection: 'column',
