@@ -56,6 +56,10 @@ interface ProgressData {
   lastPauseError: string
   lastCancelResponse: string
   lastCancelError: string
+  estimatedInputTokens: number
+  estimatedOutputTokens: number
+  actualPromptTokens: number
+  actualCompletionTokens: number
 }
 
 interface Props {
@@ -146,6 +150,14 @@ function elapsedStr(sec: number): string {
   const m = Math.floor(sec / 60)
   const s = Math.round(sec % 60)
   return `${m}m ${s}s`
+}
+
+function estimateCost(inputTokens: number, outputTokens: number): string {
+  const inputPrice = 1.0   // ¥1 per 1M input tokens (DeepSeek CN)
+  const outputPrice = 2.0  // ¥2 per 1M output tokens (DeepSeek CN)
+  const cost = (inputTokens / 1_000_000) * inputPrice + (outputTokens / 1_000_000) * outputPrice
+  if (cost < 0.01) return '< ¥0.01'
+  return `¥${cost.toFixed(2)}`
 }
 
 function computePairCount(n: number): number {
@@ -266,6 +278,10 @@ export function PoolExtractionModal({
     lastPauseError: '',
     lastCancelResponse: '',
     lastCancelError: '',
+    estimatedInputTokens: 0,
+    estimatedOutputTokens: 0,
+    actualPromptTokens: 0,
+    actualCompletionTokens: 0,
   })
 
   // ── Runtime debug refs (must be before any early return) ──────────────────
@@ -591,6 +607,10 @@ export function PoolExtractionModal({
           lastPauseError: '',
           lastCancelResponse: '',
           lastCancelError: '',
+          estimatedInputTokens: 0,
+          estimatedOutputTokens: 0,
+          actualPromptTokens: 0,
+          actualCompletionTokens: 0,
         }))
 
         const fnResponse = await runSameGranularityFunctionExtraction({
@@ -688,6 +708,10 @@ export function PoolExtractionModal({
         lastPauseError: '',
         lastCancelResponse: '',
         lastCancelError: '',
+        estimatedInputTokens: 0,
+        estimatedOutputTokens: 0,
+        actualPromptTokens: 0,
+        actualCompletionTokens: 0,
       })
       setModalState('progress')
     } catch (err) {
@@ -928,6 +952,12 @@ export function PoolExtractionModal({
           terminal ? finalSources : liveSources,
           'concurrency',
         )
+        const estInput = readProgressMetric(terminal ? finalSources : liveSources, 'estimated_input_tokens') ?? 0
+        const estOutput = readProgressMetric(terminal ? finalSources : liveSources, 'estimated_output_tokens') ?? 0
+        // Read actual token usage from result_summary (available after completion)
+        const actualPrompt = terminal ? (readProgressMetric(finalSources, 'prompt_tokens') ?? 0) : 0
+        const actualCompletion = terminal ? (readProgressMetric(finalSources, 'completion_tokens') ?? 0) : 0
+
         const inFlightCount = readProgressMetric(
           terminal ? finalSources : liveSources,
           'in_flight_pack_count',
@@ -1001,6 +1031,10 @@ export function PoolExtractionModal({
         setProgress(prev => ({
           workflowRunId: detail.id,
           workflowStatus: resolvePolledWorkflowStatus(prev.workflowStatus, detail.status),
+          estimatedInputTokens: estInput,
+          estimatedOutputTokens: estOutput,
+          actualPromptTokens: actualPrompt,
+          actualCompletionTokens: actualCompletion,
           progressPercent: packProgressPct ?? detail.progress_percent ?? (
             totalPacks > 0
               ? ((processedPacks + (inFlightCount ?? 0)) / totalPacks) * 100
@@ -1615,6 +1649,37 @@ export function PoolExtractionModal({
           </div>
         </div>
 
+        {/* Token usage */}
+        <div className="modal-section">
+          <p className="modal-section-title">用量</p>
+          <div className="modal-section-row">
+            <span className="label">预估输入</span>
+            <span className="value">{progress.estimatedInputTokens.toLocaleString()} tokens</span>
+          </div>
+          <div className="modal-section-row">
+            <span className="label">预估输出</span>
+            <span className="value">{progress.estimatedOutputTokens.toLocaleString()} tokens</span>
+          </div>
+          {(progress.actualPromptTokens > 0 || progress.actualCompletionTokens > 0) && (
+            <>
+              <div className="modal-section-row">
+                <span className="label">实际输入</span>
+                <span className="value">{progress.actualPromptTokens.toLocaleString()} tokens</span>
+              </div>
+              <div className="modal-section-row">
+                <span className="label">实际输出</span>
+                <span className="value">{progress.actualCompletionTokens.toLocaleString()} tokens</span>
+              </div>
+              <div className="modal-section-row">
+                <span className="label">预估费用</span>
+                <span className="value" style={{ fontWeight: 600, color: '#2563eb' }}>
+                  {estimateCost(progress.actualPromptTokens, progress.actualCompletionTokens)}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+
         {/* Timing */}
         <div className="modal-section">
           <p className="modal-section-title">时序</p>
@@ -1884,6 +1949,27 @@ export function PoolExtractionModal({
             </div>
           )}
         </div>
+
+        {/* Cost */}
+        {(progress.actualPromptTokens > 0 || progress.actualCompletionTokens > 0) && (
+          <div className="modal-section">
+            <p className="modal-section-title">费用</p>
+            <div className="modal-section-row">
+              <span className="label">输入 tokens</span>
+              <span className="value">{progress.actualPromptTokens.toLocaleString()}</span>
+            </div>
+            <div className="modal-section-row">
+              <span className="label">输出 tokens</span>
+              <span className="value">{progress.actualCompletionTokens.toLocaleString()}</span>
+            </div>
+            <div className="modal-section-row">
+              <span className="label">预估费用</span>
+              <span className="value" style={{ fontSize: 16, fontWeight: 600, color: '#2563eb' }}>
+                {estimateCost(progress.actualPromptTokens, progress.actualCompletionTokens)}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Error details — collapsible */}
         {progress.errors.length > 0 && (
