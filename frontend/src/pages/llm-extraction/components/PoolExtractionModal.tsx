@@ -210,7 +210,7 @@ export function PoolExtractionModal({
 }: Props) {
   // ── Modal state ───────────────────────────────────────────────────────────
   const [modalState, setModalState] = useState<ModalState>('prepare')
-  const [wizardStep, setWizardStep] = useState<1 | 2>(1)
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1)
   const [internalLabels, setInternalLabels] = useState<Record<string, string>>({})
   const [dryRun, setDryRun] = useState(false)
   const [cancelling, setCancelling] = useState(false)
@@ -1373,112 +1373,6 @@ export function PoolExtractionModal({
           </div>
         </div>
 
-        {/* Prompt template preview */}
-        <div className="modal-section" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <p
-            className="modal-section-title"
-            style={{ cursor: 'pointer', userSelect: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-            onClick={() => setShowPromptPreview(!showPromptPreview)}
-          >
-            <span>提示词模板 {showPromptPreview ? '▾' : '▸'}</span>
-            {primaryTemplate && !showPromptPreview && (
-              <span style={{ fontWeight: 400, fontSize: 12, color: '#888' }}>{primaryTemplate.key}</span>
-            )}
-          </p>
-          {showPromptPreview && primaryTemplate ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0 }}>
-              {/* Template info */}
-              <div style={{ fontSize: 12, color: '#888' }}>
-                {primaryTemplate.display_name ?? primaryTemplate.title}
-              </div>
-
-              {/* System prompt */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: '#555' }}>System Prompt</span>
-                  <button
-                    type="button"
-                    className="llm-btn"
-                    style={{ fontSize: 11, padding: '2px 8px' }}
-                    onClick={() => {
-                      if (editingPrompt && primaryTemplate) {
-                        setCustomSystemPrompt(primaryTemplate.system_prompt)
-                        setCustomUserPrompt(primaryTemplate.template)
-                      }
-                      setEditingPrompt(!editingPrompt)
-                    }}
-                  >
-                    {editingPrompt ? '恢复默认' : '编辑'}
-                  </button>
-                </div>
-                <textarea
-                  style={{
-                    flex: 1,
-                    minHeight: 60,
-                    maxHeight: 120,
-                    width: '100%',
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                    border: '1px solid #d0d7e2',
-                    borderRadius: 4,
-                    padding: '6px 8px',
-                    resize: 'vertical',
-                    background: editingPrompt ? '#fff' : '#f8f9fa',
-                    color: editingPrompt ? '#1a1a2e' : '#666',
-                  }}
-                  readOnly={!editingPrompt}
-                  value={customSystemPrompt}
-                  onChange={e => setCustomSystemPrompt(e.target.value)}
-                />
-              </div>
-
-              {/* User prompt */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#555', marginBottom: 4 }}>User Prompt</span>
-                <textarea
-                  style={{
-                    flex: 1,
-                    minHeight: 60,
-                    maxHeight: 120,
-                    width: '100%',
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                    border: '1px solid #d0d7e2',
-                    borderRadius: 4,
-                    padding: '6px 8px',
-                    resize: 'vertical',
-                    background: editingPrompt ? '#fff' : '#f8f9fa',
-                    color: editingPrompt ? '#1a1a2e' : '#666',
-                  }}
-                  readOnly={!editingPrompt}
-                  value={customUserPrompt}
-                  onChange={e => setCustomUserPrompt(e.target.value)}
-                />
-              </div>
-
-              {/* Editing warning */}
-              {editingPrompt && (
-                <div style={{ padding: '6px 10px', background: '#fff7e6', borderRadius: 4, fontSize: 11, color: '#d48806' }}>
-                  ⚠ 输出 JSON schema 由后端固定，修改 prompt 时请保留输出格式要求，否则数据无法解析入库。
-                </div>
-              )}
-
-              {/* Composite workflow note */}
-              {workflowType === 'connection_with_function' && (
-                <div style={{ fontSize: 11, color: '#888' }}>
-                  复合工作流第二步使用 projection_to_functions_v1 模板（后端自动选择）
-                </div>
-              )}
-              {workflowType === 'circuit_with_function_steps' && (
-                <div style={{ fontSize: 11, color: '#888' }}>
-                  复合工作流多步骤分别使用 circuit_to_steps_v1、circuit_to_functions_extraction_v1 模板（后端自动选择）
-                </div>
-              )}
-            </div>
-          ) : showPromptPreview && !primaryTemplate ? (
-            <div style={{ fontSize: 12, color: '#999', fontStyle: 'italic' }}>加载中或模板不可用...</div>
-          ) : null}
-        </div>
       </div>
 
       {/* Footer */}
@@ -1487,10 +1381,9 @@ export function PoolExtractionModal({
         <button className="llm-btn" onClick={handleClose}>取消</button>
         <button
           className="llm-btn llm-btn-primary"
-          onClick={handleStartExtraction}
-          disabled={!pool || selectedExtractionIds.length < 2}
+          onClick={() => setWizardStep(3)}
         >
-          开始提取 ({selectedExtractionIds.length} 区)
+          下一步
         </button>
       </div>
     </>
