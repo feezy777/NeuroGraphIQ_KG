@@ -5,6 +5,7 @@ Does NOT write final_* / kg_*, does NOT approve or promote.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ from app.models.mirror_kg import (
     MirrorRegionFunction,
 )
 from app.schemas.mirror_kg import (
+    MirrorCircuitRegionCreate,
     MirrorEvidenceRecordCreate,
     MirrorKgTripleCreate,
     MirrorRegionCircuitCreate,
@@ -133,6 +135,50 @@ async def _find_existing_connection_for_merge(
 
     row = (await session.execute(base.order_by(MirrorRegionConnection.created_at.desc()).limit(1))).scalar_one_or_none()
     return row
+
+
+async def _find_existing_function_for_merge(
+    session: AsyncSession,
+    *,
+    region_candidate_id: uuid.UUID,
+    function_term: str,
+    function_category: str,
+    relation_type: str,
+    source_atlas: str | None = None,
+    granularity_level: str | None = None,
+) -> MirrorRegionFunction | None:
+    """Find a non-superseded, non-promoted existing function with the same matching key.
+
+    Matches on region_candidate_id + function_category + relation_type, then
+    filters candidates by case-insensitive function_term equality. Excludes records
+    that are rejected, failed/promoted, or superseded.
+    """
+    blocked_review = frozenset({MirrorReviewStatus.rejected})
+    blocked_promo = frozenset({MirrorPromotionStatus.failed, MirrorPromotionStatus.promoted})
+
+    base = select(MirrorRegionFunction).where(
+        MirrorRegionFunction.region_candidate_id == region_candidate_id,
+        MirrorRegionFunction.function_category == function_category,
+        MirrorRegionFunction.relation_type == relation_type,
+        MirrorRegionFunction.review_status.notin_(blocked_review),
+        MirrorRegionFunction.promotion_status.notin_(blocked_promo),
+    )
+    if source_atlas:
+        base = base.where(MirrorRegionFunction.source_atlas == source_atlas)
+    if granularity_level:
+        base = base.where(MirrorRegionFunction.granularity_level == granularity_level)
+
+    rows = (
+        await session.execute(
+            base.order_by(MirrorRegionFunction.created_at.desc())
+        )
+    ).scalars().all()
+
+    func_term_norm = function_term.strip().lower()
+    for row in rows:
+        if row.function_term and row.function_term.strip().lower() == func_term_norm:
+            return row
+    return None
 
 
 def _extract_provenance(
@@ -398,8 +444,77 @@ async def create_mirror_function(
     session: AsyncSession,
     payload: MirrorRegionFunctionCreate,
 ) -> MirrorRegionFunction:
+    """Create a mirror function with write-time dedup & merge.
+
+    Follows the same confidence-based merge pattern as create_mirror_connection.
+    The last provenance entry's ``action`` field will be ``"created"``, ``"updated"``,
+    or ``"skipped"``.
+    """
+    existing = await _find_existing_function_for_merge(
+        session,
+        region_candidate_id=payload.region_candidate_id,
+        function_term=payload.function_term,
+        function_category=payload.function_category,
+        relation_type=payload.relation_type,
+        source_atlas=payload.source_atlas,
+        granularity_level=payload.granularity_level,
+    )
+
+    if existing is not None and existing.review_status in (
+        MirrorReviewStatus.pending, MirrorReviewStatus.needs_review
+    ):
+        old_conf = existing.confidence or 0.0
+        new_conf = payload.confidence or 0.0
+
+        old_prov = _extract_provenance(existing)
+        merged_prov = _update_provenance(
+            old_prov,
+            llm_run_id=payload.llm_run_id,
+            llm_item_id=payload.llm_item_id,
+            action="updated" if new_conf > old_conf else "skipped",
+            confidence=payload.confidence,
+        )
+
+        if new_conf > old_conf:
+            update_fields = {
+                "function_term": payload.function_term,
+                "function_category": payload.function_category,
+                "relation_type": payload.relation_type,
+                "confidence": payload.confidence,
+                "evidence_text": payload.evidence_text,
+                "uncertainty_reason": payload.uncertainty_reason,
+                "llm_run_id": payload.llm_run_id,
+                "llm_item_id": payload.llm_item_id,
+                "mirror_status": MirrorStatus.llm_suggested,
+            }
+            for key, val in update_fields.items():
+                if val is not None or key in ("mirror_status",):
+                    setattr(existing, key, val)
+
+        existing_raw = dict(existing.raw_payload_json or {})
+        existing_raw["provenance"] = merged_prov
+        existing.raw_payload_json = existing_raw
+        flag_modified(existing, "raw_payload_json")
+
+        await session.flush()
+        await session.refresh(existing)
+        return existing
+
+    # No existing, or existing is already in review/approved → create fresh
     data = payload.model_dump()
+    data.setdefault("mirror_status", MirrorStatus.llm_suggested)
+    data.setdefault("review_status", MirrorReviewStatus.pending)
     data["promotion_status"] = MirrorPromotionStatus.not_promoted
+    raw = dict(data.get("raw_payload_json") or {})
+    if "provenance" not in raw:
+        raw["provenance"] = _update_provenance(
+            {},
+            llm_run_id=payload.llm_run_id,
+            llm_item_id=payload.llm_item_id,
+            action="created",
+            confidence=payload.confidence,
+        )
+    data["raw_payload_json"] = raw
     row = MirrorRegionFunction(**data)
     session.add(row)
     await session.flush()
@@ -491,12 +606,134 @@ async def delete_mirror_function(
     await session.flush()
 
 
+async def _find_existing_circuit_for_merge(
+    session: AsyncSession,
+    *,
+    circuit_name: str,
+    circuit_type: str,
+    source_atlas: str | None = None,
+    granularity_level: str | None = None,
+    circuit_regions: list[MirrorCircuitRegionCreate] | None = None,
+) -> MirrorRegionCircuit | None:
+    """Find a non-superseded, non-promoted existing circuit with the same key.
+
+    Matches on circuit_type + source_atlas + granularity_level, then checks
+    circuit_name equality (case-insensitive) and region set equality.
+    """
+    blocked_review = frozenset({MirrorReviewStatus.rejected})
+    blocked_promo = frozenset({MirrorPromotionStatus.failed, MirrorPromotionStatus.promoted})
+
+    base = select(MirrorRegionCircuit).where(
+        MirrorRegionCircuit.circuit_type == circuit_type,
+        MirrorRegionCircuit.review_status.notin_(blocked_review),
+        MirrorRegionCircuit.promotion_status.notin_(blocked_promo),
+    )
+    if source_atlas:
+        base = base.where(MirrorRegionCircuit.source_atlas == source_atlas)
+    if granularity_level:
+        base = base.where(MirrorRegionCircuit.granularity_level == granularity_level)
+
+    rows = (
+        await session.execute(
+            base.order_by(MirrorRegionCircuit.created_at.desc())
+        )
+    ).scalars().all()
+
+    circuit_name_norm = circuit_name.strip().lower()
+    incoming_region_ids = frozenset(
+        str(cr.region_candidate_id or cr.region_final_id)
+        for cr in (circuit_regions or [])
+    )
+
+    for row in rows:
+        if row.circuit_name and row.circuit_name.strip().lower() != circuit_name_norm:
+            continue
+        # Compare region sets
+        existing_regions = await _load_circuit_regions(session, row.id)
+        existing_ids = frozenset(
+            str(cr.region_candidate_id or cr.region_final_id)
+            for cr in existing_regions
+        )
+        if existing_ids == incoming_region_ids:
+            return row
+    return None
+
+
 async def create_mirror_circuit(
     session: AsyncSession,
     payload: MirrorRegionCircuitCreate,
 ) -> MirrorRegionCircuit:
+    """Create a mirror circuit with write-time dedup & merge.
+
+    Follows the same confidence-based merge pattern as create_mirror_connection.
+    The last provenance entry's ``action`` field will be ``"created"``, ``"updated"``,
+    or ``"skipped"``.
+    """
+    existing = await _find_existing_circuit_for_merge(
+        session,
+        circuit_name=payload.circuit_name,
+        circuit_type=payload.circuit_type,
+        source_atlas=payload.source_atlas,
+        granularity_level=payload.granularity_level,
+        circuit_regions=payload.circuit_regions,
+    )
+
+    if existing is not None and existing.review_status in (
+        MirrorReviewStatus.pending, MirrorReviewStatus.needs_review
+    ):
+        old_conf = existing.confidence or 0.0
+        new_conf = payload.confidence or 0.0
+
+        old_prov = _extract_provenance(existing)
+        merged_prov = _update_provenance(
+            old_prov,
+            llm_run_id=payload.llm_run_id,
+            llm_item_id=payload.llm_item_id,
+            action="updated" if new_conf > old_conf else "skipped",
+            confidence=payload.confidence,
+        )
+
+        if new_conf > old_conf:
+            update_fields = {
+                "circuit_name": payload.circuit_name,
+                "circuit_type": payload.circuit_type,
+                "function_association": payload.function_association,
+                "description": payload.description,
+                "confidence": payload.confidence,
+                "evidence_text": payload.evidence_text,
+                "uncertainty_reason": payload.uncertainty_reason,
+                "llm_run_id": payload.llm_run_id,
+                "llm_item_id": payload.llm_item_id,
+                "mirror_status": MirrorStatus.llm_suggested,
+            }
+            for key, val in update_fields.items():
+                if val is not None or key in ("mirror_status",):
+                    setattr(existing, key, val)
+
+        existing_raw = dict(existing.raw_payload_json or {})
+        existing_raw["provenance"] = merged_prov
+        existing.raw_payload_json = existing_raw
+        flag_modified(existing, "raw_payload_json")
+
+        await session.flush()
+        await session.refresh(existing)
+        return existing
+
+    # No existing, or existing is already in review/approved → create fresh
     data = payload.model_dump(exclude={"circuit_regions"})
+    data.setdefault("mirror_status", MirrorStatus.llm_suggested)
+    data.setdefault("review_status", MirrorReviewStatus.pending)
     data["promotion_status"] = MirrorPromotionStatus.not_promoted
+    raw = dict(data.get("raw_payload_json") or {})
+    if "provenance" not in raw:
+        raw["provenance"] = _update_provenance(
+            {},
+            llm_run_id=payload.llm_run_id,
+            llm_item_id=payload.llm_item_id,
+            action="created",
+            confidence=payload.confidence,
+        )
+    data["raw_payload_json"] = raw
     row = MirrorRegionCircuit(**data)
     session.add(row)
     await session.flush()
@@ -684,10 +921,55 @@ async def get_mirror_triple(session: AsyncSession, triple_id: uuid.UUID) -> Mirr
     return row
 
 
+def _evidence_text_hash(text: str) -> str:
+    """Return a stable SHA-256 hex digest for dedup comparison."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+async def _find_existing_evidence(
+    session: AsyncSession,
+    *,
+    evidence_target_type: str,
+    evidence_target_id: uuid.UUID,
+    evidence_text: str,
+) -> MirrorEvidenceRecord | None:
+    """Check for an existing evidence record with the same target and text content."""
+    target_hash = _evidence_text_hash(evidence_text)
+    base = select(MirrorEvidenceRecord).where(
+        MirrorEvidenceRecord.evidence_target_type == evidence_target_type,
+        MirrorEvidenceRecord.evidence_target_id == evidence_target_id,
+    )
+    rows = (
+        await session.execute(
+            base.order_by(MirrorEvidenceRecord.created_at.desc())
+        )
+    ).scalars().all()
+
+    for row in rows:
+        if _evidence_text_hash(row.evidence_text) == target_hash:
+            return row
+    return None
+
+
 async def create_mirror_evidence(
     session: AsyncSession,
     payload: MirrorEvidenceRecordCreate,
 ) -> MirrorEvidenceRecord:
+    """Create a mirror evidence record with dedup.
+
+    Before INSERT, checks for an existing record with the same
+    ``evidence_target_type``, ``evidence_target_id``, and ``evidence_text``.
+    If found, returns the existing record without creating a duplicate.
+    """
+    existing = await _find_existing_evidence(
+        session,
+        evidence_target_type=payload.evidence_target_type,
+        evidence_target_id=payload.evidence_target_id,
+        evidence_text=payload.evidence_text,
+    )
+    if existing is not None:
+        return existing
+
     row = MirrorEvidenceRecord(**payload.model_dump())
     session.add(row)
     await session.flush()

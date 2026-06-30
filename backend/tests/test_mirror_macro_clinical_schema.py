@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -573,5 +573,6 @@ def test_create_circuit_for_membership_fixtures():
         circuit_name="test circuit",
         circuit_type="memory_related",
     )
-    row = asyncio.run(mirror_kg_service.create_mirror_circuit(session, payload))
+    with patch("app.services.mirror_kg_service._find_existing_circuit_for_merge", AsyncMock(return_value=None)):
+        row = asyncio.run(mirror_kg_service.create_mirror_circuit(session, payload))
     assert isinstance(row, MirrorRegionCircuit)

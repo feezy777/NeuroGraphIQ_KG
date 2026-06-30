@@ -157,7 +157,8 @@ def test_create_mirror_function_service():
         function_term="visual processing",
         function_category="visual",
     )
-    row = asyncio.run(mirror_kg_service.create_mirror_function(session, payload))
+    with patch("app.services.mirror_kg_service._find_existing_function_for_merge", AsyncMock(return_value=None)):
+        row = asyncio.run(mirror_kg_service.create_mirror_function(session, payload))
     assert isinstance(row, MirrorRegionFunction)
     assert row.review_status == MirrorReviewStatus.pending
 
@@ -176,7 +177,8 @@ def test_create_mirror_circuit_with_regions():
         circuit_type="limbic_circuit",
         circuit_regions=[{"region_candidate_id": cid, "role": "participant", "sort_order": 0}],
     )
-    row = asyncio.run(mirror_kg_service.create_mirror_circuit(session, payload))
+    with patch("app.services.mirror_kg_service._find_existing_circuit_for_merge", AsyncMock(return_value=None)):
+        row = asyncio.run(mirror_kg_service.create_mirror_circuit(session, payload))
     assert isinstance(row, MirrorRegionCircuit)
     assert session.add.call_count >= 2
 
@@ -211,7 +213,8 @@ def test_create_mirror_evidence_service():
         evidence_target_id=uuid.uuid4(),
         evidence_text="LLM suggested based on literature summary",
     )
-    row = asyncio.run(mirror_kg_service.create_mirror_evidence(session, payload))
+    with patch("app.services.mirror_kg_service._find_existing_evidence", AsyncMock(return_value=None)):
+        row = asyncio.run(mirror_kg_service.create_mirror_evidence(session, payload))
     assert isinstance(row, MirrorEvidenceRecord)
 
 
@@ -237,7 +240,8 @@ def test_llm_item_to_mirror_function_success():
     session.flush = AsyncMock()
     session.refresh = AsyncMock()
 
-    row = asyncio.run(llm_to_mirror_service.create_mirror_function_from_llm_item(session, item_id))
+    with patch("app.services.mirror_kg_service._find_existing_function_for_merge", AsyncMock(return_value=None)):
+        row = asyncio.run(llm_to_mirror_service.create_mirror_function_from_llm_item(session, item_id))
     assert isinstance(row, MirrorRegionFunction)
     assert row.function_term == "memory"
     assert row.llm_item_id == item_id
