@@ -1364,8 +1364,6 @@ async def run_same_granularity_connection_extraction(
                 await _persist_pack_trace(trace)
                 return [], [], [], set(), 0
 
-        consecutive_parse_failures = 0
-
         # Normalize aliased payloads and recover pair_id from endpoints where missing.
         parsed = normalize_connection_extraction_payload(
             parsed,
@@ -1455,7 +1453,10 @@ async def run_same_granularity_connection_extraction(
             all_no_connections.extend(_nc)
             all_warnings.extend(_pw)
             processed_pair_ids.update(_pi)
-            consecutive_parse_failures += _pf
+            if _pf > 0:
+                consecutive_parse_failures += _pf
+            else:
+                consecutive_parse_failures = 0
             packs_completed_before_cancel += 1
 
         if should_trigger_parse_fail_fast(
