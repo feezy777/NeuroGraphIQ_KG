@@ -686,6 +686,10 @@ def _connection_step_response_json(result: Any) -> dict[str, Any]:
     pack_summaries = provider_audit.get("pack_summaries") or execution_summary.get("pack_summaries") or []
     execution_summary["provider_audit"] = provider_audit
     execution_summary["pack_summaries"] = pack_summaries
+    if base.get("estimated_input_tokens"):
+        execution_summary["estimated_input_tokens"] = base["estimated_input_tokens"]
+    if base.get("estimated_output_tokens"):
+        execution_summary["estimated_output_tokens"] = base["estimated_output_tokens"]
     diagnostics = list(execution_summary.get("diagnostics") or [])
     diagnostics.extend(validate_connection_progress_invariants(execution_summary))
     if diagnostics:
