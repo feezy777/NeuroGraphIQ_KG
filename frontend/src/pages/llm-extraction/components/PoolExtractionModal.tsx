@@ -60,6 +60,7 @@ interface ProgressData {
   estimatedOutputTokens: number
   actualPromptTokens: number
   actualCompletionTokens: number
+  dryRunSamplePack: boolean
 }
 
 interface Props {
@@ -226,6 +227,7 @@ export function PoolExtractionModal({
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1)
   const [internalLabels, setInternalLabels] = useState<Record<string, string>>({})
   const [dryRun, setDryRun] = useState(false)
+  const [dryRunSamplePack, setDryRunSamplePack] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [addingMembers, setAddingMembers] = useState(false)
   const [showErrors, setShowErrors] = useState(false)
@@ -282,6 +284,7 @@ export function PoolExtractionModal({
     estimatedOutputTokens: 0,
     actualPromptTokens: 0,
     actualCompletionTokens: 0,
+    dryRunSamplePack: false,
   })
 
   // ── Runtime debug refs (must be before any early return) ──────────────────
@@ -619,6 +622,7 @@ export function PoolExtractionModal({
           candidate_ids: candidateIds,
           scope,
           dry_run: dryRun,
+          dry_run_sample_pack: dryRun && dryRunSamplePack,
           create_mirror_records: !dryRun,
           create_triples: !dryRun,
           create_evidence: !dryRun,
@@ -654,6 +658,7 @@ export function PoolExtractionModal({
         provider,
         model_name: modelName || undefined,
         dry_run: dryRun,
+        dry_run_sample_pack: dryRun && dryRunSamplePack,
         candidate_ids: candidateIds,
         resource_id: scope.resource_id,
         batch_id: scope.batch_id,
@@ -712,6 +717,7 @@ export function PoolExtractionModal({
         estimatedOutputTokens: 0,
         actualPromptTokens: 0,
         actualCompletionTokens: 0,
+        dryRunSamplePack: dryRun && dryRunSamplePack,
       })
       setModalState('progress')
     } catch (err) {
@@ -1035,6 +1041,7 @@ export function PoolExtractionModal({
           estimatedOutputTokens: estOutput,
           actualPromptTokens: actualPrompt,
           actualCompletionTokens: actualCompletion,
+          dryRunSamplePack: prev.dryRunSamplePack,
           progressPercent: packProgressPct ?? detail.progress_percent ?? (
             totalPacks > 0
               ? ((processedPacks + (inFlightCount ?? 0)) / totalPacks) * 100
@@ -1148,6 +1155,7 @@ export function PoolExtractionModal({
     setSearchTerm('')
     setSelectedMemberCandidateIds(new Set())
     setDryRun(false)
+    setDryRunSamplePack(false)
     setTemperature(0.7)
     setMaxTokens(4096)
     setShowPromptPreview(false)
@@ -1360,14 +1368,34 @@ export function PoolExtractionModal({
             onModelChange={onModelChange}
             providers={providers}
           />
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13, color: '#888', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={dryRun}
-              onChange={e => setDryRun(e.target.checked)}
-            />
-            Dry run（仅预览，不实际调用 LLM）
-          </label>
+          {/* Extraction mode */}
+          <div className="modal-section" style={{ marginTop: 12 }}>
+            <p className="modal-section-title">提取模式</p>
+            <div style={{ display: 'flex', gap: 16 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 14 }}>
+                <input type="radio" name="extractMode" checked={!dryRun} onChange={() => setDryRun(false)} />
+                正式提取
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 14 }}>
+                <input type="radio" name="extractMode" checked={dryRun} onChange={() => setDryRun(true)} />
+                Dry Run 预览
+              </label>
+            </div>
+            {dryRun && (
+              <div style={{ marginTop: 8, padding: '8px 12px', background: '#f0f7ff', borderRadius: 6, fontSize: 12, color: '#555' }}>
+                <div>📊 构建所有 packs，估算 token 用量和费用</div>
+                <div>🚫 不调用 LLM（除非勾选样本包），不写入数据库</div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={dryRunSamplePack}
+                    onChange={e => setDryRunSamplePack(e.target.checked)}
+                  />
+                  <span>运行 1 个样本包（调用真实 LLM 查看输出样例）</span>
+                </label>
+              </div>
+            )}
+          </div>
           {/* Advanced params */}
           <div className="modal-section" style={{ marginTop: 12 }}>
             <p className="modal-section-title">高级参数</p>
@@ -1865,6 +1893,39 @@ export function PoolExtractionModal({
       </div>
 
       <div style={{ padding: '0 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {progress.workflowStatus === 'dry_run' && (
+          <div className="modal-section" style={{ background: '#f0f7ff', borderRadius: 8, padding: '12px 16px', border: '1px solid #bae0ff' }}>
+            <p className="modal-section-title" style={{ color: '#0958d9' }}>📋 Dry Run 预览结果</p>
+            <div className="modal-section-row">
+              <span className="label">计划包数</span>
+              <span className="value" style={{ fontWeight: 600 }}>{progress.totalPacks} 包</span>
+            </div>
+            <div className="modal-section-row">
+              <span className="label">预估输入 tokens</span>
+              <span className="value">{progress.estimatedInputTokens.toLocaleString()}</span>
+            </div>
+            <div className="modal-section-row">
+              <span className="label">预估输出 tokens</span>
+              <span className="value">{progress.estimatedOutputTokens.toLocaleString()}</span>
+            </div>
+            <div className="modal-section-row">
+              <span className="label">预估费用</span>
+              <span className="value" style={{ fontWeight: 600, color: '#2563eb' }}>
+                {estimateCost(progress.estimatedInputTokens, progress.estimatedOutputTokens)}
+              </span>
+            </div>
+            {progress.connectionsFound > 0 && (
+              <div style={{ marginTop: 8, padding: '8px 12px', background: '#f6ffed', borderRadius: 6, fontSize: 12, border: '1px solid #b7eb8f' }}>
+                ✅ 样本包解析到 {progress.connectionsFound} 条连接（仅预览，未写入数据库）
+              </div>
+            )}
+            {progress.errors.length > 0 && (
+              <div style={{ marginTop: 8, padding: '8px 12px', background: '#fff2f0', borderRadius: 6, fontSize: 12, border: '1px solid #ffccc7' }}>
+                ⚠ 样本包执行异常: {progress.errors[0]}
+              </div>
+            )}
+          </div>
+        )}
         {/* Status banner */}
         <div
           style={{

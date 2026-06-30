@@ -3476,6 +3476,7 @@ export interface SameGranularityFunctionExtractionRequest {
   temperature?: number
   max_tokens?: number
   dry_run?: boolean
+  dry_run_sample_pack?: boolean
   max_functions_per_region?: number
   allowed_function_categories?: string[]
   allowed_relation_types?: string[]
