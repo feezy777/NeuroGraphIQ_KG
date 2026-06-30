@@ -1680,6 +1680,7 @@ async def run_same_granularity_connection_extraction(
     execution_summary = build_execution_summary(
         audit,
         pack_traces,
+        compact=False,
         extra={
             **debug_extra,
             "processed_pair_count": result.processed_pair_count,

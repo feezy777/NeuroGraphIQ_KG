@@ -134,6 +134,8 @@ def merge_provider_audit(summary: dict[str, Any]) -> dict[str, Any]:
         "failed_pack_count": summary.get("failed_pack_count", 0),
         "pack_count": summary.get("pack_count", 0),
         "processed_pack_count": summary.get("processed_pack_count", 0),
+        "in_flight_pack_count": summary.get("in_flight_pack_count", 0),
+        "pack_progress_percent": summary.get("pack_progress_percent"),
         "processed_pair_count": summary.get("processed_pair_count", 0),
         "parsed_projection_count": summary.get("parsed_projection_count", 0),
         "parsed_no_connection_count": summary.get("parsed_no_connection_count", 0),
@@ -191,6 +193,11 @@ def finalize_pack_trace(trace: dict[str, Any]) -> dict[str, Any]:
     return trace
 
 
+def _strip_prompt_preview(trace: dict[str, Any]) -> dict[str, Any]:
+    """Return trace without prompt_preview to reduce payload size."""
+    return {k: v for k, v in trace.items() if k != "prompt_preview"}
+
+
 def compact_pack_summaries(
     traces: list[dict[str, Any]],
     *,
@@ -200,6 +207,9 @@ def compact_pack_summaries(
     if not traces:
         return []
     finalized = [finalize_pack_trace(t) for t in traces]
+    # Short-circuit: if all traces fit within max_recent, return as-is without filtering/merging
+    if len(finalized) <= max_recent:
+        return finalized
     failed = [t for t in finalized if t.get("status") in {"parse_error", "schema_error", "transport_error"}]
     keep_failed = failed[-min_failed_keep:] if failed else []
     recent = finalized[-max_recent:]
@@ -240,23 +250,52 @@ def build_execution_summary(
     pack_traces: list[dict[str, Any]],
     *,
     extra: dict[str, Any] | None = None,
+    compact: bool = True,
 ) -> dict[str, Any]:
-    compact = compact_pack_summaries(pack_traces)
-    audit.pack_summaries = compact
+    if compact:
+        pack_summaries = compact_pack_summaries(pack_traces)
+    else:
+        pack_summaries = [_strip_prompt_preview(finalize_pack_trace(t)) for t in pack_traces]
+    audit.pack_summaries = pack_summaries
     summary = audit.to_dict()
-    response_received = sum(1 for t in pack_traces if t.get("response_received"))
-    summary["pack_summaries"] = compact
-    summary["response_received_count"] = response_received
-    if response_received > summary.get("provider_success_count", 0):
-        summary["provider_success_count"] = response_received
-    summary["failed_pack_count"] = sum(
-        1
-        for p in compact
-        if p.get("status") in {"parse_error", "schema_error"}
-        or p.get("parse_error")
-        or p.get("parse_error_type") in {"json_decode_error", "schema_error"}
-    )
-    summary["processed_pack_count"] = len([t for t in pack_traces if t.get("provider_call_finished")])
+    summary["pack_summaries"] = pack_summaries
+
+    if compact:
+        # Recalculate from pack_traces because pack_summaries may be truncated
+        response_received = sum(1 for t in pack_traces if t.get("response_received"))
+        summary["response_received_count"] = response_received
+        if response_received > summary.get("provider_success_count", 0):
+            summary["provider_success_count"] = response_received
+        summary["failed_pack_count"] = sum(
+            1
+            for p in pack_summaries
+            if p.get("status") in {"parse_error", "schema_error", "transport_error", "empty_response"}
+            or p.get("parse_error")
+            or p.get("parse_error_type") in {"json_decode_error", "schema_error", "transport_error", "empty_response"}
+        )
+        processed_traces = [t for t in pack_traces if t.get("provider_call_finished")]
+        summary["processed_pack_count"] = len(processed_traces)
+        summary["succeeded_pack_count"] = summary["processed_pack_count"] - summary["failed_pack_count"]
+        summary["in_flight_pack_count"] = len([
+            t for t in pack_traces
+            if t.get("provider_call_started") and not t.get("provider_call_finished")
+        ])
+    else:
+        # When not compacting, trust audit object fields directly (accurate after Task 1 fix)
+        summary["response_received_count"] = sum(1 for t in pack_traces if t.get("response_received"))
+        summary["in_flight_pack_count"] = len([
+            t for t in pack_traces
+            if t.get("provider_call_started") and not t.get("provider_call_finished")
+        ])
+
+    pack_count = int(summary.get("pack_count") or 0)
+    if pack_count > 0:
+        completed = int(summary.get("processed_pack_count") or 0)
+        in_flight = int(summary.get("in_flight_pack_count") or 0)
+        summary["pack_progress_percent"] = round(
+            min(100.0, ((completed + in_flight) / pack_count) * 100.0),
+            1,
+        )
     summary["errors"] = validate_connection_progress_invariants(summary)
     if extra:
         summary.update(extra)
