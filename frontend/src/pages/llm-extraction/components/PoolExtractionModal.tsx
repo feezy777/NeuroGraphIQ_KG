@@ -235,7 +235,7 @@ export function PoolExtractionModal({
 
   // ── Prompt engineering ──────────────────────────────────────────────────────
   const [temperature, setTemperature] = useState(0.7)
-  const [maxTokens, setMaxTokens] = useState(4096)
+  const [maxTokens, setMaxTokens] = useState(16384)
   const [showPromptPreview, setShowPromptPreview] = useState(false)
   const [editingPrompt, setEditingPrompt] = useState(false)
   const [customSystemPrompt, setCustomSystemPrompt] = useState('')
@@ -627,7 +627,7 @@ export function PoolExtractionModal({
           create_triples: !dryRun,
           create_evidence: !dryRun,
           temperature: temperature !== 0.7 ? temperature : undefined,
-          max_tokens: maxTokens !== 4096 ? maxTokens : undefined,
+          max_tokens: maxTokens !== 16384 ? maxTokens : undefined,
           prompt_template_key: primaryTemplateKey || undefined,
         })
 
@@ -668,7 +668,7 @@ export function PoolExtractionModal({
         create_mirror_records: !dryRun,
         create_evidence: !dryRun,
         temperature: temperature !== 0.7 ? temperature : undefined,
-        max_tokens: maxTokens !== 4096 ? maxTokens : undefined,
+        max_tokens: maxTokens !== 16384 ? maxTokens : undefined,
         prompt_template_key: primaryTemplateKey || undefined,
         prompt_overrides: editingPrompt && primaryTemplateKey
           ? { [primaryTemplateKey]: customUserPrompt }
@@ -1157,7 +1157,7 @@ export function PoolExtractionModal({
     setDryRun(false)
     setDryRunSamplePack(false)
     setTemperature(0.7)
-    setMaxTokens(4096)
+    setMaxTokens(16384)
     setShowPromptPreview(false)
     setEditingPrompt(false)
     setCustomSystemPrompt('')
@@ -1425,9 +1425,9 @@ export function PoolExtractionModal({
               </div>
               <input
                 type="range"
-                min={256}
-                max={8192}
-                step={256}
+                min={512}
+                max={65536}
+                step={1024}
                 value={maxTokens}
                 onChange={e => setMaxTokens(parseInt(e.target.value))}
                 style={{ width: '100%' }}

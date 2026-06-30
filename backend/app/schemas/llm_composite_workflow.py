@@ -78,7 +78,7 @@ class CompositeWorkflowRunRequest(BaseModel):
     debug_max_packs: int | None = Field(default=None, ge=1, le=500)
     debug_single_pack: bool = False
     max_circuits: int | None = Field(default=None, ge=1, le=5000)
-    max_tokens: int | None = Field(default=None, ge=256, le=8192)
+    max_tokens: int | None = Field(default=None, ge=256, le=65536)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     dry_run_sample_pack: bool = False
     prompt_template_key: str | None = None
