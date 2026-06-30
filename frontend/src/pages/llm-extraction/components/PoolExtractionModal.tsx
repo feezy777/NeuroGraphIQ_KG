@@ -10,6 +10,7 @@ import {
   removePoolMembers,
   getCandidatePool,
   createCandidatePool,
+  fetchCandidates,
   type CandidatePool,
   type CandidatePoolMember,
   type CompositeWorkflowRunRead,
@@ -205,6 +206,8 @@ export function PoolExtractionModal({
 }: Props) {
   // ── Modal state ───────────────────────────────────────────────────────────
   const [modalState, setModalState] = useState<ModalState>('prepare')
+  const [wizardStep, setWizardStep] = useState<1 | 2>(1)
+  const [internalLabels, setInternalLabels] = useState<Record<string, string>>({})
   const [dryRun, setDryRun] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [addingMembers, setAddingMembers] = useState(false)
@@ -274,6 +277,23 @@ export function PoolExtractionModal({
     }
   }, [pool?.id, pool?.memberships])
 
+  // Fetch candidate labels when pool changes
+  useEffect(() => {
+    if (!pool?.resource_id) { setInternalLabels({}); return }
+    let cancelled = false
+    fetchCandidates({ resource_id: pool.resource_id, limit: 500 })
+      .then(res => {
+        if (cancelled) return
+        const labels: Record<string, string> = {}
+        for (const c of res.items) {
+          labels[c.id] = c.cn_name ?? c.en_name ?? c.raw_name ?? c.id
+        }
+        setInternalLabels(labels)
+      })
+      .catch(err => console.error('[PoolExtractionModal] Failed to fetch candidates:', err))
+    return () => { cancelled = true }
+  }, [pool?.resource_id])
+
   // Replace pool with external table selection (no accumulation)
   const handleReplaceWithSelected = useCallback(async () => {
     if (selectedCandidateIds.length < 2) return
@@ -335,20 +355,19 @@ export function PoolExtractionModal({
   ])
 
   const displayMembers: DisplayMember[] = useMemo(() => {
-    const labels = candidateLabels ?? {}
     const fromPool = localMembers.map(m => ({
       candidate_id: m.candidate_id,
-      label: labels[m.candidate_id] ?? m.candidate_id,
+      label: internalLabels[m.candidate_id] ?? m.candidate_id,
       added_at: m.added_at ?? '',
     }))
     const fromPending = pendingMembers.filter(p => !localMembers.some(m => m.candidate_id === p.candidate_id))
       .map(p => ({
         candidate_id: p.candidate_id,
-        label: labels[p.candidate_id] ?? p.candidate_id,
+        label: internalLabels[p.candidate_id] ?? p.candidate_id,
         added_at: p.added_at,
       }))
     return [...fromPool, ...fromPending]
-  }, [localMembers, pendingMembers, candidateLabels])
+  }, [localMembers, pendingMembers, internalLabels])
 
   const allMemberIds = new Set(displayMembers.map(m => m.candidate_id))
   const totalPooledCount = allMemberIds.size
@@ -1017,6 +1036,7 @@ export function PoolExtractionModal({
       } catch { /* fire-and-forget */ }
     }
     setModalState('prepare')
+    setWizardStep(1)
     setSearchTerm('')
     setSelectedMemberCandidateIds(new Set())
     setDryRun(false)
@@ -1029,8 +1049,8 @@ export function PoolExtractionModal({
 
   if (!open) return null
 
-  // ── Render: prepare ───────────────────────────────────────────────────────
-  const renderPrepare = () => (
+  // ── Render: step 1 (pool selection) ──────────────────────────────────────
+  const renderStep1 = () => (
     <>
       {/* Header */}
       <div className="modal-header">
@@ -1098,7 +1118,7 @@ export function PoolExtractionModal({
           <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <input
               className="form-input"
-              placeholder="搜索 candidate_id..."
+              placeholder="搜索 ID 或名称..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: '1px solid #d0d7e2', borderRadius: 6 }}
@@ -1147,7 +1167,7 @@ export function PoolExtractionModal({
                         }}
                       />
                     </th>
-                    <th style={{ padding: '8px 6px', textAlign: 'left', color: '#555', fontWeight: 500 }}>#</th>
+                    <th style={{ width: 40, padding: '8px 6px', textAlign: 'left', color: '#555', fontWeight: 500 }}>#</th>
                     <th style={{ padding: '8px 6px', textAlign: 'left', color: '#555', fontWeight: 500 }}>脑区名称</th>
                     <th style={{ padding: '8px 6px', textAlign: 'left', color: '#555', fontWeight: 500 }}>ID</th>
                   </tr>
@@ -1180,6 +1200,40 @@ export function PoolExtractionModal({
             )}
           </div>
         </div>
+      </div>
+
+      {/* Footer */}
+      <div className="modal-footer">
+        <button className="llm-btn" onClick={handleClose}>取消</button>
+        <button
+          className="llm-btn llm-btn-primary"
+          onClick={() => setWizardStep(2)}
+          disabled={!pool || selectedExtractionIds.length < 2 || addingMembers || !poolMatchesExternal}
+        >
+          下一步
+        </button>
+      </div>
+    </>
+  )
+
+  // ── Render: step 2 (model config) ────────────────────────────────────────
+  const renderStep2 = () => (
+    <>
+      <div className="modal-header">
+        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#1a1a2e' }}>
+          ⚡ {TYPE_LABELS[workflowType] || workflowType || '全量提取'}
+        </h3>
+        <button className="btn-close" onClick={handleClose}>x</button>
+      </div>
+
+      <div style={{ padding: '0 20px', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Scope summary */}
+        <div className="modal-section">
+          <p className="modal-section-title">提取配置</p>
+          <div className="modal-section-row">
+            <span className="label">已选 {selectedExtractionIds.length} 个脑区 · {selectedPairCount.toLocaleString()} 对 · 约 {selectedPackEstimate} 包</span>
+          </div>
+        </div>
 
         {/* Model config */}
         <div className="modal-section">
@@ -1204,11 +1258,12 @@ export function PoolExtractionModal({
 
       {/* Footer */}
       <div className="modal-footer">
+        <button className="llm-btn" onClick={() => setWizardStep(1)}>上一步</button>
         <button className="llm-btn" onClick={handleClose}>取消</button>
         <button
           className="llm-btn llm-btn-primary"
           onClick={handleStartExtraction}
-          disabled={!pool || selectedExtractionIds.length < 2 || addingMembers || !poolMatchesExternal}
+          disabled={!pool || selectedExtractionIds.length < 2}
         >
           开始提取 ({selectedExtractionIds.length} 区)
         </button>
@@ -1622,7 +1677,8 @@ export function PoolExtractionModal({
           overflow: 'hidden',
         }}
       >
-        {modalState === 'prepare' && renderPrepare()}
+        {modalState === 'prepare' && wizardStep === 1 && renderStep1()}
+        {modalState === 'prepare' && wizardStep === 2 && renderStep2()}
         {modalState === 'progress' && renderProgress()}
         {modalState === 'result' && renderResult()}
       </div>
