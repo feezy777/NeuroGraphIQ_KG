@@ -218,10 +218,12 @@ def test_connection_extraction_debug_single_pack_single_provider_call():
             )
         )
     summary = result.execution_summary or {}
-    assert mock_provider.complete_text.await_count == 1
-    assert summary["provider_call_count"] == 1
-    assert summary["provider_success_count"] == 1
-    assert summary["parse_error_count"] == 1
+    # Now allows one retry even in debug mode (max_provider_attempts=2).
+    # The mock returns non-JSON text, so both attempts fail to parse.
+    assert mock_provider.complete_text.await_count == 2
+    assert summary["provider_call_count"] == 2
+    assert summary["provider_success_count"] == 2
+    assert summary["parse_error_count"] == 1  # counted once after retry loop
     assert summary["executed_pack_count"] == 1
     assert summary["provider_audit"]["pack_summaries"]
     assert MOCK_RAW in str(summary["provider_audit"]["pack_summaries"][0]["raw_response_preview"])

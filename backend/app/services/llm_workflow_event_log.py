@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.llm_composite_workflow import LlmCompositeWorkflowRun, LlmCompositeWorkflowStep
 
@@ -95,6 +96,7 @@ async def append_workflow_event(
         events = events[-MAX_STORED_EVENTS:]
     summary["events"] = events
     run.result_summary_json = summary
+    flag_modified(run, "result_summary_json")
 
     if step is not None:
         resp = dict(step.response_json or {})
@@ -104,9 +106,10 @@ async def append_workflow_event(
             step_events = step_events[-MAX_STORED_EVENTS:]
         resp["events"] = step_events
         step.response_json = resp
+        flag_modified(step, "response_json")
 
-    await session.flush()
     if commit:
+        await session.flush()
         await session.commit()
     return entry
 

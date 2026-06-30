@@ -137,7 +137,7 @@ def test_late_provider_response_not_persisted_when_cancelled():
     session = _mock_session(c1, c2)
     wf_id = uuid.uuid4()
 
-    from app.services.llm_providers.base import LlmProviderResponse, LlmProviderUsage
+    from app.services.llm_providers.base import LlmProviderTextResult, LlmProviderUsage
     import json
 
     async def _run():
@@ -151,16 +151,16 @@ def test_late_provider_response_not_persisted_when_cancelled():
                 "confidence": 0.5,
             }]
         }
-        response = LlmProviderResponse(
+        response = LlmProviderTextResult(
             provider="deepseek",
             model="deepseek-chat",
             raw_text=json.dumps(llm_json),
-            parsed_json=llm_json,
             usage=LlmProviderUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
             finish_reason="stop",
             request_payload_redacted={},
             response_payload={},
             latency_ms=1,
+            transport_ok=True,
         )
         mock_provider = AsyncMock()
         call_count = {"n": 0}
@@ -171,7 +171,7 @@ def test_late_provider_response_not_persisted_when_cancelled():
                 await cancel_registry.mark_cancelling(wf_id)
             return response
 
-        mock_provider.complete_json = _complete
+        mock_provider.complete_text = _complete
 
         with patch("app.services.llm_connection_extraction_service.get_llm_provider", return_value=mock_provider), \
              patch("app.services.llm_connection_extraction_service.get_deepseek_runtime_config") as cfg, \
@@ -187,7 +187,7 @@ def test_late_provider_response_not_persisted_when_cancelled():
                 composite_workflow_run_id=wf_id,
             )
         persist.assert_not_awaited()
-        assert any("late provider response ignored" in w for w in result.warnings)
+        assert result.status == LlmRunStatus.cancelled
         await cancel_registry.clear(wf_id)
 
     asyncio.run(_run())
@@ -258,5 +258,240 @@ def test_is_workflow_cancelled_or_cancelling_uses_registry():
         await cancel_registry.mark_cancelling(wf_id)
         assert await composite_svc.is_workflow_cancelled_or_cancelling(session, wf_id) is True
         await cancel_registry.clear(wf_id)
+
+    asyncio.run(_run())
+
+
+# ── Transaction rollback + recovery tests ──────────────────────────────────────
+
+def test_cleanup_sql_failure_rolls_back_and_writes_cleanup_failed():
+    """When a DELETE inside cleanup raises, the session is rolled back and the
+    workflow is marked cleanup_failed (not left in an aborted-transaction state)."""
+    from app.services import llm_composite_workflow_service as composite_svc
+
+    wf_id = uuid.uuid4()
+    run = MagicMock()
+    run.id = wf_id
+    run.status = CompositeWorkflowStatus.running.value
+    run.result_summary_json = {}
+    run.completed_at = None
+    run.warnings_json = []
+    run.errors_json = []
+
+    step = MagicMock()
+    step.workflow_run_id = wf_id
+    step.llm_run_id = uuid.uuid4()
+    step.status = CompositeStepStatus.running.value
+    step.completed_at = None
+
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=run)
+
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [step]
+    mock_result = MagicMock()
+    mock_result.scalars.return_value = mock_scalars
+    session.execute = AsyncMock(return_value=mock_result)
+
+    cleanup_error = RuntimeError("simulated cleanup SQL failure")
+
+    async def _run():
+        with patch.object(
+            composite_svc, "cleanup_composite_workflow_artifacts",
+            AsyncMock(side_effect=cleanup_error),
+        ):
+            resp = await composite_svc.cancel_composite_workflow(
+                session, wf_id, cleanup=True, reason="test"
+            )
+
+        assert resp.status == CompositeWorkflowStatus.cleanup_failed
+        assert resp.errors
+        assert "simulated cleanup SQL failure" in str(resp.errors)
+        session.rollback.assert_awaited()
+
+    asyncio.run(_run())
+
+
+def test_cancel_cleanup_failure_writes_outcome_to_summary_json():
+    """After a cleanup failure, cleanup_failed is written to result_summary_json
+    and the status field is set to cleanup_failed (valid enum value)."""
+    from app.services import llm_composite_workflow_service as composite_svc
+
+    wf_id = uuid.uuid4()
+
+    run_obj = MagicMock()
+    run_obj.id = wf_id
+    run_obj.status = CompositeWorkflowStatus.running.value
+    run_obj.result_summary_json = {}
+    run_obj.completed_at = None
+    run_obj.warnings_json = []
+    run_obj.errors_json = []
+
+    step = MagicMock()
+    step.workflow_run_id = wf_id
+    step.llm_run_id = uuid.uuid4()
+    step.status = CompositeStepStatus.running.value
+    step.completed_at = None
+
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=run_obj)
+
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [step]
+    mock_result = MagicMock()
+    mock_result.scalars.return_value = mock_scalars
+    session.execute = AsyncMock(return_value=mock_result)
+
+    cleanup_error = RuntimeError("FK violation during mirror delete")
+
+    async def _run():
+        with patch.object(
+            composite_svc, "cleanup_composite_workflow_artifacts",
+            AsyncMock(side_effect=cleanup_error),
+        ):
+            resp = await composite_svc.cancel_composite_workflow(
+                session, wf_id, cleanup=True, reason="fk_test"
+            )
+
+        assert resp.status == CompositeWorkflowStatus.cleanup_failed
+        assert run_obj.status == CompositeWorkflowStatus.cleanup_failed.value
+        summary = run_obj.result_summary_json
+        assert summary.get("cleanup") is True
+        assert summary.get("cleanup_failed") is True
+        assert summary.get("cancelled") is True
+        assert summary.get("cancel_reason") == "fk_test"
+        assert "cleanup_errors" in summary
+
+    asyncio.run(_run())
+
+
+def test_cancel_no_cleanup_writes_cancelled_status():
+    """Cancel without cleanup should write cancelled status directly."""
+    from app.services import llm_composite_workflow_service as composite_svc
+
+    wf_id = uuid.uuid4()
+    run = MagicMock()
+    run.id = wf_id
+    run.status = CompositeWorkflowStatus.running.value
+    run.result_summary_json = {}
+    run.completed_at = None
+    run.warnings_json = []
+    run.errors_json = []
+
+    step = MagicMock()
+    step.workflow_run_id = wf_id
+    step.status = CompositeStepStatus.running.value
+    step.completed_at = None
+
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=run)
+
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [step]
+    mock_result = MagicMock()
+    mock_result.scalars.return_value = mock_scalars
+    session.execute = AsyncMock(return_value=mock_result)
+
+    async def _run():
+        resp = await composite_svc.cancel_composite_workflow(
+            session, wf_id, cleanup=False, reason="quick_cancel"
+        )
+        assert resp.status == CompositeWorkflowStatus.cancelled
+        assert run.status == CompositeWorkflowStatus.cancelled.value
+        assert run.result_summary_json.get("cancelled") is True
+        assert run.result_summary_json.get("cancel_reason") == "quick_cancel"
+
+    asyncio.run(_run())
+
+
+def test_cancel_idempotent_when_already_cleanup_failed():
+    """Repeated cancel when already cleanup_failed should return current state."""
+    from app.services import llm_composite_workflow_service as composite_svc
+
+    wf_id = uuid.uuid4()
+    run = MagicMock()
+    run.status = CompositeWorkflowStatus.cleanup_failed.value
+    run.result_summary_json = {
+        "deleted": {"mirror_projections": 0},
+        "cleanup_warnings": [],
+        "cleanup_errors": ["prior failure"],
+        "cancelled": True,
+    }
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=run)
+
+    async def _run():
+        cleanup_mock = AsyncMock()
+        with patch.object(composite_svc, "cleanup_composite_workflow_artifacts", cleanup_mock):
+            resp = await composite_svc.cancel_composite_workflow(session, wf_id, cleanup=True)
+        cleanup_mock.assert_not_awaited()
+        assert resp.status == CompositeWorkflowStatus.cleanup_failed
+        assert resp.errors == ["prior failure"]
+
+    asyncio.run(_run())
+
+
+def test_cancel_idempotent_when_already_cancelled():
+    """Repeated cancel when already cancelled should return current state."""
+    from app.services import llm_composite_workflow_service as composite_svc
+
+    wf_id = uuid.uuid4()
+    run = MagicMock()
+    run.status = CompositeWorkflowStatus.cancelled.value
+    run.result_summary_json = {
+        "cancelled": True,
+        "cancelled_by": "user",
+    }
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=run)
+
+    async def _run():
+        cleanup_mock = AsyncMock()
+        with patch.object(composite_svc, "cleanup_composite_workflow_artifacts", cleanup_mock):
+            resp = await composite_svc.cancel_composite_workflow(session, wf_id, cleanup=True)
+        cleanup_mock.assert_not_awaited()
+        assert resp.status == CompositeWorkflowStatus.cancelled
+
+    asyncio.run(_run())
+
+
+def test_cleanup_service_rollback_on_exception():
+    """When cleanup_composite_workflow_artifacts catches an internal exception,
+    it must rollback the session so the caller is not left with an aborted tx."""
+    from app.services.llm_composite_workflow_cleanup_service import cleanup_composite_workflow_artifacts
+
+    wf_id = uuid.uuid4()
+    session = AsyncMock()
+
+    session.execute = AsyncMock(side_effect=RuntimeError("simulated JSONB cast error"))
+
+    async def _run():
+        deleted, warnings, errors = await cleanup_composite_workflow_artifacts(
+            session, wf_id, steps=[]
+        )
+        assert len(errors) >= 1
+        assert any("simulated JSONB" in e for e in errors)
+        session.rollback.assert_awaited()
+
+    asyncio.run(_run())
+
+
+def test_safe_append_event_does_not_raise():
+    """The safe_append_workflow_event wrapper must never propagate exceptions."""
+    from app.services.llm_workflow_event_log import safe_append_workflow_event
+
+    session = AsyncMock()
+    session.add = MagicMock(side_effect=RuntimeError("DB gone"))
+    session.flush = AsyncMock(side_effect=RuntimeError("DB gone"))
+
+    async def _run():
+        result = await safe_append_workflow_event(
+            session,
+            uuid.uuid4(),
+            event="cancel_initiated",
+            message="test",
+            commit=False,
+        )
+        assert result is None
 
     asyncio.run(_run())

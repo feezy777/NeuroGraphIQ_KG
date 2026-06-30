@@ -13,6 +13,9 @@ import {
   runSameGranularityCircuitExtraction,
   runRegionFieldCompletion,
   getExtractionPromptTemplates,
+  cancelCompositeWorkflow,
+  pauseCompositeWorkflow,
+  resumeCompositeWorkflow,
   type ExtractionPromptTemplate,
 } from '../../../api/endpoints'
 import { ApiError } from '../../../api/client'
@@ -97,10 +100,11 @@ export function ExtractionRunModal(props: ExtractionRunModalProps) {
   const [elapsedMs, setElapsedMs] = useState(0)
   const [workflowRunId, setWorkflowRunId] = useState<string | undefined>()
   const [error, setError] = useState<string | null>(null)
-  // Batch progress (single-step only)
-  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0, created: 0 })
+  // Batch progress
+  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0, created: 0, packDone: 0, packTotal: 0 })
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const cancelledRef = useRef(false)
+  const abortRef = useRef<AbortController | null>(null)
 
   const { data: templatesData } = useData(() => getExtractionPromptTemplates(taskDef.promptCategory ?? 'extraction'), [taskDef.promptCategory])
   const templates = templatesData?.items ?? []
@@ -116,6 +120,8 @@ export function ExtractionRunModal(props: ExtractionRunModalProps) {
   // ── Execution ──────────────────────────────────────────────────────────
   const startExecution = useCallback(async () => {
     setPhase('running'); setError(null); cancelledRef.current = false
+    abortRef.current = new AbortController()
+    const signal = abortRef.current.signal
     const startTime = Date.now()
     timerRef.current = setInterval(() => setElapsedMs(Date.now() - startTime), 1000)
 
@@ -131,7 +137,7 @@ export function ExtractionRunModal(props: ExtractionRunModalProps) {
     try {
       if (isComposite) {
         // ── Composite: backend workflow with progress tracking ────────────
-        setBatchProgress({ done: 0, total: selectedCandidateIds.length, created: 0 })
+        setBatchProgress({ done: 0, total: selectedCandidateIds.length, created: 0, packDone: 0, packTotal: 0 })
         const compositeSteps = COMPOSITE_TASK_SUBSTEP_LABELS[taskId as CompositeExtractionTaskId]?.map(
           (label: string, i: number) => ({ id: String(i), label, status: 'pending' as const }),
         ) ?? []
@@ -146,11 +152,17 @@ export function ExtractionRunModal(props: ExtractionRunModalProps) {
               if (meta?.workflowRunId) setWorkflowRunId(meta.workflowRunId)
               const totalCreated = steps.reduce((sum, s) => sum + (s.createdCount ?? 0), 0)
               const doneSteps = steps.filter(s => s.status !== 'pending' && s.status !== 'running').length
-              setBatchProgress({ done: doneSteps, total: steps.length || 1, created: totalCreated })
-            } })
+              // Extract pack progress from connection step's execution summary
+              const connStep = steps.find(s => s.id === 'connection')
+              const es = connStep?.executionSummary as Record<string, unknown> | undefined
+              const packTotal = Number(es?.pack_count ?? 0)
+              const packDone = Number(es?.executed_pack_count ?? es?.processed_pack_count ?? 0)
+              setBatchProgress({ done: doneSteps, total: steps.length || 1, created: totalCreated, packDone, packTotal })
+            } },
+          signal)
         setResult(r); setSubsteps(r.substeps)
         const finalCreated = r.substeps.reduce((sum, s) => sum + (s.createdCount ?? 0), 0)
-        setBatchProgress({ done: selectedCandidateIds.length, total: selectedCandidateIds.length, created: finalCreated })
+        setBatchProgress({ done: selectedCandidateIds.length, total: selectedCandidateIds.length, created: finalCreated, packDone: 0, packTotal: 0 })
       } else {
         // ── Single-step: batch processing ─────────────────────────────────
         const scopeParam = (scope.batch_id || scope.resource_id) ? {
@@ -164,7 +176,7 @@ export function ExtractionRunModal(props: ExtractionRunModalProps) {
         const batches: string[][] = []
         for (let i = 0; i < allIds.length; i += BATCH_SIZE) batches.push(allIds.slice(i, i + BATCH_SIZE))
 
-        setBatchProgress({ done: 0, total: allIds.length, created: 0 })
+        setBatchProgress({ done: 0, total: allIds.length, created: 0, packDone: 0, packTotal: 0 })
         const runningSteps: CompositeSubstepResult[] = batches.map((batchIds, i) => ({
           id: `batch-${i}`, label: `批次 ${i + 1}/${batches.length}（脑区 ${i * BATCH_SIZE + 1}-${Math.min((i + 1) * BATCH_SIZE, allIds.length)}）`, status: 'pending' as const,
         }))
@@ -205,7 +217,7 @@ export function ExtractionRunModal(props: ExtractionRunModalProps) {
           if (res?.run_id) lastRunId = res.run_id
 
           const doneRegions = Math.min((bi + 1) * BATCH_SIZE, allIds.length)
-          setBatchProgress({ done: doneRegions, total: allIds.length, created: totalCreated })
+          setBatchProgress({ done: doneRegions, total: allIds.length, created: totalCreated, packDone: 0, packTotal: 0 })
           // Update this batch's status and counts
           runningSteps[bi] = {
             ...runningSteps[bi],
@@ -231,7 +243,52 @@ export function ExtractionRunModal(props: ExtractionRunModalProps) {
     }
   }, [taskId, isComposite, provider, modelName, dryRun, temperature, maxTokens, taskParamValues, createMirror, createTriples, createEvidence, promptTemplateKey, systemPrompt, selectedCandidateIds, scope, debugSinglePack, taskLabel])
 
-  const handleCancel = useCallback(() => { cancelledRef.current = true; if (timerRef.current) clearInterval(timerRef.current); onClose() }, [onClose])
+  const handleCancel = useCallback(async () => {
+    cancelledRef.current = true
+    if (timerRef.current) clearInterval(timerRef.current)
+    // Abort the polling signal so runCompositeExtractionTask stops cleanly
+    try { abortRef.current?.abort() } catch (_) { /* ignore */ }
+    // Call backend cancel API so the server stops processing
+    if (workflowRunId) {
+      try {
+        await cancelCompositeWorkflow(workflowRunId, { cleanup: true, reason: 'user_cancelled' })
+      } catch (_) {
+        // Ignore cancel errors — the modal is closing anyway
+      }
+    }
+    onClose()
+  }, [onClose, workflowRunId])
+
+  // ── Pause / Resume for ExtractionRunModal ──────────────────────────────
+  const [pausing, setPausing] = useState(false)
+  const [resuming, setResuming] = useState(false)
+  const pauseInFlightRef = useRef(false)
+
+  const handlePause = useCallback(async () => {
+    if (!workflowRunId || pauseInFlightRef.current) return
+    pauseInFlightRef.current = true
+    setPausing(true)
+    try {
+      await pauseCompositeWorkflow(workflowRunId)
+    } catch (err: any) {
+      setError(err?.message || String(err))
+    } finally {
+      pauseInFlightRef.current = false
+      setPausing(false)
+    }
+  }, [workflowRunId])
+
+  const handleResume = useCallback(async () => {
+    if (!workflowRunId) return
+    setResuming(true)
+    try {
+      await resumeCompositeWorkflow(workflowRunId)
+    } catch (err: any) {
+      setError(err?.message || String(err))
+    } finally {
+      setResuming(false)
+    }
+  }, [workflowRunId])
 
   // ── Render helpers ─────────────────────────────────────────────────────
   const renderSlider = (key: string, label: string, value: number, min: number, max: number, step = 0.1) => (
@@ -335,9 +392,10 @@ export function ExtractionRunModal(props: ExtractionRunModalProps) {
   // ── Running ────────────────────────────────────────────────────────────
   if (phase === 'running') {
     const pct = batchProgress.total > 0 ? Math.round((batchProgress.done / batchProgress.total) * 100) : undefined
+    const packPct = batchProgress.packTotal > 0 ? Math.round((batchProgress.packDone / batchProgress.packTotal) * 100) : undefined
     const progressLabel = isComposite
-      ? `步骤 ${batchProgress.done}/${batchProgress.total}`
-      : `已处理 ${batchProgress.done}/${batchProgress.total} 个脑区`
+      ? `步骤 ${batchProgress.done}/${batchProgress.total} · 已生成 ${batchProgress.created}`
+      : `已完成 ${batchProgress.done}/${batchProgress.total} · 已生成 ${batchProgress.created}`
     return (
       <div className="modal-overlay">
         <div className="modal-panel" style={{ maxWidth: MODAL_W }}>
@@ -369,6 +427,21 @@ export function ExtractionRunModal(props: ExtractionRunModalProps) {
                 </div>
               </div>
             )}
+            {/* Pack progress (composite connection extraction) */}
+            {batchProgress.packTotal > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+                  <span style={{ color: '#888' }}>包进度</span>
+                  <span style={{ color: 'var(--primary)', fontWeight: 600 }}>
+                    {batchProgress.packDone}/{batchProgress.packTotal}
+                    {packPct != null ? ` (${packPct}%)` : ''}
+                  </span>
+                </div>
+                <div style={{ height: 6, background: '#e8e8e8', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${packPct ?? 0}%`, background: '#1890ff', borderRadius: 3, transition: 'width 0.3s' }} />
+                </div>
+              </div>
+            )}
             {/* Substep list */}
             {substeps.length === 0 && <div style={{ color: '#888', fontSize: 15, padding: '16px 0' }}>正在启动…</div>}
             {substeps.map(step => (
@@ -383,7 +456,15 @@ export function ExtractionRunModal(props: ExtractionRunModalProps) {
             ))}
             {error && <div style={{ marginTop: 14, padding: '10px 14px', background: '#fff2f0', borderRadius: 4, fontSize: 14, color: '#cf1322' }}>{error}</div>}
           </div>
-          <div className="modal-footer"><button className="btn" onClick={handleCancel} style={{ color: '#cf1322', fontSize: 14 }}>取消执行</button></div>
+          <div className="modal-footer">
+            <button className="btn" onClick={handlePause} disabled={pausing} style={{ fontSize: 14 }}>
+              {pausing ? '⏳ 暂停中...' : '⏸ 暂停'}
+            </button>
+            <button className="btn" onClick={handleResume} disabled={resuming} style={{ fontSize: 14 }}>
+              {resuming ? '⏳ 继续中...' : '▶ 继续'}
+            </button>
+            <button className="btn" onClick={handleCancel} style={{ color: '#cf1322', fontSize: 14 }}>取消执行</button>
+          </div>
         </div>
       </div>
     )

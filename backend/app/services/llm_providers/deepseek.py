@@ -190,15 +190,17 @@ class DeepSeekProvider:
                 headers=headers,
             )
 
+        resolved_timeout = timeout_seconds or config.timeout_seconds
         started = time.monotonic()
         logger.info(
-            "[deepseek] POST chat/completions model=%s user_chars=%s json_mode=%s",
+            "[deepseek] POST chat/completions model=%s user_chars=%s json_mode=%s timeout=%ss",
             use_model,
             len(user_prompt),
             json_mode_enabled,
+            resolved_timeout,
         )
         async with httpx.AsyncClient(
-            timeout=timeout_seconds or config.timeout_seconds,
+            timeout=httpx.Timeout(resolved_timeout, connect=15.0),
             trust_env=False,
         ) as client:
             try:

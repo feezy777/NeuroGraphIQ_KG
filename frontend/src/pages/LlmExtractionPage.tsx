@@ -32,7 +32,7 @@ import { formatExtractionApiError } from './llm-extraction/utils/formatExtractio
 import { FieldCompletionTab } from './llm-extraction/components/FieldCompletionTab'
 import { QuickExtractionCards } from './llm-extraction/components/QuickExtractionCards'
 import { PoolExtractionModal } from './llm-extraction/components/PoolExtractionModal'
-import { useCandidatePool, type PoolScope } from './llm-extraction/hooks/useCandidatePool'
+import { useCandidatePool, type PoolScope, PoolSetupError } from './llm-extraction/hooks/useCandidatePool'
 import {
   type LlmDataTabId,
   type MirrorSubTabId,
@@ -5849,12 +5849,18 @@ export function LlmExtractionPage() {
   const [compositeSubsteps, setCompositeSubsteps] = useState<CompositeSubstepResult[]>([])
   const [compositeResult, setCompositeResult] = useState<CompositeExtractionResult | null>(null)
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([])
+  const selectedCandidateIdsRef = useRef<string[]>([])
+  const handleSelectionIdsChange = useCallback((ids: string[]) => {
+    selectedCandidateIdsRef.current = ids
+    setSelectedCandidateIds(ids)
+  }, [])
   const [candidateMinError, setCandidateMinError] = useState<string | null>(null)
   const [candidateLargeWarning, setCandidateLargeWarning] = useState<string | null>(null)
   const [debugSinglePack, setDebugSinglePack] = useState(false)
   // New simplified run modal
   const [showRunModal, setShowRunModal] = useState(false)
   const [showFullExtractModal, setShowFullExtractModal] = useState(false)
+  const [poolPreSyncedForModal, setPoolPreSyncedForModal] = useState(false)
   const [poolWorkflowType, setPoolWorkflowType] = useState('connection_with_function')
 
   const { setExpanded: setLogConsoleExpanded, errorCount: logErrorCount } = useWorkbenchLog()
@@ -5899,14 +5905,11 @@ export function LlmExtractionPage() {
   // when session scope is already loaded — avoids a race where
   // openPoolExtractModal calls setPoolCandidates before the useEffect
   // that used to set poolScope has committed.
-  const poolScope: PoolScope | null = useMemo(() => {
-    const sourceAtlas = scope.source_atlas || ''
-    const granularityLevel = scope.granularity_level || ''
-    if (sourceAtlas && granularityLevel) {
-      return { sourceAtlas, granularityLevel, granularityFamily: scope.granularity_family || null }
-    }
-    return null
-  }, [scope.source_atlas, scope.granularity_level, scope.granularity_family])
+  const poolScope: PoolScope = useMemo(() => ({
+    sourceAtlas: scope.source_atlas || 'AAL3',
+    granularityLevel: scope.granularity_level || 'macro',
+    granularityFamily: scope.granularity_family || 'macro_clinical',
+  }), [scope.source_atlas, scope.granularity_level, scope.granularity_family])
 
   const {
     pool,
@@ -5917,11 +5920,35 @@ export function LlmExtractionPage() {
     refresh,
   } = useCandidatePool(poolScope)
 
+  const setupExtractionPoolFromCurrentSelection = useCallback(async () => {
+    const ids = [...new Set(selectedCandidateIdsRef.current.filter(Boolean))]
+    if (ids.length < 2) {
+      throw new PoolSetupError('当前没有可加入提取池的候选脑区（至少需要 2 个）')
+    }
+    const payloadScope: PoolScope = {
+      sourceAtlas: scope.source_atlas || 'AAL3',
+      granularityLevel: scope.granularity_level || 'macro',
+      granularityFamily: scope.granularity_family || 'macro_clinical',
+    }
+    if (import.meta.env.DEV) {
+      console.info('[LlmExtractionPage] setupExtractionPool', {
+        selectedIdsLength: ids.length,
+        batchId: scope.batch_id || null,
+        atlas: payloadScope.sourceAtlas,
+        granularity: payloadScope.granularityLevel,
+        granularityFamily: payloadScope.granularityFamily,
+        candidateIdsSample: ids.slice(0, 3),
+      })
+    }
+    return setPoolCandidates(ids, payloadScope)
+  }, [scope.source_atlas, scope.granularity_level, scope.granularity_family, scope.batch_id, setPoolCandidates])
+
   const openPoolExtractModal = useCallback(async (
     workflowType: string,
     task: string,
   ) => {
-    if (selectedCandidateIds.length < 2) {
+    const ids = selectedCandidateIdsRef.current
+    if (ids.length < 2) {
       setCandidateMinError('请至少选择 2 个脑区后再提取')
       return
     }
@@ -5930,13 +5957,18 @@ export function LlmExtractionPage() {
     setDryRun(false)
     setPoolWorkflowType(workflowType)
     try {
-      await setPoolCandidates(selectedCandidateIds)
+      await setupExtractionPoolFromCurrentSelection()
+      setPoolPreSyncedForModal(true)
       setShowFullExtractModal(true)
     } catch (err) {
       console.error('[LlmExtractionPage] setPoolCandidates failed:', err)
-      setCandidateMinError('设置提取池失败，请重试')
+      if (err instanceof PoolSetupError) {
+        setCandidateMinError(err.message)
+      } else {
+        setCandidateMinError('设置提取池失败，请重试')
+      }
     }
-  }, [selectedCandidateIds, setPoolCandidates])
+  }, [setupExtractionPoolFromCurrentSelection])
 
   const switchDataTab = useCallback((tabId: LlmDataTabId) => {
     setActiveDataTab(tabId)
@@ -6057,14 +6089,20 @@ export function LlmExtractionPage() {
               className="llm-btn llm-btn-ghost"
               style={{ fontSize: 12 }}
               onClick={async () => {
-                if (selectedCount < 2) {
+                if (selectedCandidateIdsRef.current.length < 2) {
                   setCandidateMinError('请至少选择 2 个脑区')
                   return
                 }
+                setCandidateMinError(null)
                 try {
-                  await setPoolCandidates(selectedCandidateIds)
-                } catch {
-                  setCandidateMinError('设置提取池失败，请重试')
+                  await setupExtractionPoolFromCurrentSelection()
+                } catch (err) {
+                  console.error('[LlmExtractionPage] setPoolCandidates failed:', err)
+                  if (err instanceof PoolSetupError) {
+                    setCandidateMinError(err.message)
+                  } else {
+                    setCandidateMinError('设置提取池失败，请重试')
+                  }
                 }
               }}
               disabled={selectedCount < 2}
@@ -6162,7 +6200,7 @@ export function LlmExtractionPage() {
             onBatchStart={() => setBatchLoading(true)}
             onBatchEnd={() => setBatchLoading(false)}
             onSelectionChange={setSelectedCount}
-            onSelectionIdsChange={setSelectedCandidateIds}
+            onSelectionIdsChange={handleSelectionIdsChange}
             pooledCandidateIds={pooledCandidateIds}
           />
         )}
@@ -6246,7 +6284,11 @@ export function LlmExtractionPage() {
         onSetPoolCandidates={setPoolCandidates}
         selectedCandidateIds={selectedCandidateIds}
         candidateLabels={{}}
-        onClose={() => setShowFullExtractModal(false)}
+        skipInitialPoolSync={poolPreSyncedForModal}
+        onClose={() => {
+          setShowFullExtractModal(false)
+          setPoolPreSyncedForModal(false)
+        }}
       />
     </div>
     </LlmErrorBoundary>

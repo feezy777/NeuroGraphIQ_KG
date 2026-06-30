@@ -20,6 +20,7 @@ interface Props {
   loading?: boolean
   error?: string | null
   emptyText?: string
+  pageSize?: number
   onOpenDetail: (row: FormalRow) => void
   onRefresh?: (overlayPatch?: OverlayPatch) => void
   onDeleteSelected?: (ids: string[]) => void
@@ -32,6 +33,7 @@ export function FormalObjectTableSection({
   loading,
   error,
   emptyText,
+  pageSize: pageSizeProp,
   onOpenDetail,
   onRefresh,
   onDeleteSelected,
@@ -55,7 +57,7 @@ export function FormalObjectTableSection({
     total,
     pagedItems,
     setPage,
-  } = useDataCenterPagination({ items, resetKeys })
+  } = useDataCenterPagination({ items, pageSize: pageSizeProp, resetKeys })
 
   useEffect(() => {
     setSelectedIds(new Set())

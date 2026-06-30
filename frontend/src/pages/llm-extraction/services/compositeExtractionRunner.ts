@@ -789,9 +789,16 @@ async function pollCompositeWorkflowRun(
   cb: CompositeRunCallbacks,
   startedAt: number,
   initialSubsteps: CompositeSubstepResult[],
+  signal?: AbortSignal,
 ): Promise<CompositeWorkflowRunRead> {
   let substeps = initialSubsteps
   while (true) {
+    if (signal?.aborted) {
+      // Caller cancelled — return the last known detail as best-effort
+      const detail = await getCompositeWorkflowRun(workflowRunId).catch(() => null)
+      if (detail) return detail
+      throw new DOMException('Polling aborted', 'AbortError')
+    }
     const detail = await getCompositeWorkflowRun(workflowRunId)
     substeps = mapServerStepsFromRead(detail)
     logWorkflowEvents(detail.recent_events)
@@ -870,7 +877,7 @@ function applyCreatedTargetsToSubsteps(
       step.createdIds = target.ids
     }
     if (typeof target.count === 'number' && target.count > 0) {
-      step.createdCount = (step.createdCount ?? 0) + target.count
+      step.createdCount = target.count
     }
   }
   return next
@@ -926,6 +933,7 @@ async function runViaBackendCompositeWorkflow(
   taskId: CompositeExtractionTaskId,
   ctx: CompositeExtractionContext,
   cb: CompositeRunCallbacks,
+  signal?: AbortSignal,
 ): Promise<CompositeExtractionResult> {
   const minRequired = CANDIDATE_MINIMUMS[taskId] ?? 0
   const n = ctx.selectedCandidateIds.length
@@ -987,6 +995,7 @@ async function runViaBackendCompositeWorkflow(
       cb,
       startedAt,
       initialSubsteps,
+      signal,
     )
     response = readToRunResponse(finalDetail)
   } catch (e) {
@@ -1055,9 +1064,10 @@ export async function runCompositeExtractionTask(
   taskId: CompositeExtractionTaskId,
   ctx: CompositeExtractionContext,
   cb: CompositeRunCallbacks,
+  signal?: AbortSignal,
 ): Promise<CompositeExtractionResult> {
   try {
-    return await runViaBackendCompositeWorkflow(taskId, ctx, cb)
+    return await runViaBackendCompositeWorkflow(taskId, ctx, cb, signal)
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) {
       return runCompositeExtractionTaskFallback(taskId, ctx, cb)

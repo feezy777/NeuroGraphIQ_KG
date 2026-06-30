@@ -16,7 +16,7 @@ from app.services.llm_connection_extraction_service import (
     run_same_granularity_connection_extraction,
 )
 from app.services.llm_extraction_prompt_engineering import finalize_connection_extraction_status, ConnectionExecutionAudit
-from app.services.llm_providers.base import LlmProviderResponse, LlmProviderUsage
+from app.services.llm_providers.base import LlmProviderResponse, LlmProviderTextResult, LlmProviderUsage
 from app.services.llm_status_utils import (
     PERSISTENT_RUN_STATUSES,
     apply_persistent_run_status,
@@ -181,19 +181,19 @@ def test_no_connections_run_persists_succeeded_with_outcome():
         "no_connections": [{"pair_id": pair_id, "reason": "none"}],
         "warnings": [],
     }
-    response = LlmProviderResponse(
+    response = LlmProviderTextResult(
         provider="deepseek",
         model="deepseek-chat",
         raw_text=json.dumps(llm_json),
-        parsed_json=llm_json,
         usage=LlmProviderUsage(),
         finish_reason="stop",
         request_payload_redacted={},
         response_payload={},
         latency_ms=5,
+        transport_ok=True,
     )
     mock_provider = AsyncMock()
-    mock_provider.complete_json = AsyncMock(return_value=response)
+    mock_provider.complete_text = AsyncMock(return_value=response)
     session = _mock_session([c1, c2])
     with patch("app.services.llm_connection_extraction_service.get_llm_provider", return_value=mock_provider), \
          patch("app.services.llm_connection_extraction_service.get_deepseek_runtime_config") as cfg:

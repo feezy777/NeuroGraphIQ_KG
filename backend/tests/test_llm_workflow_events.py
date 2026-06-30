@@ -17,7 +17,7 @@ from app.services.llm_workflow_event_log import (
 )
 from app.models.candidate import CandidateBrainRegion
 from app.models.llm_composite_workflow import LlmCompositeWorkflowRun
-from app.services.llm_providers.base import LlmProviderResponse, LlmProviderUsage
+from app.services.llm_providers.base import LlmProviderTextResult, LlmProviderUsage
 
 
 def _candidate(**kwargs) -> CandidateBrainRegion:
@@ -246,19 +246,19 @@ def test_connection_extraction_emits_core_events():
 
     session.get = AsyncMock(side_effect=_get)
     llm_json = _projection_json(c1, c2)
-    response = LlmProviderResponse(
+    response = LlmProviderTextResult(
         provider="deepseek",
         model="deepseek-chat",
         raw_text='{"projections":[],"no_connections":[]}',
-        parsed_json=llm_json,
         usage=LlmProviderUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         finish_reason="stop",
         request_payload_redacted={},
         response_payload={},
         latency_ms=5,
+        transport_ok=True,
     )
     mock_provider = MagicMock()
-    mock_provider.complete_json = AsyncMock(return_value=response)
+    mock_provider.complete_text = AsyncMock(return_value=response)
 
     with patch("app.services.llm_connection_extraction_service.get_llm_provider", return_value=mock_provider), \
          patch("app.services.llm_connection_extraction_service.get_deepseek_runtime_config") as cfg, \
@@ -314,19 +314,19 @@ def test_parse_error_event_includes_raw_preview():
         return next((c for c in [c1, c2] if c.id == pk), None)
 
     session.get = AsyncMock(side_effect=_get)
-    response = LlmProviderResponse(
+    response = LlmProviderTextResult(
         provider="deepseek",
         model="deepseek-chat",
         raw_text="not valid json at all",
-        parsed_json=None,
         usage=LlmProviderUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         finish_reason="stop",
         request_payload_redacted={},
         response_payload={},
         latency_ms=5,
+        transport_ok=True,
     )
     mock_provider = MagicMock()
-    mock_provider.complete_json = AsyncMock(return_value=response)
+    mock_provider.complete_text = AsyncMock(return_value=response)
 
     with patch("app.services.llm_connection_extraction_service.get_llm_provider", return_value=mock_provider), \
          patch("app.services.llm_connection_extraction_service.get_deepseek_runtime_config") as cfg, \

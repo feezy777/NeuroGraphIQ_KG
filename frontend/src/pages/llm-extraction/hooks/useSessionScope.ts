@@ -42,9 +42,9 @@ export function useSessionScope() {
     return {
       resource_id: sess.resource_id ?? '',
       batch_id: sess.batch_id ?? '',
-      source_atlas: '',
-      granularity_level: '',
-      granularity_family: '',
+      source_atlas: 'AAL3',
+      granularity_level: 'macro',
+      granularity_family: 'macro_clinical',
       source_version: '',
     }
   })

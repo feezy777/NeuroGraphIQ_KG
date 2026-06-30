@@ -115,12 +115,13 @@ export function MirrorKgPanel({
     refresh()
   }
 
+  // Always load all data (limit=0 = unlimited on backend)
   const baseParams = useMemo(() => ({
     batch_id: batchId || undefined,
     resource_id: resourceId || undefined,
     source_atlas: sourceAtlas || undefined,
     granularity_level: granularityLevel || undefined,
-    limit: 500,
+    limit: 0,
   }), [batchId, resourceId, sourceAtlas, granularityLevel])
 
   const resetKeys = [mirrorTab, batchId, resourceId, sourceAtlas, granularityLevel, tick]
@@ -142,7 +143,7 @@ export function MirrorKgPanel({
     [JSON.stringify(baseParams), tick, mirrorTab],
   )
   const { data: evData, loading: evLoading, error: evError } = useData(
-    () => listMirrorEvidence({ limit: 100 }),
+    () => listMirrorEvidence({ limit: 0 }),
     [tick, mirrorTab],
   )
 
@@ -209,6 +210,7 @@ export function MirrorKgPanel({
           loading={tabState.loading}
           error={tabState.error}
           emptyText={t('dataCenter.noData')}
+          pageSize={999999}
           onOpenDetail={setSelected}
           onRefresh={handleCompletionDone}
           onDeleteSelected={handleBulkDelete}

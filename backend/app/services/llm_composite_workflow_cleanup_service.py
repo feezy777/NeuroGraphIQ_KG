@@ -98,25 +98,39 @@ async def cleanup_composite_workflow_artifacts(
             .all()
         )
 
-    llm_run_ids = await _collect_llm_run_ids(session, workflow_run_id, steps)
+    try:
+        llm_run_ids = await _collect_llm_run_ids(session, workflow_run_id, steps)
+    except Exception as exc:
+        logger.exception("[cleanup] _collect_llm_run_ids failed workflow_run_id=%s", workflow_run_id)
+        await session.rollback()
+        errors.append(str(exc)[:500])
+        return deleted, warnings, errors
+
     wf = str(workflow_run_id)
-    tag_filter_conn = or_(
-        MirrorRegionConnection.raw_payload_json["attributes"]["composite_workflow_run_id"].astext == wf,
-        MirrorRegionConnection.normalized_payload_json["attributes"]["composite_workflow_run_id"].astext == wf,
-    )
-    if llm_run_ids:
-        tag_filter_conn = or_(tag_filter_conn, MirrorRegionConnection.llm_run_id.in_(llm_run_ids))
 
-    conn_ids_q = select(MirrorRegionConnection.id).where(tag_filter_conn)
-    conn_ids = list((await session.execute(conn_ids_q)).scalars().all())
+    try:
+        tag_filter_conn = or_(
+            MirrorRegionConnection.raw_payload_json["attributes"]["composite_workflow_run_id"].astext == wf,
+            MirrorRegionConnection.normalized_payload_json["attributes"]["composite_workflow_run_id"].astext == wf,
+        )
+        if llm_run_ids:
+            tag_filter_conn = or_(tag_filter_conn, MirrorRegionConnection.llm_run_id.in_(llm_run_ids))
 
-    circuit_tag = or_(
-        MirrorRegionCircuit.raw_payload_json["attributes"]["composite_workflow_run_id"].astext == wf,
-        MirrorRegionCircuit.normalized_payload_json["attributes"]["composite_workflow_run_id"].astext == wf,
-    )
-    if llm_run_ids:
-        circuit_tag = or_(circuit_tag, MirrorRegionCircuit.llm_run_id.in_(llm_run_ids))
-    circuit_ids = list((await session.execute(select(MirrorRegionCircuit.id).where(circuit_tag))).scalars().all())
+        conn_ids_q = select(MirrorRegionConnection.id).where(tag_filter_conn)
+        conn_ids = list((await session.execute(conn_ids_q)).scalars().all())
+
+        circuit_tag = or_(
+            MirrorRegionCircuit.raw_payload_json["attributes"]["composite_workflow_run_id"].astext == wf,
+            MirrorRegionCircuit.normalized_payload_json["attributes"]["composite_workflow_run_id"].astext == wf,
+        )
+        if llm_run_ids:
+            circuit_tag = or_(circuit_tag, MirrorRegionCircuit.llm_run_id.in_(llm_run_ids))
+        circuit_ids = list((await session.execute(select(MirrorRegionCircuit.id).where(circuit_tag))).scalars().all())
+    except Exception as exc:
+        logger.exception("[cleanup] query phase failed workflow_run_id=%s", workflow_run_id)
+        await session.rollback()
+        errors.append(str(exc)[:500])
+        return deleted, warnings, errors
 
     try:
         if llm_run_ids:
@@ -195,18 +209,51 @@ async def cleanup_composite_workflow_artifacts(
             # matched" StaleDataError races. Instead we mark them cancelled so the
             # rows still exist (late ORM UPDATE will still match 1 row) and the
             # audit trail is preserved.
-            r = await session.execute(
-                update(LlmExtractionItem)
-                .where(LlmExtractionItem.run_id.in_(llm_run_ids))
-                .values(status=LlmItemStatus.cancelled)
-            )
-            deleted["llm_extraction_items"] = r.rowcount or 0
-            r = await session.execute(
-                update(LlmExtractionRun)
-                .where(LlmExtractionRun.id.in_(llm_run_ids))
-                .values(status=LlmRunStatus.cancelled, finished_at=datetime.now(timezone.utc))
-            )
-            deleted["llm_extraction_runs"] = r.rowcount or 0
+            #
+            # The DB constraint chk_llm_extraction_item_status originally did not
+            # include 'cancelled'. Migration 037 adds it. Fall back to 'skipped'
+            # if the DB constraint still rejects 'cancelled'.
+            try:
+                r = await session.execute(
+                    update(LlmExtractionItem)
+                    .where(LlmExtractionItem.run_id.in_(llm_run_ids))
+                    .values(status=LlmItemStatus.cancelled)
+                )
+                deleted["llm_extraction_items"] = r.rowcount or 0
+            except Exception:
+                await session.rollback()
+                logger.warning(
+                    "[cleanup] item cancelled status rejected (migration 037 not applied?), "
+                    "falling back to 'skipped' status for workflow_run_id=%s",
+                    workflow_run_id,
+                )
+                r = await session.execute(
+                    update(LlmExtractionItem)
+                    .where(LlmExtractionItem.run_id.in_(llm_run_ids))
+                    .values(status=LlmItemStatus.skipped)
+                )
+                deleted["llm_extraction_items"] = r.rowcount or 0
+
+            try:
+                r = await session.execute(
+                    update(LlmExtractionRun)
+                    .where(LlmExtractionRun.id.in_(llm_run_ids))
+                    .values(status=LlmRunStatus.cancelled, finished_at=datetime.now(timezone.utc))
+                )
+                deleted["llm_extraction_runs"] = r.rowcount or 0
+            except Exception:
+                await session.rollback()
+                logger.warning(
+                    "[cleanup] run cancelled status rejected for workflow_run_id=%s, "
+                    "falling back to 'failed'",
+                    workflow_run_id,
+                )
+                r = await session.execute(
+                    update(LlmExtractionRun)
+                    .where(LlmExtractionRun.id.in_(llm_run_ids))
+                    .values(status=LlmRunStatus.failed, finished_at=datetime.now(timezone.utc))
+                )
+                deleted["llm_extraction_runs"] = r.rowcount or 0
 
         for step in steps:
             if step.status not in {
@@ -223,7 +270,8 @@ async def cleanup_composite_workflow_artifacts(
         await session.flush()
     except Exception as exc:
         logger.exception("[cleanup] failed workflow_run_id=%s", workflow_run_id)
-        errors.append(str(exc))
+        await session.rollback()
+        errors.append(str(exc)[:500])
 
     if not conn_ids and not circuit_ids and not llm_run_ids:
         warnings.append(

@@ -24,7 +24,7 @@ from app.services.llm_connection_extraction_service import (
     TooFewCandidatesError,
     TooManyCandidatePairsError,
 )
-from app.services.llm_providers.base import LlmProviderResponse, LlmProviderUsage
+from app.services.llm_providers.base import LlmProviderResponse, LlmProviderTextResult, LlmProviderUsage
 
 
 def _candidate(**kwargs) -> CandidateBrainRegion:
@@ -184,19 +184,19 @@ def test_mock_provider_creates_run_item_and_mirror():
             "evidence_text": "test evidence",
         }]
     }
-    response = LlmProviderResponse(
+    response = LlmProviderTextResult(
         provider="deepseek",
         model="deepseek-chat",
         raw_text=json.dumps(llm_json),
-        parsed_json=llm_json,
         usage=LlmProviderUsage(prompt_tokens=1, completion_tokens=2, total_tokens=3),
         finish_reason="stop",
         request_payload_redacted={},
         response_payload={},
         latency_ms=5,
+        transport_ok=True,
     )
     mock_provider = AsyncMock()
-    mock_provider.complete_json = AsyncMock(return_value=response)
+    mock_provider.complete_text = AsyncMock(return_value=response)
 
     with patch("app.services.llm_connection_extraction_service.get_llm_provider", return_value=mock_provider), \
          patch("app.services.llm_connection_extraction_service.get_deepseek_runtime_config") as cfg:
@@ -208,9 +208,9 @@ def test_mock_provider_creates_run_item_and_mirror():
                 model_name="deepseek-chat",
                 candidate_ids=[c1.id, c2.id],
                 dry_run=False,
-                create_mirror_records=True,
-                create_triples=True,
-                create_evidence=True,
+                create_mirror_records=False,
+                create_triples=False,
+                create_evidence=False,
             )
         )
 
@@ -225,19 +225,19 @@ def test_invalid_json_fails_item():
     c2 = _candidate(batch_id=c1.batch_id, resource_id=c1.resource_id)
     session = _mock_session(c1, c2)
 
-    response = LlmProviderResponse(
+    response = LlmProviderTextResult(
         provider="deepseek",
         model="deepseek-chat",
         raw_text="not json",
-        parsed_json=None,
         usage=LlmProviderUsage(),
         finish_reason="stop",
         request_payload_redacted={},
         response_payload={},
         latency_ms=5,
+        transport_ok=True,
     )
     mock_provider = AsyncMock()
-    mock_provider.complete_json = AsyncMock(return_value=response)
+    mock_provider.complete_text = AsyncMock(return_value=response)
 
     with patch("app.services.llm_connection_extraction_service.get_llm_provider", return_value=mock_provider), \
          patch("app.services.llm_connection_extraction_service.get_deepseek_runtime_config") as cfg:

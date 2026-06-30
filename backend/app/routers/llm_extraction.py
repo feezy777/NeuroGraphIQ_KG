@@ -1198,7 +1198,7 @@ async def list_extraction_prompt_templates(
     
     category=extraction returns circuit_to_functions, circuit_to_steps, circuit extraction prompts.
     """
-    from app.services.field_completion_prompt_engineering import list_extraction_prompt_template_items
+    from app.services.prompt_metadata import list_extraction_prompt_template_items
     raw = list_extraction_prompt_template_items()
     if category and category != "extraction":
         raw = [r for r in raw if r.get("category") == category]

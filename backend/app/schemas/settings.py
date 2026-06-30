@@ -14,7 +14,7 @@ class DeepSeekRuntimeSettings(BaseModel):
     base_url: str = "https://api.deepseek.com/v1"
     default_model: str = "deepseek-chat"
     api_key: str = ""
-    timeout_seconds: int = Field(default=30, ge=5, le=120)
+    timeout_seconds: int = Field(default=120, ge=5, le=300)
     max_batch_size: int = Field(default=20, ge=1, le=20)
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     max_tokens: int = Field(default=2000, ge=256, le=8192)

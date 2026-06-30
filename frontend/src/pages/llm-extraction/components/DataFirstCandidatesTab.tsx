@@ -53,6 +53,7 @@ interface Props {
   onBatchEnd?: () => void
   onSelectionChange?: (count: number) => void
   onSelectionIdsChange?: (ids: string[]) => void
+  pooledCandidateIds?: Set<string>
 }
 
 export function DataFirstCandidatesTab({
@@ -69,6 +70,7 @@ export function DataFirstCandidatesTab({
   onBatchEnd,
   onSelectionChange,
   onSelectionIdsChange,
+  pooledCandidateIds,
 }: Props) {
   const { t } = useI18n()
   const sess = readSessionIds()
@@ -137,7 +139,7 @@ export function DataFirstCandidatesTab({
     [filteredItems, page, pageSize],
   )
 
-  const getId = useCallback((item: CandidateBrainRegion) => item.id, [])
+  const getId = useCallback((item: CandidateBrainRegion) => item?.id ?? '', [])
 
   const selection = useBulkSelection({
     getId,
@@ -250,6 +252,22 @@ export function DataFirstCandidatesTab({
     },
   ], [t, onSelectCandidate])
 
+  const displayCols = useMemo(() => {
+    if (!pooledCandidateIds || pooledCandidateIds.size === 0) return cols
+    return [
+      {
+        key: 'pool_marker',
+        header: '',
+        render: (_: any, row: CandidateBrainRegion) =>
+          row && pooledCandidateIds.has(row.id) ? (
+            <span className="pool-row-marker" title="已在提取池中">🧠</span>
+          ) : null,
+        width: 32,
+      },
+      ...cols,
+    ] as Column<CandidateBrainRegion>[]
+  }, [cols, pooledCandidateIds])
+
   const executeBulk = async () => {
     setShowConfirm(false)
     if (!isCandidateBulkTask(selectedTask)) return
@@ -360,6 +378,7 @@ export function DataFirstCandidatesTab({
           <table className="llm-dense-table llm-candidate-table">
             <colgroup>
               <col style={{ width: 36 }} />
+              {pooledCandidateIds?.size ? <col style={{ width: 32 }} /> : null}
               <col style={{ width: 180 }} />
               <col style={{ width: 260 }} />
               <col style={{ width: 100 }} />
@@ -380,7 +399,7 @@ export function DataFirstCandidatesTab({
                     onChange={selection.togglePage}
                   />
                 </th>
-                {cols.map(col => (
+                {displayCols.map(col => (
                   <th
                     key={col.key}
                     className={col.key === 'actions' ? 'llm-table-action-cell' : undefined}
@@ -392,10 +411,10 @@ export function DataFirstCandidatesTab({
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={cols.length + 1}>{t('common.loading')}</td></tr>
+                <tr><td colSpan={displayCols.length + 1}>{t('common.loading')}</td></tr>
               )}
               {!loading && error && (
-                <tr><td colSpan={cols.length + 1}>
+                <tr><td colSpan={displayCols.length + 1}>
                   <div className="llm-table-error">
                     <span className="llm-inline-error">
                       {isLimitExceededError(error) ? t('llm.dataFirst.limitExceededError') : error}
@@ -410,18 +429,18 @@ export function DataFirstCandidatesTab({
                 </td></tr>
               )}
               {!loading && !error && pageItems.length === 0 && (
-                <tr><td colSpan={cols.length + 1}>{emptyMessage}</td></tr>
+                <tr><td colSpan={displayCols.length + 1}>{emptyMessage}</td></tr>
               )}
-              {!loading && !error && pageItems.map(row => (
-                <tr key={row.id} className="llm-table-row">
+              {!loading && !error && pageItems.filter(Boolean).map((row, idx) => (
+                <tr key={row?.id ?? `row-${idx}`} className="llm-table-row">
                   <td className="llm-table-check-cell">
                     <input
                       type="checkbox"
-                      checked={selection.isSelected(row.id)}
-                      onChange={() => selection.toggleOne(row.id)}
+                      checked={row ? selection.isSelected(row.id) : false}
+                      onChange={() => row && selection.toggleOne(row.id)}
                     />
                   </td>
-                  {cols.map(col => (
+                  {displayCols.map(col => (
                     <td
                       key={col.key}
                       className={col.key === 'actions' ? 'llm-table-action-cell' : undefined}

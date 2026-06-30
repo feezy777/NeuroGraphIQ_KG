@@ -32,7 +32,9 @@ export function DataCenterPagination({
             <span>{t('dataCenter.pagination.total', { total })}</span>
             <span>{t('dataCenter.pagination.range', { start: startIndex, end: endIndex })}</span>
             <span>{t('dataCenter.pagination.page', { page, totalPages })}</span>
-            <span className="data-center-pagination-pagesize">{t('dataCenter.pagination.pageSize')}</span>
+            <span className="data-center-pagination-pagesize">
+              {pageSize >= 999999 ? '全部显示' : t('dataCenter.pagination.pageSizeN', { n: pageSize })}
+            </span>
           </>
         )}
       </div>

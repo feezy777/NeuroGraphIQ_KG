@@ -1,4 +1,6 @@
 import { useState, useEffect, type ComponentType } from 'react'
+import { I18nProvider } from './i18n-context'
+import { WorkbenchLogProvider } from './logging/WorkbenchLogContext'
 import { WorkbenchLayout } from './layout/WorkbenchLayout'
 import { DashboardPage } from './pages/DashboardPage'
 import { ResourcesPage } from './pages/ResourcesPage'
@@ -60,8 +62,12 @@ export default function App() {
     : (ROUTES[basePath] ?? DashboardPage)
 
   return (
-    <WorkbenchLayout currentPath={path}>
-      <Page />
-    </WorkbenchLayout>
+    <I18nProvider>
+      <WorkbenchLogProvider>
+        <WorkbenchLayout currentPath={path}>
+          <Page />
+        </WorkbenchLayout>
+      </WorkbenchLogProvider>
+    </I18nProvider>
   )
 }

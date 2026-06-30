@@ -55,7 +55,15 @@ from app.services import llm_projection_function_extraction_service as proj_fn_s
 from app.services import mirror_kg_service
 from app.services.llm_extraction_prompt_engineering import CONNECTION_FAILURE_STATUSES
 from app.services.llm_status_utils import is_semantic_failure, is_semantic_no_edges
-from app.services.llm_workflow_cancel_registry import is_cancelling, mark_cancelling, cancel_tasks, clear as clear_cancel_registry
+from app.services.llm_workflow_cancel_registry import (
+    is_cancelling,
+    mark_cancelling,
+    cancel_tasks,
+    clear as clear_cancel_registry,
+    is_pause_requested,
+    mark_pause_requested,
+    clear_pause_requested,
+)
 from app.services.llm_workflow_event_log import get_recent_events, safe_append_workflow_event
 from app.services.llm_composite_workflow_cleanup_service import (
     cleanup_composite_workflow_artifacts,
@@ -162,6 +170,7 @@ PROVIDER_AUDIT_SUMMARY_KEYS: tuple[str, ...] = (
     "parsed_projection_count",
     "parsed_no_connection_count",
     "created_projection_count",
+    "updated_projection_count",
     "no_connection_count",
     "unprocessed_pair_count",
     "rejected_item_count",
@@ -176,6 +185,12 @@ PROVIDER_AUDIT_SUMMARY_KEYS: tuple[str, ...] = (
     "executed_pack_count",
     "skipped_debug_pack_count",
     "planned_model_call_count",
+    "average_pack_sec",
+    "estimated_remaining_sec",
+    "concurrency",
+    "active_pack_index",
+    "in_flight_pack_count",
+    "pack_progress_percent",
     "pack_summaries",
     "provider_audit",
     "errors",
@@ -208,6 +223,41 @@ def normalize_composite_request(request: CompositeWorkflowRunRequest) -> Composi
             data[key] = none_if_blank(data[key])
     normalized = CompositeWorkflowRunRequest.model_validate(data)
     return apply_debug_flags_to_request(normalized)
+
+
+async def resolve_composite_request_candidates(
+    session: AsyncSession,
+    request: CompositeWorkflowRunRequest,
+    *,
+    workflow_run: LlmCompositeWorkflowRun | None = None,
+) -> CompositeWorkflowRunRequest:
+    """Expand candidate_pool_id or persisted run JSON into candidate_ids for execution."""
+    if len(request.candidate_ids) >= 2:
+        return request
+    if request.candidate_pool_id:
+        from app.services.candidate_pool_service import resolve_pool_candidate_ids
+
+        pool_ids = await resolve_pool_candidate_ids(session, request.candidate_pool_id)
+        if len(pool_ids) >= 2:
+            data = request.model_dump()
+            data["candidate_ids"] = pool_ids
+            return normalize_composite_request(CompositeWorkflowRunRequest.model_validate(data))
+    if workflow_run is not None and workflow_run.candidate_ids_json:
+        hydrated: list[uuid.UUID] = []
+        for raw in workflow_run.candidate_ids_json:
+            try:
+                hydrated.append(uuid.UUID(str(raw)))
+            except (TypeError, ValueError):
+                continue
+        if len(hydrated) >= 2:
+            data = request.model_dump()
+            data["candidate_ids"] = hydrated
+            return normalize_composite_request(CompositeWorkflowRunRequest.model_validate(data))
+    if request.candidate_pool_id:
+        raise ValueError(
+            f"Pool {request.candidate_pool_id} has fewer than 2 candidates for extraction."
+        )
+    return request
 
 
 def compute_progress_percent(steps: list[LlmCompositeWorkflowStep]) -> float:
@@ -661,13 +711,12 @@ def _merge_connection_provider_audit_into_summary(
     )
 
     merged = dict(summary)
-    if existing_summary:
-        for key in PROVIDER_AUDIT_SUMMARY_KEYS:
-            val = existing_summary.get(key)
-            if val not in (None, {}, []):
-                merged[key] = val
-
     if conn_step is None:
+        if existing_summary:
+            for key in PROVIDER_AUDIT_SUMMARY_KEYS:
+                val = existing_summary.get(key)
+                if val not in (None, {}, []):
+                    merged[key] = val
         return merged
 
     conn_resp = dict(conn_step.response_json or {})
@@ -861,6 +910,12 @@ async def create_workflow_run(
     request: CompositeWorkflowRunRequest,
 ) -> LlmCompositeWorkflowRun:
     candidate_ids = list(request.candidate_ids)
+    if request.candidate_pool_id:
+        from app.services.candidate_pool_service import resolve_pool_candidate_ids
+        pool_ids = await resolve_pool_candidate_ids(session, request.candidate_pool_id)
+        if len(pool_ids) < 2:
+            raise ValueError(f"Pool {request.candidate_pool_id} has fewer than 2 candidates (got {len(pool_ids)})")
+        candidate_ids = pool_ids
     pair_count = compute_pair_count(candidate_ids)
     run = LlmCompositeWorkflowRun(
         workflow_type=request.workflow_type.value,
@@ -990,6 +1045,28 @@ _CANCELLED_RUN_STATUSES = {
     CompositeWorkflowStatus.cleanup_failed.value,
 }
 
+_PAUSE_RUN_STATUSES = {
+    CompositeWorkflowStatus.pause_requested.value,
+    CompositeWorkflowStatus.paused.value,
+}
+
+_WORKFLOW_CONTROL_STATUSES = _CANCELLED_RUN_STATUSES | _PAUSE_RUN_STATUSES
+
+
+async def sync_workflow_run_control_status(
+    session: AsyncSession,
+    run: LlmCompositeWorkflowRun,
+) -> str:
+    """Re-read workflow status from DB so pause/cancel from another session is not overwritten."""
+    db_status = (
+        await session.execute(
+            select(LlmCompositeWorkflowRun.status).where(LlmCompositeWorkflowRun.id == run.id)
+        )
+    ).scalar_one_or_none()
+    if db_status is not None:
+        run.status = db_status
+    return run.status
+
 
 async def is_workflow_cancelled_or_cancelling(
     session: AsyncSession,
@@ -1031,6 +1108,23 @@ async def finalize_workflow_run(
         existing_summary=existing_summary,
         conn_step=conn_step,
     )
+    await sync_workflow_run_control_status(session, run)
+    if run.status in _WORKFLOW_CONTROL_STATUSES:
+        summary.setdefault("events", existing_summary.get("events"))
+        run.result_summary_json = summary
+        flag_modified(run, "result_summary_json")
+        if run.status in _PAUSE_RUN_STATUSES or is_pause_requested(run.id):
+            summary["pause_requested"] = run.status == CompositeWorkflowStatus.pause_requested.value
+            summary["paused"] = run.status == CompositeWorkflowStatus.paused.value
+            if is_pause_requested(run.id) and run.status != CompositeWorkflowStatus.paused.value:
+                run.status = CompositeWorkflowStatus.pause_requested.value
+            run.result_summary_json = summary
+            flag_modified(run, "result_summary_json")
+        if not run.completed_at and run.status in _CANCELLED_RUN_STATUSES:
+            run.completed_at = _utcnow()
+        await session.flush()
+        return run
+
     run.completed_at = _utcnow()
 
     step_map = {s.step_key: s for s in steps}
@@ -1497,11 +1591,16 @@ async def run_connection_with_function_workflow(
     *,
     commit_progress: bool = False,
 ) -> tuple[list[LlmCompositeWorkflowStep], list[str], list[str]]:
-    async def _us(step: LlmCompositeWorkflowStep, **kwargs: Any) -> LlmCompositeWorkflowStep:
+    async def _us(
+        step: LlmCompositeWorkflowStep,
+        *,
+        step_commit: bool | None = None,
+        **kwargs: Any,
+    ) -> LlmCompositeWorkflowStep:
         return await update_workflow_step_status(
             session,
             step,
-            commit_progress=commit_progress,
+            commit_progress=commit_progress if step_commit is None else step_commit,
             **_sanitize_step_update_kwargs(kwargs),
         )
 
@@ -1543,6 +1642,8 @@ async def run_connection_with_function_workflow(
         llm_run: LlmExtractionRun,
         audit: Any,
         progress_summary: dict[str, Any] | None = None,
+        *,
+        persist: bool = True,
     ) -> None:
         from app.services.llm_extraction_prompt_engineering import ConnectionExecutionAudit
         from app.services.llm_connection_parse_diagnostics import (
@@ -1560,7 +1661,7 @@ async def run_connection_with_function_workflow(
         summary["provider_audit"] = provider_audit
         summary["pack_summaries"] = provider_audit.get("pack_summaries") or summary.get("pack_summaries") or []
         invariant_errors = validate_connection_progress_invariants(summary)
-        if invariant_errors:
+        if invariant_errors and persist:
             for err in invariant_errors:
                 await safe_append_workflow_event(
                     session,
@@ -1571,7 +1672,7 @@ async def run_connection_with_function_workflow(
                     message=err["message"],
                     data={"summary_keys": list(summary.keys())},
                     step=conn_step,
-                    commit=commit_progress,
+                    commit=False,
                 )
             run_errors = list(workflow_run.errors_json or [])
             for err in invariant_errors:
@@ -1626,6 +1727,7 @@ async def run_connection_with_function_workflow(
                 "pack_count": summary.get("pack_count", 0),
                 "status": "running",
             },
+            step_commit=False,
         )
         run_summary = dict(workflow_run.result_summary_json or {})
         run_summary.update({
@@ -1638,6 +1740,17 @@ async def run_connection_with_function_workflow(
             "failed_pack_count": summary.get("failed_pack_count", 0),
             "pack_count": summary.get("pack_count", 0),
             "processed_pack_count": summary.get("processed_pack_count", 0),
+            "parsed_projection_count": summary.get("parsed_projection_count", 0),
+            "parsed_no_connection_count": summary.get("parsed_no_connection_count", 0),
+            "created_projection_count": summary.get("created_projection_count", 0),
+            "updated_projection_count": summary.get("updated_projection_count", 0),
+            "no_connection_count": summary.get("no_connection_count", 0),
+            "average_pack_sec": summary.get("average_pack_sec"),
+            "estimated_remaining_sec": summary.get("estimated_remaining_sec"),
+            "concurrency": summary.get("concurrency", 1),
+            "active_pack_index": summary.get("active_pack_index"),
+            "in_flight_pack_count": summary.get("in_flight_pack_count", 0),
+            "pack_progress_percent": summary.get("pack_progress_percent"),
             "pack_summaries": summary.get("pack_summaries", []),
             "provider_audit": provider_audit,
             "fail_fast_triggered": summary.get("fail_fast_triggered"),
@@ -1657,8 +1770,19 @@ async def run_connection_with_function_workflow(
         )
         workflow_run.result_summary_json = run_summary
         flag_modified(workflow_run, "result_summary_json")
-        if commit_progress:
-            await session.commit()
+        if persist and commit_progress:
+            await sync_workflow_run_control_status(session, workflow_run)
+            try:
+                await session.commit()
+            except StaleDataError:
+                if is_cancelling(workflow_run.id):
+                    logger.warning(
+                        "[composite] late progress commit ignored after cancel run=%s",
+                        workflow_run.id,
+                    )
+                    await session.rollback()
+                else:
+                    raise
 
     try:
         conn_body = build_connection_extraction_request(request)
@@ -1710,6 +1834,26 @@ async def run_connection_with_function_workflow(
             mark_completed=True,
         )
         step1_result = result
+        await sync_workflow_run_control_status(session, workflow_run)
+        if workflow_run.status in _PAUSE_RUN_STATUSES or is_pause_requested(workflow_run.id):
+            exec_summary = result.execution_summary or {}
+            rs = dict(workflow_run.result_summary_json or {})
+            rs["paused"] = True
+            rs["pause_requested"] = False
+            rs["packs_cancelled"] = exec_summary.get("packs_cancelled", 0)
+            workflow_run.status = CompositeWorkflowStatus.paused.value
+            workflow_run.result_summary_json = rs
+            flag_modified(workflow_run, "result_summary_json")
+            await clear_pause_requested(workflow_run.id)
+            await _us(
+                fn_step,
+                status=CompositeStepStatus.skipped,
+                errors=["Workflow paused — skipping projection function extraction."],
+                mark_completed=True,
+            )
+            if commit_progress:
+                await session.commit()
+            return steps, warnings, errors
     except Exception as exc:
         logger.exception("[llm-composite-workflow][extract_connections] step failed")
         msg = normalize_step_error(exc)
@@ -2234,13 +2378,8 @@ async def _execute_composite_workflow(
         return await _recover_unhandled_workflow_failure(session, run.id, exc, commit=True)
 
     await session.refresh(run)
-    if run.status in {
-        CompositeWorkflowStatus.cancelling.value,
-        CompositeWorkflowStatus.cancelled.value,
-        CompositeWorkflowStatus.cleanup_in_progress.value,
-        CompositeWorkflowStatus.cleanup_done.value,
-        CompositeWorkflowStatus.cleanup_failed.value,
-    }:
+    await sync_workflow_run_control_status(session, run)
+    if run.status in _WORKFLOW_CONTROL_STATUSES:
         return _run_response(run, steps)
 
     await finalize_workflow_run(session, run, steps, warnings=warnings, errors=errors)
@@ -2295,6 +2434,7 @@ async def start_composite_workflow(
 ) -> CompositeWorkflowRunResponse:
     """Create workflow run + pending steps and return immediately (202 path)."""
     request = normalize_composite_request(request)
+    request = await resolve_composite_request_candidates(session, request)
     run, steps, warnings = await prepare_composite_workflow(session, request)
     run.status = CompositeWorkflowStatus.pending.value
     run.warnings_json = warnings
@@ -2326,6 +2466,11 @@ async def execute_composite_workflow_background(
                     workflow_run_id,
                 )
                 return
+            request = await resolve_composite_request_candidates(
+                session,
+                request,
+                workflow_run=run,
+            )
             warnings = list(run.warnings_json or [])
             await _execute_composite_workflow(
                 session,
@@ -2640,31 +2785,57 @@ async def cancel_composite_workflow(
     final_status = CompositeWorkflowStatus.cancelled
 
     if cleanup:
-        run.status = CompositeWorkflowStatus.cleanup_in_progress.value
-        await session.flush()
-        deleted, cleanup_warnings, cleanup_errors = await cleanup_composite_workflow_artifacts(
-            session, workflow_run_id, steps=steps
-        )
-        warnings.extend(cleanup_warnings)
-        errors.extend(cleanup_errors)
-        cancel_meta = {
-            "provider_calls_before_cancel": (run.result_summary_json or {}).get("provider_call_count", 0),
-            "cancel_reason": reason,
-        }
-        if errors:
+        try:
+            run.status = CompositeWorkflowStatus.cleanup_in_progress.value
+            await session.flush()
+            deleted, cleanup_warnings, cleanup_errors = await cleanup_composite_workflow_artifacts(
+                session, workflow_run_id, steps=steps
+            )
+            warnings.extend(cleanup_warnings)
+            errors.extend(cleanup_errors)
+            cancel_meta = {
+                "provider_calls_before_cancel": (run.result_summary_json or {}).get("provider_call_count", 0),
+                "cancel_reason": reason,
+            }
+            if errors:
+                final_status = CompositeWorkflowStatus.cleanup_failed
+            else:
+                final_status = CompositeWorkflowStatus.cleanup_done
+            await mark_workflow_cleanup_summary(
+                session,
+                run,
+                deleted=deleted,
+                cancel_reason=reason,
+                cancel_meta=cancel_meta,
+                warnings=warnings,
+                errors=errors,
+                final_status=final_status,
+            )
+        except Exception as cleanup_exc:
+            logger.exception("[cancel] cleanup raised — rolling back and writing cleanup_failed workflow_run_id=%s", workflow_run_id)
+            await session.rollback()
+            # Re-fetch run in a clean transaction so we can safely write the failure outcome.
+            run = await session.get(LlmCompositeWorkflowRun, workflow_run_id)
+            if run is None:
+                raise KeyError("Composite workflow run not found") from cleanup_exc
+            errors.append(str(cleanup_exc)[:500])
+            summary = dict(run.result_summary_json or {})
+            summary["cleanup"] = True
+            summary["cleanup_failed"] = True
+            summary["cancelled"] = True
+            summary["cancelled_at"] = _utcnow().isoformat()
+            summary["cancelled_by"] = "user"
+            summary["cancel_reason"] = reason
+            if errors:
+                summary["cleanup_errors"] = errors
+            if warnings:
+                summary["cleanup_warnings"] = warnings
+            run.result_summary_json = summary
+            run.status = CompositeWorkflowStatus.cleanup_failed.value
+            if not run.completed_at:
+                run.completed_at = _utcnow()
             final_status = CompositeWorkflowStatus.cleanup_failed
-        else:
-            final_status = CompositeWorkflowStatus.cleanup_done
-        await mark_workflow_cleanup_summary(
-            session,
-            run,
-            deleted=deleted,
-            cancel_reason=reason,
-            cancel_meta=cancel_meta,
-            warnings=warnings,
-            errors=errors,
-            final_status=final_status,
-        )
+            deleted = {}
     else:
         run.status = CompositeWorkflowStatus.cancelled.value
         run.completed_at = _utcnow()
@@ -2699,14 +2870,27 @@ async def pause_composite_workflow(
     *,
     reason: str = "user_paused",
 ) -> CompositeWorkflowCancelResponse:
-    """Pause a running composite workflow. Processing stops after the current pack."""
+    """Pause a running composite workflow. Processing stops after the current pack.
+
+    Uses a dedicated *pause* flag (NOT the cancel flag) so the worker stops
+    scheduling new packs but does NOT delete mirror data or trigger cleanup.
+    """
     run = await session.get(LlmCompositeWorkflowRun, workflow_run_id)
     if run is None:
         raise KeyError("Composite workflow run not found")
 
-    if run.status in (CompositeWorkflowStatus.succeeded.value, CompositeWorkflowStatus.failed.value,
-                      CompositeWorkflowStatus.cancelled.value, CompositeWorkflowStatus.cleanup_done.value,
-                      CompositeWorkflowStatus.paused.value):
+    # Idempotency — terminal / already-paused states
+    terminal_or_paused = {
+        CompositeWorkflowStatus.succeeded.value,
+        CompositeWorkflowStatus.failed.value,
+        CompositeWorkflowStatus.partially_succeeded.value,
+        CompositeWorkflowStatus.cancelled.value,
+        CompositeWorkflowStatus.cleanup_done.value,
+        CompositeWorkflowStatus.cleanup_failed.value,
+        CompositeWorkflowStatus.pause_requested.value,
+        CompositeWorkflowStatus.paused.value,
+    }
+    if run.status in terminal_or_paused:
         return CompositeWorkflowCancelResponse(
             workflow_run_id=workflow_run_id,
             status=CompositeWorkflowStatus(run.status),
@@ -2716,21 +2900,86 @@ async def pause_composite_workflow(
             errors=[],
         )
 
-    await mark_cancelling(workflow_run_id)
-    run.status = CompositeWorkflowStatus.paused.value
+    # Set the in-process pause flag — NOT the cancel flag
+    await mark_pause_requested(workflow_run_id)
+
+    # Persist pause_requested immediately so frontend polling sees it
+    now_ts = datetime.now(timezone.utc).isoformat()
+    run.status = CompositeWorkflowStatus.pause_requested.value
     run.result_summary_json = {
         **(run.result_summary_json or {}),
+        "pause_requested": True,
         "pause_reason": reason,
-        "paused_at": datetime.now(timezone.utc).isoformat(),
+        "pause_requested_at": now_ts,
     }
     await session.flush()
     await session.commit()
+
+    logger.info(
+        "[composite-workflow][pause] run_id=%s reason=%s",
+        workflow_run_id,
+        reason,
+    )
     return CompositeWorkflowCancelResponse(
         workflow_run_id=workflow_run_id,
-        status=CompositeWorkflowStatus.paused,
+        status=CompositeWorkflowStatus.pause_requested,
         cleanup=False,
         deleted={},
         warnings=[],
+        errors=[],
+    )
+
+async def resume_composite_workflow(
+    session: AsyncSession,
+    workflow_run_id: uuid.UUID,
+) -> CompositeWorkflowCancelResponse:
+    """Resume a paused / pause_requested composite workflow.
+
+    From *pause_requested*: clears the flag so the worker continues scheduling.
+    From *paused*: returns unsupported_resume (packs already fully drained).
+    Other states: returns current terminal status.
+    """
+    run = await session.get(LlmCompositeWorkflowRun, workflow_run_id)
+    if run is None:
+        raise KeyError("Composite workflow run not found")
+
+    if run.status == CompositeWorkflowStatus.paused.value:
+        await clear_pause_requested(workflow_run_id)
+        return CompositeWorkflowCancelResponse(
+            workflow_run_id=workflow_run_id,
+            status=CompositeWorkflowStatus.paused,
+            cleanup=False,
+            deleted={},
+            warnings=["Resume not supported — workflow is fully paused; all packs already drained."],
+            errors=[],
+        )
+
+    if run.status == CompositeWorkflowStatus.pause_requested.value:
+        await clear_pause_requested(workflow_run_id)
+        run.status = CompositeWorkflowStatus.running.value
+        rs = dict(run.result_summary_json or {})
+        rs["pause_requested"] = False
+        rs["resumed_at"] = datetime.now(timezone.utc).isoformat()
+        run.result_summary_json = rs
+        await session.flush()
+        await session.commit()
+        logger.info("[composite-workflow][resume] run_id=%s resumed", workflow_run_id)
+        return CompositeWorkflowCancelResponse(
+            workflow_run_id=workflow_run_id,
+            status=CompositeWorkflowStatus.running,
+            cleanup=False,
+            deleted={},
+            warnings=[],
+            errors=[],
+        )
+
+    # Terminal / unknown state — cannot resume
+    return CompositeWorkflowCancelResponse(
+        workflow_run_id=workflow_run_id,
+        status=CompositeWorkflowStatus(run.status),
+        cleanup=False,
+        deleted={},
+        warnings=[f"Cannot resume from status: {run.status}"],
         errors=[],
     )
 

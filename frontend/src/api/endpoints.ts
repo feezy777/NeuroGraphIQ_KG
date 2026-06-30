@@ -435,6 +435,66 @@ export const fetchCandidateStatusSummary = (p?: { batch_id?: string; resource_id
   getJson<CandidateStatusSummary>('/api/candidates/brain-regions/status-summary', p)
 export const fetchCandidateOptions = () => getJson<Record<string, string[]>>('/api/candidates/options')
 
+// ── Candidate Pools ──────────────────────────────────────────────────────────
+export interface CandidatePoolMember {
+  id: string
+  pool_id: string
+  candidate_id: string
+  added_at: string
+  added_by: string | null
+}
+
+export interface CandidatePool {
+  id: string
+  name: string | null
+  resource_id: string | null
+  batch_id: string | null
+  source_atlas: string
+  granularity_level: string
+  granularity_family: string | null
+  candidate_count: number
+  pair_count: number
+  status: string
+  created_at: string
+  updated_at: string
+  memberships: CandidatePoolMember[]
+}
+
+export interface CandidatePoolCreateRequest {
+  name?: string | null
+  candidate_ids: string[]
+  resource_id?: string | null
+  batch_id?: string | null
+  source_atlas: string
+  granularity_level: string
+  granularity_family?: string | null
+}
+
+export interface CandidatePoolMembersRequest {
+  candidate_ids: string[]
+}
+
+export const createCandidatePool = (body: CandidatePoolCreateRequest) =>
+  postJson<CandidatePool>('/api/candidates/pools', body)
+
+export const replaceCandidatePool = (body: CandidatePoolCreateRequest) =>
+  postJson<CandidatePool>('/api/candidates/pools/replace', body)
+
+export const listCandidatePools = (params?: Record<string, string | number | undefined>) =>
+  getJson<{ items: CandidatePool[]; total: number }>('/api/candidates/pools', params)
+
+export const getCandidatePool = (poolId: string) =>
+  getJson<CandidatePool>(`/api/candidates/pools/${poolId}`)
+
+export const addPoolMembers = (poolId: string, body: CandidatePoolMembersRequest) =>
+  postJson<CandidatePool>(`/api/candidates/pools/${poolId}/members`, body)
+
+export const removePoolMembers = (poolId: string, body: CandidatePoolMembersRequest) =>
+  deleteJson<CandidatePool>(`/api/candidates/pools/${poolId}/members`, undefined, body)
+
+export const deleteCandidatePool = (poolId: string) =>
+  deleteJson<void>(`/api/candidates/pools/${poolId}`)
+
 // ── Rule Validation ───────────────────────────────────────────────────────────
 export interface RuleValidationRun {
   id: string
@@ -3202,6 +3262,10 @@ export interface CompositeWorkflowRunRequest {
   notes?: string | null
   debug_single_pack?: boolean
   debug_max_packs?: number | null
+  temperature?: number
+  max_tokens?: number
+  prompt_template_key?: string
+  prompt_overrides?: Record<string, string>
 }
 
 export interface CompositeWorkflowStepRead {
@@ -3382,6 +3446,12 @@ export const cancelCompositeWorkflow = (
 export const pauseCompositeWorkflow = (workflowRunId: string) =>
   postJson<CompositeWorkflowCancelResponse>(
     `/api/llm-extraction/composite-workflows/${workflowRunId}/pause`,
+    {},
+  )
+
+export const resumeCompositeWorkflow = (workflowRunId: string) =>
+  postJson<CompositeWorkflowCancelResponse>(
+    `/api/llm-extraction/composite-workflows/${workflowRunId}/resume`,
     {},
   )
 

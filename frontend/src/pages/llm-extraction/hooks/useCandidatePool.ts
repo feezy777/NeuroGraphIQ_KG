@@ -7,6 +7,7 @@ import {
   removePoolMembers,
   deleteCandidatePool,
   listCandidatePools,
+  replaceCandidatePool,
   type CandidatePool,
   type CandidatePoolMember,
 } from '../../../api/endpoints'
@@ -15,6 +16,13 @@ export interface PoolScope {
   sourceAtlas: string
   granularityLevel: string
   granularityFamily: string | null
+}
+
+export class PoolSetupError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PoolSetupError'
+  }
 }
 
 function scopeKey(s: PoolScope): string {
@@ -27,11 +35,9 @@ function isPoolNotFoundError(err: unknown): boolean {
   return msg.includes('Pool not found') || msg.includes('404')
 }
 
-async function safeDeletePool(poolId: string): Promise<void> {
-  try {
-    await deleteCandidatePool(poolId)
-  } catch (err) {
-    if (!isPoolNotFoundError(err)) throw err
+function logPoolDebug(label: string, data: Record<string, unknown>) {
+  if (import.meta.env.DEV) {
+    console.info(`[useCandidatePool] ${label}`, data)
   }
 }
 
@@ -130,40 +136,52 @@ export function useCandidatePool(scope: PoolScope | null) {
     }
   }, [scope, pool?.id, pooledCandidateIds, currentKey])
 
-  /** Replace pool contents with exactly these candidates (no accumulation). */
-  const setPoolCandidates = useCallback(async (candidateIds: string[]) => {
-    if (candidateIds.length < 2) return
-    if (!scope) {
-      const msg = '[useCandidatePool] setPoolCandidates: scope is null — poolScope not initialized yet'
-      console.warn(msg)
-      throw new Error(msg)
+  /** Replace pool contents with exactly these candidates (no accumulation). Returns the fresh pool. */
+  const setPoolCandidates = useCallback(async (
+    candidateIds: string[],
+    scopeOverride?: PoolScope | null,
+  ): Promise<CandidatePool> => {
+    const effectiveScope = scopeOverride ?? scope
+    const uniqueIds = [...new Set(candidateIds.filter(Boolean))]
+
+    if (uniqueIds.length < 2) {
+      throw new PoolSetupError('当前没有可加入提取池的候选脑区（至少需要 2 个）')
+    }
+    if (!effectiveScope?.sourceAtlas || !effectiveScope?.granularityLevel) {
+      throw new PoolSetupError('提取范围尚未就绪，请稍候再试')
     }
 
-    ++fetchGenRef.current  // invalidate any in-flight background fetch
+    const payload = {
+      candidate_ids: uniqueIds,
+      source_atlas: effectiveScope.sourceAtlas,
+      granularity_level: effectiveScope.granularityLevel,
+      granularity_family: effectiveScope.granularityFamily,
+    }
+
+    logPoolDebug('setPoolCandidates request', {
+      selectedIdsLength: uniqueIds.length,
+      atlas: payload.source_atlas,
+      granularity: payload.granularity_level,
+      granularityFamily: payload.granularity_family,
+      payload,
+    })
+
+    ++fetchGenRef.current
     try {
-      const existing = await listScopePools()
-      for (const item of existing) {
-        await safeDeletePool(item.id)
-      }
-      const created = await createCandidatePool({
-        candidate_ids: candidateIds,
-        source_atlas: scope.sourceAtlas,
-        granularity_level: scope.granularityLevel,
-        granularity_family: scope.granularityFamily,
+      const created = await replaceCandidatePool(payload)
+      const full = await getCandidatePool(created.id)
+      logPoolDebug('setPoolCandidates response', {
+        status: 'ok',
+        poolId: full.id,
+        candidateCount: full.candidate_count,
       })
-      // Always fetch and set the pool we just created — it is the
-      // authoritative state.  The generation bump above invalidates
-      // stale background fetches; no gen-check needed here because we
-      // know the created.id and want the latest data for it.
-      if (mountedRef.current) {
-        const full = await getCandidatePool(created.id)
-        if (mountedRef.current) setPool(full)
-      }
+      if (mountedRef.current) setPool(full)
+      return full
     } catch (err) {
       console.error('[useCandidatePool] setPoolCandidates failed:', err)
       throw err
     }
-  }, [scope, listScopePools, currentKey])
+  }, [scope, currentKey])
 
   const removeCandidate = useCallback(async (candidateId: string) => {
     if (!pool) return

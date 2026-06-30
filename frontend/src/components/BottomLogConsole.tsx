@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { ChevronDown, ChevronUp, Copy, Trash2, X } from 'lucide-react'
 import { useI18n } from '../i18n-context'
 import { useWorkbenchLog } from '../logging/useWorkbenchLog'
@@ -132,6 +132,27 @@ export function BottomLogConsole() {
     lastError,
   } = useWorkbenchLog()
 
+  const consoleRef = useRef<HTMLDivElement>(null)
+
+  // Dynamically set --log-console-actual-height on the layout parent
+  // so main content padding matches the actual console height
+  useEffect(() => {
+    const el = consoleRef.current
+    if (!el) return
+    const layout = el.closest('.layout') as HTMLElement | null
+    if (!layout) return
+
+    const updateHeight = () => {
+      const h = el.getBoundingClientRect().height
+      layout.style.setProperty('--log-console-actual-height', `${h}px`)
+    }
+
+    updateHeight()
+    const ro = new ResizeObserver(updateHeight)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [expanded, filteredLogs.length])
+
   const copyAll = useCallback(async () => {
     const text = logs.map(entryToText).join('\n\n---\n\n')
     try {
@@ -147,6 +168,7 @@ export function BottomLogConsole() {
 
   return (
     <div
+      ref={consoleRef}
       className={`workbench-log-console${expanded ? ' expanded' : ' collapsed'}`}
       data-error-count={errorCount}
     >

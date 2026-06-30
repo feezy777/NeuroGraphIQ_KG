@@ -1,18 +1,23 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+// @refresh reset
+import { useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 import {
   getInitialLanguage,
   saveLanguage,
   translate,
   type Language,
 } from './i18n'
+import { I18nContext, type I18nContextValue } from './i18n-context-core'
 
-interface I18nContextValue {
-  language: Language
-  setLanguage: (language: Language) => void
-  t: (key: string, params?: Record<string, string | number>) => string
+export type { I18nContextValue }
+
+function buildFallbackI18n(): I18nContextValue {
+  const language = getInitialLanguage()
+  return {
+    language,
+    setLanguage: saveLanguage,
+    t: (key, params) => translate(language, key, params),
+  }
 }
-
-const I18nContext = createContext<I18nContextValue | null>(null)
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<Language>(getInitialLanguage)
@@ -37,8 +42,17 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
 export function useI18n(): I18nContextValue {
   const ctx = useContext(I18nContext)
-  if (!ctx) {
-    throw new Error('useI18n must be used within I18nProvider')
+  if (ctx) {
+    return ctx
   }
-  return ctx
+
+  if (import.meta.env.DEV) {
+    console.warn(
+      '[useI18n] Missing I18nProvider — using fallback translations. '
+      + 'If this persists after a hard refresh, check App.tsx provider wiring.',
+    )
+    return buildFallbackI18n()
+  }
+
+  throw new Error('useI18n must be used within I18nProvider')
 }

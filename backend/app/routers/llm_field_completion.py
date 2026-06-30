@@ -70,7 +70,7 @@ async def related_targets(
 
 @router.get("/prompt-templates", response_model=FieldCompletionPromptTemplateListResponse)
 async def list_prompt_templates():
-    from app.services.field_completion_prompt_engineering import list_field_completion_prompt_template_items
+    from app.services.prompt_metadata import list_field_completion_prompt_template_items
 
     raw = list_field_completion_prompt_template_items()
     return FieldCompletionPromptTemplateListResponse(items=raw)

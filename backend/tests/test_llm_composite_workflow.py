@@ -414,9 +414,13 @@ def test_circuit_workflow_96_candidates_no_scope_typeerror(client):
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert "unexpected keyword argument 'scope'" not in " ".join(data.get("errors", [])).lower()
-    mock_invoke.assert_awaited_once()
-    body = mock_invoke.await_args.args[1]
-    assert len(body.candidate_ids) == 96
+    assert mock_invoke.await_count >= 1
+    all_candidate_ids: list[uuid.UUID] = []
+    for call in mock_invoke.await_args_list:
+        req_body = call.args[1]
+        all_candidate_ids.extend(req_body.candidate_ids)
+        assert "scope" not in call.kwargs
+    assert len(set(str(cid) for cid in all_candidate_ids)) == 96
     steps = {s["step_key"]: s for s in data["steps"]}
     assert steps["extract_circuits"]["status"] == "succeeded"
 

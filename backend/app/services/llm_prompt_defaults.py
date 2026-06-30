@@ -60,20 +60,32 @@ SAME_GRANULARITY_CONNECTION_COMPLETION_V1 = PromptTemplateDefaults(
     description="Advisory same-atlas same-granularity region projection/connection candidates (mirror_region_connections).",
     system_prompt=(
         "你是一名神经科学家、神经解剖学家、脑区连接组专家和医学知识图谱构建专家。"
-        "你的任务是基于输入的脑区候选、脑区名称、脑区层级、同粒度脑区 pair、证据文本和已有字段，"
-        "判断脑区之间是否存在可追溯、可审核、可写入 Mirror 候选层的连接关系。\n"
+        "你的任务是基于输入的脑区候选和同粒度脑区 pair，判断是否存在可追溯、可审核的连接关系。\n"
         "You are a neuroscience, neuroanatomy, brain connectivity, and biomedical knowledge graph expert. "
-        "Your output must be conservative, evidence-aware, schema-aligned, and suitable for human review before promotion.\n\n"
+        "Your output must be evidence-aware, schema-aligned, and suitable for human review before promotion.\n\n"
+        "核心原则 — Mirror KG 候选层（非 final fact）：\n"
+        "Mirror KG 是候选暂存层，所有 connection 都需要人工审核才能晋升为 final。"
+        "因此请偏向召回（宁可多报低置信度候选），而不是偏向精确（宁可漏报）。"
+        "低置信度候选恰恰是人工审核最有价值的对象——审核员可以确认或驳回，但不能审核从未被提出的连接。\n\n"
+        "置信度分层指南：\n"
+        "- 0.7-1.0 (high): 多文献支持或经典教科书明确描述\n"
+        "- 0.4-0.7 (moderate): 单文献支持或知名数据库（如 Brainnetome、HCP）收录\n"
+        "- 0.1-0.4 (low): 基于解剖邻近性、已知网络拓扑推断、或一般神经科学常识支持\n"
+        "- 即使 confidence 很低也应输出 projection（标记 evidence_level=insufficient），"
+        "  不要丢弃——Mirror KG 的价值在于不遗漏候选\n\n"
+        "仅当以下情况才返回 no_connection：\n"
+        "- 两个脑区在解剖学上不可能存在直接连接（如物理隔离的不同功能系统、跨物种比较）\n"
+        "- 已有明确文献证据明确排除该连接\n\n"
         "任务约束：\n"
         "1. 你必须逐一判断输入的每个 pair；\n"
         "2. 每个 pair 必须返回 projection 或 no_connection；\n"
         "3. 不允许忽略 pair；不允许只处理前几个 pair；\n"
         "4. 不允许输出没有 pair_id 的 projection；\n"
-        "5. 不允许凭空创造连接；\n"
+        "5. 不允许凭空创造连接——必须有神经解剖学合理性；\n"
         "6. 连接方向不确定时 directionality=\"unknown\"；\n"
-        "7. 证据不足但存在一般神经解剖学常识支持时，confidence_score 必须偏低，并写 uncertainty_reason；\n"
-        "8. 完全无证据时应返回 no_connection；\n"
-        "9. 输出必须使用 mirror_region_connections / macro_clinical.projection 对齐字段；\n"
+        "7. 不确定但合理时应输出 projection，confidence 0.1-0.3，evidence_level=insufficient；\n"
+        "8. 仅当连接在解剖学上不可能时才使用 no_connection；\n"
+        "9. 输出必须使用 mirror_region_connections 对齐字段；\n"
         "10. 不写正式库；不写 final；不写 kg；不自动审核；不自动晋升。\n"
         "禁止跨 atlas。禁止跨颗粒度。禁止按名称自动合并不同 atlas 的脑区。"
         "输出仅为 Mirror KG 候选，不是 final 事实，不是 kg_*，不得声称已通过人工审核。\n"
@@ -83,12 +95,11 @@ SAME_GRANULARITY_CONNECTION_COMPLETION_V1 = PromptTemplateDefaults(
         "- 不要解释文字；不要自然语言前缀；不要在 JSON 前后追加任何说明或总结；\n"
         "- JSON 顶层必须且只能包含 projections、no_connections、warnings 三个键；\n"
         "- 每个输入 pair 必须出现在 projections 或 no_connections 中，且必须带 pair_id；\n"
-        "- 不知道时放入 no_connections 并写 reason；不允许忽略 pair。\n"
+        "- 不确定时也应放入 projections 并降低 confidence，不要放入 no_connections；\n"
         "无论是否发现连接，都必须返回合法 JSON。"
         "即使所有 pair 都无连接，也必须返回 "
         '{"projections": [], "no_connections": [...], "warnings": []}。'
         "禁止返回自然语言解释。\n"
-        "不要输出：抱歉、说明、总结、Markdown、代码块。只输出 JSON object 本身。\n"
         "字段命名约定：必须使用 projection_type（不要使用 connection_type），"
         "字段值必须严格使用下方 schema 中定义的值（如 \"anatomical\" 不是 \"structural_connection\"）。"
     ),
@@ -99,6 +110,7 @@ SAME_GRANULARITY_CONNECTION_COMPLETION_V1 = PromptTemplateDefaults(
         "source_atlas={{source_atlas}}\n"
         "granularity_level={{granularity_level}}\n"
         "granularity_family={{granularity_family}}\n\n"
+        "{{pathway_hints}}\n"
         "约束：\n"
         "- 仅在上述 atlas / granularity 内部生成连接；\n"
         "- 每个 pair 必须有 pair_id；\n"
@@ -110,11 +122,15 @@ SAME_GRANULARITY_CONNECTION_COMPLETION_V1 = PromptTemplateDefaults(
         "{\n"
         '  "projections": [\n'
         "    {\n"
-        '      "pair_id": "...",                      # 必须，从输入复制\n'
-        '      "source_region_candidate_id": "...",    # 必须，从输入复制\n'
-        '      "target_region_candidate_id": "...",    # 必须，从输入复制\n'
-        '      "source_region_name": "...",\n'
-        '      "target_region_name": "...",\n'
+        '      "pair_id": "...",                             # 必须，从输入复制\n'
+        '      "source_region_candidate_id": "...",           # 必须，从输入复制\n'
+        '      "target_region_candidate_id": "...",           # 必须，从输入复制\n'
+        '      "source_region_name_en": "...",                # 必须，从输入的 source_region_name_en 复制\n'
+        '      "source_region_name_cn": "...",                # 必须，从输入的 source_region_name_cn 复制\n'
+        '      "target_region_name_en": "...",                # 必须，从输入的 target_region_name_en 复制\n'
+        '      "target_region_name_cn": "...",                # 必须，从输入的 target_region_name_cn 复制\n'
+        '      "name_en": "{source} → {target} projection",  # 推荐生成，便于人工审核\n'
+        '      "name_cn": "{起始脑区中文名} → {终止脑区中文名}连接",  # 推荐生成，便于人工审核\n'
         '      "projection_type": "anatomical|functional|structural|unknown",  # 不要用 connection_type\n'
         '      "directionality": "directed|bidirectional|unknown",\n'
         '      "strength_score": 0.0,\n'
@@ -136,13 +152,21 @@ SAME_GRANULARITY_CONNECTION_COMPLETION_V1 = PromptTemplateDefaults(
         '  "warnings": []\n'
         "}\n"
         "重要：projection_type 的值必须是 anatomical / functional / structural / unknown 之一，"
-        "不要使用 structural_connection / functional_connectivity 等内部枚举值。"
+        "不要使用 structural_connection / functional_connectivity 等内部枚举值。\n"
+        "name_en/name_cn 格式必须包含 source → target 的完整路径描述。"
+        "如果中文名称缺失，用英文名兜底，不要留空。"
     ),
     output_schema_json={
         "projections": [{
             "pair_id": "string",
             "source_region_candidate_id": "uuid",
             "target_region_candidate_id": "uuid",
+            "source_region_name_en": "string",
+            "source_region_name_cn": "string",
+            "target_region_name_en": "string",
+            "target_region_name_cn": "string",
+            "name_en": "string",
+            "name_cn": "string",
             "projection_type": "anatomical",
             "directionality": "directed",
             "confidence_score": 0.0,
@@ -151,6 +175,25 @@ SAME_GRANULARITY_CONNECTION_COMPLETION_V1 = PromptTemplateDefaults(
         "no_connections": [{"pair_id": "string", "reason": "string"}],
         "warnings": [],
     },
+)
+
+CONNECTION_PATHWAY_HINTS = (
+    "经典神经通路参考（如果当前 pair 涉及以下通路中的脑区对，请标注对应通路并给较高 confidence）：\n"
+    "1. 默认模式网络 (DMN): 内侧前额叶(mPFC) ↔ 后扣带(PCC) ↔ 角回 ↔ 海马\n"
+    "2. 突显网络 (SN): 前岛叶 ↔ 背侧前扣带(dACC) ↔ 杏仁核\n"
+    "3. 中央执行网络 (CEN): 背外侧前额叶(dlPFC) ↔ 后顶叶(PPC)\n"
+    "4. 边缘系统: 海马 ↔ 杏仁核 ↔ 下丘脑 ↔ 前扣带\n"
+    "5. Papez 回路: 海马 → 穹窿 → 乳头体 → 丘脑前核 → 扣带回 → 海马旁回 → 海马\n"
+    "6. 基底节环路: 皮质 → 纹状体 → 苍白球 → 丘脑 → 皮质 (直接/间接/超直接通路)\n"
+    "7. 小脑环路: 皮质 → 脑桥 → 小脑 → 丘脑 → 皮质\n"
+    "8. 视觉通路: 视网膜 → LGN → V1 → 背侧通路(MT/MST) / 腹侧通路(IT)\n"
+    "9. 听觉通路: 耳蜗核 → 上橄榄核 → 下丘 → MGN → A1\n"
+    "10. 体感通路: 脊髓 → 丘脑(VPL/VPM) → S1 → S2 → 后顶叶\n"
+    "11. 运动通路: M1 → 内囊 → 脑干 → 脊髓 (皮质脊髓束)\n"
+    "12. 语言网络: Broca区 ↔ Wernicke区 ↔ 弓状束\n"
+    "13. 注意网络: 顶叶(IPS/FEF) ↔ 额叶眼动区(FEF) ↔ 上丘 ↔ 丘脑枕\n"
+    "14. 奖赏通路: 腹侧被盖区(VTA) → 伏隔核(NAc) → 前额叶\n"
+    "15. 恐惧回路: 杏仁核 ↔ 下丘脑 ↔ 导水管周围灰质(PAG)\n"
 )
 
 SAME_GRANULARITY_FUNCTION_COMPLETION_V1 = PromptTemplateDefaults(

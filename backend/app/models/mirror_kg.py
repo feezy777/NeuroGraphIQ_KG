@@ -33,6 +33,10 @@ class MirrorRegionConnection(Base):
     )
     source_region_final_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     target_region_final_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    source_region_name_cn: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    source_region_name_en: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    target_region_name_cn: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    target_region_name_en: Mapped[str | None] = mapped_column(String(256), nullable=True)
     resource_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("atlas_resources.id", ondelete="SET NULL"), nullable=True
     )

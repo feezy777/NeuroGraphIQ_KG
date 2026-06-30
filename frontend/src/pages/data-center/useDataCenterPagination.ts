@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-export const DATA_CENTER_PAGE_SIZE = 20
+export const DATA_CENTER_PAGE_SIZE = 100
 
 export interface UseDataCenterPaginationOptions<T> {
   items: T[]

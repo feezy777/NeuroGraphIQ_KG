@@ -189,6 +189,10 @@ class MirrorRegionConnectionCreate(BaseModel):
     target_region_candidate_id: uuid.UUID | None = None
     source_region_final_id: uuid.UUID | None = None
     target_region_final_id: uuid.UUID | None = None
+    source_region_name_cn: str | None = None
+    source_region_name_en: str | None = None
+    target_region_name_cn: str | None = None
+    target_region_name_en: str | None = None
     resource_id: uuid.UUID | None = None
     batch_id: uuid.UUID | None = None
     llm_run_id: uuid.UUID | None = None
@@ -225,6 +229,10 @@ class MirrorRegionConnectionRead(BaseModel):
     target_region_candidate_id: uuid.UUID | None
     source_region_final_id: uuid.UUID | None
     target_region_final_id: uuid.UUID | None
+    source_region_name_cn: str | None = None
+    source_region_name_en: str | None = None
+    target_region_name_cn: str | None = None
+    target_region_name_en: str | None = None
     resource_id: uuid.UUID | None
     batch_id: uuid.UUID | None
     llm_run_id: uuid.UUID | None

@@ -8,13 +8,17 @@ import sys
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
 from app.routers import (
     candidate,
+    candidate_pool,
     database_admin,
     file_normalization,
     final_db_query,
@@ -45,6 +49,7 @@ from app.routers import (
 )
 
 _settings = get_settings()
+_log = logging.getLogger(__name__)
 
 BACKEND_VERSION = "4.7.0-mvp2-composite-workflow-stabilization"
 
@@ -64,6 +69,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _db_error_detail(exc: BaseException) -> dict[str, str]:
+    message = str(exc) or exc.__class__.__name__
+    hint = "Check PostgreSQL is running and DATABASE_URL is correct."
+    if sys.platform == "win32" and "ProactorEventLoop" in message:
+        hint = (
+            "On Windows, start the backend with "
+            "`backend/.venv/Scripts/python.exe run_server.py` (not raw uvicorn)."
+        )
+    return {
+        "code": "DATABASE_UNAVAILABLE",
+        "message": "Database connection failed.",
+        "hint": hint,
+        "error": message[:500],
+    }
+
+
+@app.exception_handler(SQLAlchemyError)
+async def sqlalchemy_exception_handler(_request: Request, exc: SQLAlchemyError) -> JSONResponse:
+    _log.exception("[api][database]")
+    return JSONResponse(status_code=503, content={"detail": _db_error_detail(exc)})
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -175,6 +202,9 @@ app.include_router(
 app.include_router(promotion.router, prefix="/api/promotion", tags=["Promotion"])
 app.include_router(
     promotion.candidate_router, prefix="/api/candidates", tags=["Candidate Promotion"]
+)
+app.include_router(
+    candidate_pool.router, prefix="/api/candidates", tags=["Candidate Pools"]
 )
 app.include_router(final_db_query.router, prefix="/api/final-regions", tags=["Final DB Query"])
 app.include_router(

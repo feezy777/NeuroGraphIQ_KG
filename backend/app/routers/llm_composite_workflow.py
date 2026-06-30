@@ -80,6 +80,7 @@ async def start_composite_workflow(
 ):
     try:
         normalized = composite_svc.normalize_composite_request(request)
+        normalized = await composite_svc.resolve_composite_request_candidates(session, normalized)
         logger.info(
             "[llm-composite-workflow][start] workflow_type=%s dry_run=%s debug_single_pack=%s debug_max_packs=%s candidate_count=%s",
             normalized.workflow_type.value,
@@ -97,6 +98,9 @@ async def start_composite_workflow(
         return _start_response_from_run(pending)
     except HTTPException:
         raise
+    except ValueError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("[llm-composite-workflow][start][unhandled]")
         await session.rollback()
@@ -237,6 +241,34 @@ async def pause_composite_workflow(
             detail={
                 "code": "COMPOSITE_WORKFLOW_PAUSE_ERROR",
                 "message": "Failed to pause composite workflow.",
+                "error": str(exc)[:500],
+            },
+        ) from exc
+
+
+@router.post(
+    "/composite-workflows/{workflow_run_id}/resume",
+    response_model=CompositeWorkflowCancelResponse,
+)
+async def resume_composite_workflow(
+    workflow_run_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+):
+    try:
+        return await composite_svc.resume_composite_workflow(
+            session,
+            workflow_run_id,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Composite workflow run not found") from None
+    except Exception as exc:
+        logger.exception("[llm-composite-workflow][resume] unhandled")
+        await session.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "COMPOSITE_WORKFLOW_RESUME_ERROR",
+                "message": "Failed to resume composite workflow.",
                 "error": str(exc)[:500],
             },
         ) from exc

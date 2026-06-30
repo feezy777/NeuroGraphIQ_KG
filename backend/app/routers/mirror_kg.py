@@ -58,10 +58,11 @@ async def list_connections(
     llm_item_id: uuid.UUID | None = None,
     candidate_id: uuid.UUID | None = None,
     search: str | None = None,
-    limit: int = Query(default=50, ge=1, le=5000),
+    limit: int = Query(default=100, ge=0, le=100000, description="0 = unlimited"),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_db),
 ):
+    _limit = None if limit == 0 else limit
     items, total = await mirror_kg_service.list_mirror_connections(
         session,
         resource_id=resource_id,
@@ -76,7 +77,7 @@ async def list_connections(
         llm_item_id=llm_item_id,
         candidate_id=candidate_id,
         search=search,
-        limit=limit,
+        limit=_limit,
         offset=offset,
     )
     return MirrorRegionConnectionListResponse(
@@ -161,10 +162,11 @@ async def list_functions(
     llm_item_id: uuid.UUID | None = None,
     candidate_id: uuid.UUID | None = None,
     search: str | None = None,
-    limit: int = Query(default=50, ge=1, le=5000),
+    limit: int = Query(default=100, ge=0, le=100000, description="0 = unlimited"),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_db),
 ):
+    _limit = None if limit == 0 else limit
     items, total = await mirror_kg_service.list_mirror_functions(
         session,
         resource_id=resource_id,
@@ -179,7 +181,7 @@ async def list_functions(
         llm_item_id=llm_item_id,
         candidate_id=candidate_id,
         search=search,
-        limit=limit,
+        limit=_limit,
         offset=offset,
     )
     return MirrorRegionFunctionListResponse(
@@ -255,10 +257,11 @@ async def list_circuits(
     llm_run_id: uuid.UUID | None = None,
     llm_item_id: uuid.UUID | None = None,
     search: str | None = None,
-    limit: int = Query(default=50, ge=1, le=5000),
+    limit: int = Query(default=100, ge=0, le=100000, description="0 = unlimited"),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_db),
 ):
+    _limit = None if limit == 0 else limit
     items, total = await mirror_kg_service.list_mirror_circuits(
         session,
         resource_id=resource_id,
@@ -272,7 +275,7 @@ async def list_circuits(
         llm_run_id=llm_run_id,
         llm_item_id=llm_item_id,
         search=search,
-        limit=limit,
+        limit=_limit,
         offset=offset,
     )
     return MirrorRegionCircuitListResponse(
@@ -351,10 +354,11 @@ async def list_triples(
     llm_item_id: uuid.UUID | None = None,
     predicate: str | None = None,
     search: str | None = None,
-    limit: int = Query(default=50, ge=1, le=5000),
+    limit: int = Query(default=100, ge=0, le=100000, description="0 = unlimited"),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_db),
 ):
+    _limit = None if limit == 0 else limit
     items, total = await mirror_kg_service.list_mirror_triples(
         session,
         resource_id=resource_id,
@@ -369,7 +373,7 @@ async def list_triples(
         llm_item_id=llm_item_id,
         predicate=predicate,
         search=search,
-        limit=limit,
+        limit=_limit,
         offset=offset,
     )
     return MirrorKgTripleListResponse(
@@ -493,10 +497,11 @@ async def list_evidence(
     llm_run_id: uuid.UUID | None = None,
     llm_item_id: uuid.UUID | None = None,
     search: str | None = None,
-    limit: int = Query(default=50, ge=1, le=5000),
+    limit: int = Query(default=100, ge=0, le=100000, description="0 = unlimited"),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_db),
 ):
+    _limit = None if limit == 0 else limit
     items, total = await mirror_kg_service.list_mirror_evidence(
         session,
         evidence_target_type=evidence_target_type,
@@ -506,7 +511,7 @@ async def list_evidence(
         llm_run_id=llm_run_id,
         llm_item_id=llm_item_id,
         search=search,
-        limit=limit,
+        limit=_limit,
         offset=offset,
     )
     return MirrorEvidenceRecordListResponse(

@@ -1,0 +1,6 @@
+- [Project Overview](memory/project-overview.md) — Stack, paths, governance chain, running services
+- [Connection Extraction Enhancements](memory/connection-extraction-enhancements.md) — Backend prompt + pool + concurrency + name columns
+- [Frontend Pool Modal](memory/frontend-pool-modal.md) — PoolExtractionModal, QuickExtractionCards, CSS fixes
+- [Bug Fixes](memory/bug-fixes.md) — MissingGreenlet, add-selected, log console, button styles
+- [User Preferences](memory/user-preferences.md) — Language, workflow, constraints, known stance
+- [Session 2026-06-26](memory/session-2026-06-26.md) — All fixes applied today: pool API, data recovery, display limits, cancel tx, extraction progress, name fields

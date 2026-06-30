@@ -1,8 +1,8 @@
 :root {
   --sidebar-w: 220px;
   --topbar-h: 52px;
-  --log-console-height-collapsed: 40px;
-  --log-console-height-expanded: 300px;
+  --log-console-height-collapsed: 44px;
+  --log-console-height-expanded: 320px;
   --bg: #f2f3f5;
   --sidebar-bg: #001529;
   --sidebar-text: rgba(255, 255, 255, 0.65);
@@ -113,7 +113,7 @@ code { font-family: 'Consolas', 'Menlo', monospace; font-size: 12px; }
   padding-bottom: calc(16px + var(--log-console-height-collapsed));
 }
 .layout.log-console-expanded .main.main-data-center {
-  padding-bottom: calc(16px + var(--log-console-height-expanded));
+  padding-bottom: calc(16px + var(--log-console-actual-height, var(--log-console-height-expanded)));
 }
 
 /* Page header */
@@ -2652,10 +2652,10 @@ tr:hover td { background: #fafbfc; cursor: pointer; }
 
 /* ??? Workbench Log Console ??????????????????????????????????????????????????? */
 .layout.log-console-collapsed .main {
-  padding-bottom: calc(22px + 40px);
+  padding-bottom: calc(22px + var(--log-console-height-collapsed));
 }
 .layout.log-console-expanded .main {
-  padding-bottom: calc(22px + 300px);
+  padding-bottom: calc(22px + var(--log-console-actual-height, var(--log-console-height-expanded)));
 }
 
 .workbench-log-console {
@@ -3239,7 +3239,7 @@ tr:hover td { background: #fafbfc; cursor: pointer; }
 }
 
 .layout.log-console-expanded .import-batches-management-layout {
-  min-height: calc(100vh - 320px);
+  min-height: calc(100vh - var(--log-console-actual-height, var(--log-console-height-expanded)));
 }
 
 .import-batches-list-pane {
@@ -6712,7 +6712,7 @@ tr:hover td { background: #fafbfc; cursor: pointer; }
   min-height: 0;
 }
 .layout.log-console-expanded .main.main-llm-data-first {
-  padding-bottom: calc(8px + var(--log-console-height-expanded));
+  padding-bottom: calc(8px + var(--log-console-actual-height, var(--log-console-height-expanded)));
 }
 
 .llm-data-first-page {
@@ -9677,6 +9677,62 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   background: #fff;
 }
 
+/* ── Wide modal variant ─────────────────────────────────────────────────── */
+.modal-panel.wide {
+  max-width: 900px;
+}
+
+/* ── Pool extraction modal ─────────────────────────────────────────────── */
+.pool-extraction-modal .modal-panel {
+  min-height: 520px;
+}
+
+/* ── Modal section cards ─────────────────────────────────────────────────── */
+.modal-section {
+  background: #f8f9fc;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+.modal-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 12px 0;
+}
+.modal-section-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #333;
+  margin-bottom: 6px;
+}
+.modal-section-row .label {
+  color: #888;
+  min-width: 100px;
+}
+.modal-section-row .value {
+  font-weight: 500;
+}
+
+/* ── Candidate Pool Bar ──────────────────────────────────────────────────── */
+
+.pool-bar-progress-track {
+  height: 6px;
+  background: #e0e7f0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.pool-bar-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2563eb, #3b82f6);
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
 /* ── Slider (range input) ──────────────────────────────────────────────── */
 input[type="range"] {
   -webkit-appearance: none;
@@ -10171,29 +10227,77 @@ input[type="range"]::-webkit-slider-thumb {
 }
 .llm-quick-card {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
+  flex-direction: column;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--white);
-  cursor: pointer;
   transition: all 0.15s;
-  text-align: left;
   flex: 1;
   min-width: 200px;
   box-shadow: var(--shadow);
+  overflow: hidden;
 }
-.llm-quick-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+.llm-quick-card-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.llm-quick-card-disabled .llm-quick-card-header {
+  cursor: pointer;
+}
+.llm-quick-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+.llm-quick-card-header:hover {
+  background: #fafafa;
+}
+.llm-quick-card-body {
+  padding: 0 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.2s ease;
+  max-height: 120px;
+  opacity: 1;
+}
+.llm-quick-card-body-collapsed {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  overflow: hidden;
 }
 .llm-quick-card-fn { border-left: 4px solid #722ed1; }
-.llm-quick-card-fn:hover { border-color: #722ed1; background: #f9f0ff; }
+.llm-quick-card-fn:hover { border-color: #722ed1; }
 .llm-quick-card-conn { border-left: 4px solid #1677ff; }
-.llm-quick-card-conn:hover { border-color: #1677ff; background: #e6f4ff; }
+.llm-quick-card-conn:hover { border-color: #1677ff; }
 .llm-quick-card-circuit { border-left: 4px solid #13c2c2; }
-.llm-quick-card-circuit:hover { border-color: #13c2c2; background: #e6fffb; }
-.llm-quick-icon { font-size: 22px; flex-shrink: 0; }
-.llm-quick-label { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; }
-.llm-quick-desc { font-size: 11px; color: var(--text-muted); }
+.llm-quick-card-circuit:hover { border-color: #13c2c2; }
+.llm-quick-icon { font-size: 20px; flex-shrink: 0; }
+.llm-quick-label { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; }
+.llm-quick-count { font-size: 11px; color: var(--text-muted); background: #f0f0f0; padding: 1px 8px; border-radius: 10px; }
+.llm-quick-toggle { font-size: 11px; color: #bbb; flex-shrink: 0; }
+.llm-quick-desc { font-size: 12px; color: var(--text-muted); margin: 0; line-height: 1.5; }
+.llm-quick-action-btn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid #d0d7e2;
+  background: #fff;
+  color: #555;
+  font-size: 12px;
+  cursor: pointer;
+  align-self: flex-start;
+  transition: all 0.15s;
+}
+.llm-quick-action-btn:hover:not(:disabled) {
+  border-color: #2563eb;
+  color: #2563eb;
+}
+.llm-quick-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -130,11 +130,13 @@ def test_debug_single_pack_executes_one_provider_call_and_captures_preview():
             )
         )
     summary = result.execution_summary or {}
-    assert mock_provider.complete_text.await_count == 1
-    assert summary["provider_call_count"] == 1
-    assert summary["prompt_sent_count"] == 1
-    assert summary["provider_success_count"] == 1
-    assert summary["parse_error_count"] == 1
+    # Now allows one retry even in debug mode (max_provider_attempts=2).
+    # The mock returns non-JSON text, so both attempts fail to parse.
+    assert mock_provider.complete_text.await_count == 2
+    assert summary["provider_call_count"] == 2
+    assert summary["prompt_sent_count"] == 2
+    assert summary["provider_success_count"] == 2
+    assert summary["parse_error_count"] == 1  # counted once after retry loop
     assert summary["provider_transport_error_count"] == 0
     assert summary["provider_empty_response_count"] == 0
     assert summary["executed_pack_count"] == 1
@@ -323,4 +325,4 @@ def test_planned_vs_executed_pack_count_with_many_pairs():
     assert summary["executed_pack_count"] == 1
     assert summary["planned_pack_count"] == len(packs)
     assert summary["skipped_debug_pack_count"] == len(packs) - 1
-    assert mock_provider.complete_text.await_count == 1
+    assert mock_provider.complete_text.await_count == 2  # retry with max_provider_attempts=2

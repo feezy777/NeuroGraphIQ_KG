@@ -9,17 +9,7 @@ from typing import Any
 
 from app.schemas.mirror_kg import ConnectionType, Directionality
 from app.services.field_completion_prompt_engineering import estimate_prompt_tokens
-
-EXTRACTION_PROMPT_DISPLAY_NAMES: dict[str, str] = {
-    "same_granularity_connection_completion_v1": (
-        "同粒度脑区连接提取（Same-granularity Brain Region Projection Extraction）"
-    ),
-    "connection_with_function": (
-        "连接与连接功能组合抽取（Projection and Projection Function Composite Extraction）"
-    ),
-    "projection_to_functions_v1": "连接功能抽取（Projection Function Extraction）",
-    "circuit_to_functions_extraction_v1": "回路功能抽取（Circuit-to-Functions Extraction）",
-}
+from app.services.prompt_metadata import prompt_display_name
 
 VALID_EVIDENCE_LEVELS = frozenset({"low", "moderate", "high", "insufficient"})
 VALID_PROJECTION_TYPES = frozenset({"anatomical", "functional", "structural", "unknown"})
@@ -104,10 +94,6 @@ class ConnectionExecutionAudit:
                 1 for p in self.pack_summaries if p.get("response_received")
             ),
         }
-
-
-def prompt_display_name(prompt_key: str) -> str | None:
-    return EXTRACTION_PROMPT_DISPLAY_NAMES.get(prompt_key)
 
 
 def make_pair_id(source_id: uuid.UUID, target_id: uuid.UUID) -> str:

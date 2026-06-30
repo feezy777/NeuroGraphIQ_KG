@@ -655,7 +655,8 @@ export function ExtractionResultModal({
   const providerAuditMessage = providerAudit.message
   const providerAuditTone = providerAudit.tone ?? 'info'
   const auditCounts = execSummary ? resolveProviderAuditCounts(execSummary) : null
-  const executedPackCount = Number(execSummary?.executed_pack_count ?? execSummary?.pack_count ?? 0)
+  const packCount = Number(execSummary?.pack_count ?? 0)
+  const executedPackCount = Number(execSummary?.executed_pack_count ?? 0)
   const plannedPackCount = Number(execSummary?.planned_pack_count ?? 0)
   const skippedDebugPackCount = Number(execSummary?.skipped_debug_pack_count ?? 0)
   const debugSinglePackEnabled = Boolean(execSummary?.debug_single_pack)
@@ -834,9 +835,9 @@ export function ExtractionResultModal({
                     ['schema_error_count', execSummary.schema_error_count],
                     ['failed_pack_count', counts.failedPackCount],
                     ['provider_empty_response_count', execSummary.provider_empty_response_count],
-                    ['pack_count', executedPackCount],
-                    ['planned_pack_count', plannedPackCount > 0 ? plannedPackCount : null],
+                    ['pack_count', packCount],
                     ['executed_pack_count', executedPackCount > 0 ? executedPackCount : null],
+                    ['planned_pack_count', plannedPackCount > 0 ? plannedPackCount : null],
                     ['skipped_debug_pack_count', skippedDebugPackCount > 0 ? skippedDebugPackCount : null],
                     ['processed_pair_count', execSummary.processed_pair_count],
                     ['created_projection_count', execSummary.created_projection_count],

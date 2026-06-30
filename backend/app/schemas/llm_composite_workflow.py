@@ -25,6 +25,7 @@ class CompositeWorkflowType(StrEnum):
 class CompositeWorkflowStatus(StrEnum):
     pending = "pending"
     running = "running"
+    pause_requested = "pause_requested"
     paused = "paused"
     cancelling = "cancelling"
     cancelled = "cancelled"
@@ -55,6 +56,10 @@ class CompositeWorkflowRunRequest(BaseModel):
     model_name: str | None = None
     dry_run: bool = True
     candidate_ids: list[uuid.UUID] = Field(default_factory=list)
+    candidate_pool_id: uuid.UUID | None = Field(
+        default=None,
+        description="When set, resolve candidate_ids from this pool instead of using the candidate_ids field"
+    )
     resource_id: uuid.UUID | None = None
     batch_id: uuid.UUID | None = None
     source_atlas: str | None = None
@@ -75,6 +80,8 @@ class CompositeWorkflowRunRequest(BaseModel):
     max_circuits: int | None = Field(default=None, ge=1, le=5000)
     max_tokens: int | None = Field(default=None, ge=256, le=8192)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    prompt_template_key: str | None = None
+    prompt_overrides: dict[str, str] | None = None
     parse_error_fail_fast_enabled: bool = True
     parse_error_fail_fast_threshold: int = Field(default=3, ge=1, le=20)
 

@@ -127,13 +127,16 @@ export async function patchJson<T>(path: string, body?: unknown, params?: QueryP
   return res.json() as Promise<T>
 }
 
-export async function deleteJson<T>(path: string, params?: QueryParams): Promise<T> {
+export async function deleteJson<T>(path: string, params?: QueryParams, body?: unknown): Promise<T> {
   const url = buildUrl(path, params)
   const res = await fetch(url, {
     method: 'DELETE',
-    headers: { Accept: 'application/json' },
+    headers: body !== undefined
+      ? { 'Content-Type': 'application/json', Accept: 'application/json' }
+      : { Accept: 'application/json' },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   })
-  if (!res.ok) return handleError(res, { url, method: 'DELETE' })
+  if (!res.ok) return handleError(res, { url, method: 'DELETE', requestBodyPreview: previewBody(body) })
   return res.json() as Promise<T>
 }
 
