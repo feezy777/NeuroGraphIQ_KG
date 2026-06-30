@@ -24,7 +24,7 @@ EXTRACTION_PROMPT_DISPLAY_NAMES: dict[str, str] = {
 VALID_EVIDENCE_LEVELS = frozenset({"low", "moderate", "high", "insufficient"})
 VALID_PROJECTION_TYPES = frozenset({"anatomical", "functional", "structural", "unknown"})
 VALID_DIRECTIONALITY = frozenset({"directed", "bidirectional", "unknown"})
-DEFAULT_PAIRS_PER_PACK = 20
+DEFAULT_PAIRS_PER_PACK = 30
 
 CONNECTION_FAILURE_STATUSES = frozenset({
     "failed",
@@ -52,6 +52,13 @@ class ConnectionExecutionAudit:
     parsed_no_connection_count: int = 0
     created_projection_count: int = 0
     updated_projection_count: int = 0
+    merged_projection_count: int = 0       # dedup-merged into existing Mirror connections
+    skipped_duplicate_count: int = 0       # exact duplicates skipped during write
+    no_connection_count: int = 0           # total pairs with no_connection outcome
+    succeeded_pack_count: int = 0          # packs completed without transport/parse failure
+    no_connection_pack_count: int = 0      # packs that succeeded but found zero connections
+    failed_pack_count: int = 0             # packs that failed (transport, parse, exception)
+    processed_pack_count: int = 0          # packs that finished provider call (success or failure)
     model_call_count: int = 0
     estimated_input_tokens: int = 0
     estimated_output_tokens: int = 0
@@ -79,6 +86,13 @@ class ConnectionExecutionAudit:
             "parsed_no_connection_count": self.parsed_no_connection_count,
             "created_projection_count": self.created_projection_count,
             "updated_projection_count": self.updated_projection_count,
+            "merged_projection_count": self.merged_projection_count,
+            "skipped_duplicate_count": self.skipped_duplicate_count,
+            "no_connection_count": self.no_connection_count,
+            "succeeded_pack_count": self.succeeded_pack_count,
+            "no_connection_pack_count": self.no_connection_pack_count,
+            "failed_pack_count": self.failed_pack_count,
+            "processed_pack_count": self.processed_pack_count,
             "model_call_count": self.model_call_count,
             "estimated_input_tokens": self.estimated_input_tokens,
             "estimated_output_tokens": self.estimated_output_tokens,
@@ -86,12 +100,6 @@ class ConnectionExecutionAudit:
             "schema_error_count": self.schema_error_count,
             "rejected_item_count": self.rejected_item_count,
             "pack_summaries": self.pack_summaries,
-            "failed_pack_count": sum(
-                1
-                for p in self.pack_summaries
-                if p.get("parse_error")
-                or p.get("parse_error_type") in {"json_decode_error", "schema_error"}
-            ),
             "response_received_count": sum(
                 1 for p in self.pack_summaries if p.get("response_received")
             ),
@@ -149,6 +157,42 @@ def build_compact_pair_records(
             "source_atlas": sc.source_atlas or first.source_atlas,
         })
     return records
+
+
+def score_pair_priority(
+    src_candidate: Any,
+    tgt_candidate: Any,
+) -> int:
+    """Score a candidate pair 0-100 for pack ordering. Higher = earlier pack.
+
+    No pairs are ever excluded — this only affects pack order.
+    """
+    score = 0
+
+    # Same laterality: +20
+    src_lat = getattr(src_candidate, "laterality", None)
+    tgt_lat = getattr(tgt_candidate, "laterality", None)
+    if src_lat and tgt_lat and src_lat == tgt_lat:
+        score += 20
+
+    # Both hemispheres (L-R or R-L): -10 (still evaluate, just later)
+    if src_lat and tgt_lat and src_lat != tgt_lat:
+        score -= 10
+
+    return score
+
+
+def order_pairs_by_priority(
+    pairs: list[tuple[uuid.UUID, uuid.UUID]],
+    candidate_map: dict[uuid.UUID, Any],
+) -> list[tuple[uuid.UUID, uuid.UUID]]:
+    """Sort pairs by descending priority score. No pairs are removed."""
+    scored = [
+        (score_pair_priority(candidate_map[a], candidate_map[b]), (a, b))
+        for a, b in pairs
+    ]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [pair for _, pair in scored]
 
 
 def pack_pair_records(
@@ -249,6 +293,12 @@ def _projection_record_to_connection(
         "pair_id": pair_id,
         "source_candidate_id": str(src),
         "target_candidate_id": str(tgt),
+        "source_region_name_en": proj.get("source_region_name_en"),
+        "source_region_name_cn": proj.get("source_region_name_cn"),
+        "target_region_name_en": proj.get("target_region_name_en"),
+        "target_region_name_cn": proj.get("target_region_name_cn"),
+        "name_en": proj.get("name_en"),
+        "name_cn": proj.get("name_cn"),
         "connection_type": _map_projection_type(
             proj.get("projection_type") or proj.get("relation_type") or proj.get("connection_type")
         ),
