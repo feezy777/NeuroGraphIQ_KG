@@ -15,6 +15,8 @@ import { HumanReviewPage } from './pages/HumanReviewPage'
 import { PromotionsPage } from './pages/PromotionsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { MirrorKgPage } from './pages/MirrorKgPage'
+import { BackgroundTaskCenterPage } from './pages/BackgroundTaskCenter'
+import { TaskDetailModalProvider } from './components/TaskDetailModal'
 
 const ROUTES: Record<string, ComponentType> = {
   '/': DashboardPage,
@@ -25,6 +27,7 @@ const ROUTES: Record<string, ComponentType> = {
   '/data-center': DataCenterPage,
   '/llm-extraction': LlmExtractionPage,
   '/mirror-kg': MirrorKgPage,
+  '/task-center': BackgroundTaskCenterPage,
   '/rule-validation': RuleValidationPage,
   '/human-review': HumanReviewPage,
   '/promotions': PromotionsPage,
@@ -63,11 +66,13 @@ export default function App() {
 
   return (
     <I18nProvider>
-      <WorkbenchLogProvider>
-        <WorkbenchLayout currentPath={path}>
-          <Page />
-        </WorkbenchLayout>
-      </WorkbenchLogProvider>
+      <TaskDetailModalProvider>
+        <WorkbenchLogProvider>
+          <WorkbenchLayout currentPath={path}>
+            <Page />
+          </WorkbenchLayout>
+        </WorkbenchLogProvider>
+      </TaskDetailModalProvider>
     </I18nProvider>
   )
 }

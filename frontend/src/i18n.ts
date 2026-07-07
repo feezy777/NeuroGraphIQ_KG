@@ -70,6 +70,7 @@ export const messages: Record<Language, Record<string, string>> = {
     'nav.rawMacro96': 'Raw Macro96 行',
     'nav.candidates': '候选脑区',
     'nav.llmExtraction': 'LLM 提取',
+    'nav.taskCenter': '任务中心',
     'nav.ruleValidation': '规则校验',
     'nav.humanReview': '人工审核',
     'nav.promotions': '晋升记录',

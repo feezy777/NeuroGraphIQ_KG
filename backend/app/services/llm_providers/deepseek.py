@@ -48,6 +48,10 @@ def extract_raw_text_from_response(body: Any, *, http_text: str = "") -> tuple[s
                     content = message.get("content")
                     if isinstance(content, str) and content.strip():
                         return content, False
+                    # v4-pro reasoning model: answer may be in reasoning_content
+                    reasoning = message.get("reasoning_content")
+                    if isinstance(reasoning, str) and reasoning.strip():
+                        return reasoning, False
                 delta = first.get("delta")
                 if isinstance(delta, dict):
                     content = delta.get("content")
@@ -190,7 +194,10 @@ class DeepSeekProvider:
                 headers=headers,
             )
 
-        resolved_timeout = timeout_seconds or config.timeout_seconds
+        # Unified timeout: all models >=120s, reasoning models >=180s
+        _MODEL_MIN_TIMEOUT = {'deepseek-v4-pro': 180, 'deepseek-reasoner': 180}
+        resolved_timeout = max(timeout_seconds or config.timeout_seconds or 120,
+                               _MODEL_MIN_TIMEOUT.get(use_model, 120))
         started = time.monotonic()
         logger.info(
             "[deepseek] POST chat/completions model=%s user_chars=%s json_mode=%s timeout=%ss",

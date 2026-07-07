@@ -19,6 +19,7 @@ from app.config import get_settings
 from app.routers import (
     candidate,
     candidate_pool,
+    connection_pool,
     database_admin,
     file_normalization,
     final_db_query,
@@ -26,6 +27,7 @@ from app.routers import (
     import_batches,
     llm_extraction,
     llm_field_completion,
+    llm_circuit_extraction,
     llm_composite_workflow,
     final_kg,
     final_macro_clinical_browser,
@@ -206,6 +208,9 @@ app.include_router(
 app.include_router(
     candidate_pool.router, prefix="/api/candidates", tags=["Candidate Pools"]
 )
+app.include_router(
+    connection_pool.router, prefix="/api/connection-pools", tags=["Connection Pools"]
+)
 app.include_router(final_db_query.router, prefix="/api/final-regions", tags=["Final DB Query"])
 app.include_router(
     llm_extraction.router, prefix="/api/llm-extraction", tags=["LLM Extraction"]
@@ -214,6 +219,11 @@ app.include_router(
     llm_field_completion.router,
     prefix="/api/llm-extraction/field-completion",
     tags=["Field Completion"],
+)
+app.include_router(
+    llm_circuit_extraction.router,
+    prefix="/api/llm-extraction/circuit-extraction",
+    tags=["Circuit Extraction"],
 )
 app.include_router(
     llm_composite_workflow.router, prefix="/api/llm-extraction", tags=["LLM Composite Workflow"]

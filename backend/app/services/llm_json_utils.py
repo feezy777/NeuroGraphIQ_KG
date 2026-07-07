@@ -204,7 +204,7 @@ def _score_parsed_value(value: Any) -> int:
         for key in value:
             if key in _SCHEMA_HINT_KEYS:
                 score += 10
-        if "projections" in value or "no_connections" in value:
+        if "projections" in value or "no_connections" in value or "circuits" in value:
             score += 25
         if "projection_functions" in value:
             score += 25

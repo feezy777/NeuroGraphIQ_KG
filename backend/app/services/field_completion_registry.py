@@ -164,10 +164,10 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
             "strength_score",    # formal; mirror col: strength
             "confidence_score",  # formal; mirror col: confidence
             "evidence_text",     # direct (mirror col same name)
+            "canonical_id",      # direct — auto-generated from source→target names
             "name_en",           # overlay
             "name_cn",           # overlay
             "description",       # overlay
-            "remark",            # overlay
             "source_db",         # overlay
             "status",            # overlay
         ),
@@ -181,7 +181,7 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
             "evidence_text": "evidence_text",
         },
         overlay_field_names=(
-            "name_en", "name_cn", "description", "remark",
+            "name_en", "name_cn", "description",
             "source_db", "status", "evidence_level",
         ),
         field_aliases=_aliases(
@@ -216,7 +216,6 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
             "confidence_score",   # formal; mirror col: confidence
             "evidence_text",      # direct
             "description",        # overlay
-            "remark",             # overlay
             "source_db",          # overlay
             "status",             # overlay
         ),
@@ -228,7 +227,7 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
         },
         overlay_field_names=(
             "function_term_cn", "function_domain", "function_role",
-            "effect_type", "description", "remark", "source_db", "status",
+            "effect_type", "description", "source_db", "status",
         ),
         field_aliases=_aliases(
             ("function_term", "function_term_en"),      # legacy
@@ -255,7 +254,7 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
         allowed_fields=(
             "id", "species_id", "canonical_start_region_id", "canonical_end_region_id",
             "data_source_id", "primary_evidence_id", "external_code",
-            "name_en", "name_cn", "circuit_class", "description", "remark",
+            "name_en", "name_cn", "circuit_class", "description",
             "attributes", "source_db", "status", "created_at", "updated_at",
         ),
         enrichable_fields=(
@@ -263,9 +262,9 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
             "data_source_id", "primary_evidence_id", "external_code",
             "name_en",           # formal; mirror col: circuit_name
             "name_cn",           # overlay
+            "canonical_id",      # direct — auto-generated from circuit_name
             "circuit_class",     # formal; mirror col: circuit_type
             "description",       # direct (same name)
-            "remark",            # overlay
             "attributes",        # overlay
             "source_db",         # overlay
             "status",            # overlay
@@ -280,7 +279,7 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
             "evidence_text": "evidence_text",
         },
         overlay_field_names=(
-            "name_cn", "remark", "attributes", "source_db", "status",
+            "name_cn", "attributes", "source_db", "status",
             "canonical_start_region_id", "canonical_end_region_id",
             "species_id", "data_source_id", "primary_evidence_id", "external_code",
         ),
@@ -318,7 +317,6 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
             "step_no",         # overlay (mirror has step_order, type differs)
             "role_in_circuit", # overlay (mirror has 'role')
             "description",     # direct
-            "remark",          # overlay
             "source_db",       # overlay
             "status",          # overlay
         ),
@@ -331,7 +329,7 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
         },
         overlay_field_names=(
             "step_name_cn", "step_no", "role_in_circuit",
-            "remark", "source_db", "status",
+            "source_db", "status",
         ),
         field_aliases=_aliases(
             ("step_name", "step_name_en"),     # legacy
@@ -364,7 +362,6 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
             "confidence_score",  # formal; mirror col: confidence
             "evidence_text",     # direct
             "description",       # overlay
-            "remark",            # overlay
             "source_db",         # overlay
             "status",            # overlay
         ),
@@ -376,7 +373,7 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
         },
         overlay_field_names=(
             "function_term_cn", "function_domain", "function_role",
-            "effect_type", "description", "remark", "source_db", "status",
+            "effect_type", "description", "source_db", "status",
         ),
         field_aliases=_aliases(
             ("function_term", "function_term_en"),   # legacy mirror field name
@@ -413,7 +410,7 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
             "function_term_en", "function_term_cn",
             "function_domain", "function_role", "effect_type",
             "confidence_score", "evidence_level",
-            "description", "remark",
+            "description",
             "source_db", "status",
         ),
         required_fields=("function_term_en", "function_term_cn", "status"),
@@ -427,7 +424,6 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
             "confidence_score": "confidence_score",
             "evidence_level": "evidence_level",
             "description": "description",
-            "remark": "remark",
             "source_db": "source_db",
             "status": "status",
             "evidence_text": "evidence_text",

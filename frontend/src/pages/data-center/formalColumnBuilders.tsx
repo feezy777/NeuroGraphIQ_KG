@@ -33,6 +33,15 @@ function formatCellValue(value: unknown, renderType?: string): ReactNode {
       </span>
     )
   }
+  if (renderType === 'canonical_id') {
+    const s = String(value)
+    return (
+      <span className="data-center-id-cell" title={s}>
+        <code>{s}</code>
+        <CopyButton value={s} />
+      </span>
+    )
+  }
   const s = String(value)
   if (s.length > 120) return `${s.slice(0, 117)}…`
   return s

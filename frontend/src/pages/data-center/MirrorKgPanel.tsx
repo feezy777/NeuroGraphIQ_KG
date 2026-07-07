@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useData } from '../../hooks/useData'
 import { useI18n } from '../../i18n-context'
 import {
@@ -67,6 +67,18 @@ export function MirrorKgPanel({
   const [circuitBundle, setCircuitBundle] = useState<CircuitBundleFieldCompletionGroup | null>(null)
   const [bundleWarnings, setBundleWarnings] = useState<string[]>([])
   const [overlayPatch, setOverlayPatch] = useState<OverlayPatch>({})
+  // Server-side pagination
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(200)
+  const [serverTotal, setServerTotal] = useState(0)
+
+  const handlePageSizeChange = useCallback((size: number) => {
+    setPageSize(size)
+    setPage(1)
+  }, [])
+
+  // Reset page when tab or filters change
+  useEffect(() => { setPage(1) }, [mirrorTab, batchId, resourceId, sourceAtlas, granularityLevel])
 
   const mapping = getFormalFieldMapping(TAB_TO_TYPE[mirrorTab])
   const refresh = () => setTick(x => x + 1)
@@ -94,6 +106,22 @@ export function MirrorKgPanel({
     }
   }, [mirrorTab])
 
+  const handleFetchAll = useCallback(async (): Promise<FormalRow[]> => {
+    const params: Record<string, any> = { limit: 0 }  // 0 = unlimited on backend
+    if (batchId) params.batch_id = batchId
+    if (resourceId) params.resource_id = resourceId
+    if (sourceAtlas) params.source_atlas = sourceAtlas
+    if (granularityLevel) params.granularity_level = granularityLevel
+    let result: any
+    if (mirrorTab === 'connections') result = await listMirrorConnections(params)
+    else if (mirrorTab === 'functions') result = await listMirrorFunctions(params)
+    else if (mirrorTab === 'circuits') result = await listMirrorCircuits(params)
+    else if (mirrorTab === 'triples') result = await listMirrorTriples(params)
+    else return []
+    const items = result?.items ?? []
+    return items.map((item: any) => ({ ...item, id: item.id ?? '' }))
+  }, [mirrorTab, batchId, resourceId, sourceAtlas, granularityLevel])
+
   const handleBulkDelete = useCallback(async (ids: string[]) => {
     const deleteFn = mirrorTab === 'connections' ? deleteMirrorConnection
       : mirrorTab === 'functions' ? deleteMirrorFunction
@@ -108,44 +136,70 @@ export function MirrorKgPanel({
     }
   }, [mirrorTab])
 
-  const handleCompletionDone = (patch?: OverlayPatch) => {
+  const handleCompletionDone = useCallback((patch?: OverlayPatch) => {
     if (patch && Object.keys(patch).length > 0) {
       setOverlayPatch(prev => mergeOverlayPatches(prev, patch))
     }
     refresh()
-  }
+  }, [])
 
-  // Always load all data (limit=0 = unlimited on backend)
+  const resetKeys = [mirrorTab, batchId, resourceId, sourceAtlas, granularityLevel, tick]
+
+  // Server-side pagination: compute offset from page
+  const offset = useMemo(() => (page - 1) * pageSize, [page, pageSize])
+
   const baseParams = useMemo(() => ({
     batch_id: batchId || undefined,
     resource_id: resourceId || undefined,
     source_atlas: sourceAtlas || undefined,
     granularity_level: granularityLevel || undefined,
-    limit: 0,
-  }), [batchId, resourceId, sourceAtlas, granularityLevel])
+    limit: pageSize,
+    offset,
+  }), [batchId, resourceId, sourceAtlas, granularityLevel, pageSize, offset])
 
-  const resetKeys = [mirrorTab, batchId, resourceId, sourceAtlas, granularityLevel, tick]
+  const connKey = useMemo(() => `${mirrorTab}-conn-${JSON.stringify(baseParams)}-${tick}`, [mirrorTab, baseParams, tick])
+  const funcKey = useMemo(() => `${mirrorTab}-func-${JSON.stringify(baseParams)}-${tick}`, [mirrorTab, baseParams, tick])
+  const circKey = useMemo(() => `${mirrorTab}-circ-${JSON.stringify(baseParams)}-${tick}`, [mirrorTab, baseParams, tick])
+  const tripleKey = useMemo(() => `${mirrorTab}-triple-${JSON.stringify(baseParams)}-${tick}`, [mirrorTab, baseParams, tick])
+  const evKey = useMemo(() => `${mirrorTab}-ev-${tick}-${page}-${pageSize}`, [mirrorTab, tick, page, pageSize])
 
+  // Only fetch the active tab — others stay null until switched
   const { data: connData, loading: connLoading, error: connError } = useData(
-    () => listMirrorConnections(baseParams),
-    [JSON.stringify(baseParams), tick, mirrorTab],
+    () => mirrorTab === 'connections' ? listMirrorConnections(baseParams) : Promise.resolve(null as any),
+    [connKey],
   )
   const { data: funcData, loading: funcLoading, error: funcError } = useData(
-    () => listMirrorFunctions(baseParams),
-    [JSON.stringify(baseParams), tick, mirrorTab],
+    () => mirrorTab === 'functions' ? listMirrorFunctions(baseParams) : Promise.resolve(null as any),
+    [funcKey],
   )
   const { data: circData, loading: circLoading, error: circError } = useData(
-    () => listMirrorCircuits(baseParams),
-    [JSON.stringify(baseParams), tick, mirrorTab],
+    () => mirrorTab === 'circuits' ? listMirrorCircuits(baseParams) : Promise.resolve(null as any),
+    [circKey],
   )
   const { data: tripleData, loading: tripleLoading, error: tripleError } = useData(
-    () => listMirrorTriples(baseParams),
-    [JSON.stringify(baseParams), tick, mirrorTab],
+    () => mirrorTab === 'triples' ? listMirrorTriples(baseParams) : Promise.resolve(null as any),
+    [tripleKey],
   )
   const { data: evData, loading: evLoading, error: evError } = useData(
-    () => listMirrorEvidence({ limit: 0 }),
-    [tick, mirrorTab],
+    () => mirrorTab === 'evidence' ? listMirrorEvidence({ limit: pageSize, offset }) : Promise.resolve(null as any),
+    [evKey],
   )
+
+  // Derive serverTotal from active tab's API response
+  const activeTotal = useMemo(() => {
+    const data = mirrorTab === 'connections' ? connData
+      : mirrorTab === 'functions' ? funcData
+      : mirrorTab === 'circuits' ? circData
+      : mirrorTab === 'triples' ? tripleData
+      : mirrorTab === 'evidence' ? evData
+      : null
+    return (data as any)?.total ?? 0
+  }, [mirrorTab, connData, funcData, circData, tripleData, evData])
+
+  // Keep serverTotal in sync
+  useEffect(() => {
+    if (activeTotal > 0) setServerTotal(activeTotal)
+  }, [activeTotal])
 
   const subTabLabels: Record<MirrorKgSubTab, string> = {
     connections: 'Connections / Projections',
@@ -210,10 +264,14 @@ export function MirrorKgPanel({
           loading={tabState.loading}
           error={tabState.error}
           emptyText={t('dataCenter.noData')}
-          pageSize={999999}
+          pageSize={pageSize}
+          serverTotal={serverTotal}
+          serverPage={page}
+          onServerPageChange={setPage}
           onOpenDetail={setSelected}
           onRefresh={handleCompletionDone}
           onDeleteSelected={handleBulkDelete}
+          onFetchAll={handleFetchAll}
         />
       )}
 

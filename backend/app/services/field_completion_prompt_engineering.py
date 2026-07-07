@@ -19,7 +19,8 @@ from app.utils.json_safety import json_dumps_safe, to_jsonable
 
 FIELD_COMPLETION_FALLBACK_KEY = "universal_field_completion_v1"
 BUNDLE_CONSISTENCY_KEY = "circuit_bundle_consistency_v1"
-DEFAULT_INPUT_TOKEN_BUDGET = 6000
+DEFAULT_INPUT_TOKEN_BUDGET = 2000
+MAX_TARGETS_PER_PACK = 5
 
 DETERMINISTIC_FIELD_KEYS = frozenset({
     "canonical_start_region_id",
@@ -119,13 +120,25 @@ def build_compact_field_context(
     bundle_context: dict[str, Any] | None = None,
     canonical_resolution: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Minimal context for one field — no full attributes/raw JSON."""
+    """Minimal context for one field — includes key target attributes for LLM reasoning."""
     bundle_context = bundle_context or {}
     canonical_resolution = canonical_resolution or {}
     ctx: dict[str, Any] = {
         "id": _short_id(getattr(target, "id", "")),
         "field": field_name,
     }
+    # Include all direct column values so the LLM can reason about the target
+    try:
+        for col in target.__table__.columns:
+            col_name = col.name
+            if col_name in ("id", "created_at", "updated_at", "raw_payload_json", "normalized_payload_json", "attributes"):
+                continue
+            val = getattr(target, col_name, None)
+            if val is not None and str(val).strip():
+                ctx[col_name] = _clip(str(val), 120)
+    except Exception:
+        pass  # non-ORM object, skip auto-column extraction
+
     if isinstance(target, MirrorCircuitFunction):
         ctx["circuit_id"] = _short_id(getattr(target, "circuit_id", None))
         for key in (
@@ -208,7 +221,7 @@ def pack_target_batches(
     template_body: str,
     token_budget: int = DEFAULT_INPUT_TOKEN_BUDGET,
 ) -> list[list[dict[str, Any]]]:
-    """Split records into packs that fit token budget (not a hard target cap)."""
+    """Split records into packs that fit token budget AND max targets per pack."""
     if not records:
         return []
     base_tokens = estimate_prompt_tokens(system_prompt) + estimate_prompt_tokens(template_body) + 32
@@ -217,7 +230,10 @@ def pack_target_batches(
     current_tokens = base_tokens
     for rec in records:
         rec_tokens = estimate_prompt_tokens(rec)
-        if current and current_tokens + rec_tokens > token_budget:
+        if current and (
+            current_tokens + rec_tokens > token_budget
+            or len(current) >= MAX_TARGETS_PER_PACK
+        ):
             packs.append(current)
             current = []
             current_tokens = base_tokens
@@ -245,13 +261,19 @@ def build_batch_field_prompt(
         "records": records,
         "output_note": "Return field_updates with target_id for each record.",
     }
+    system_prompt = (
+        "You are a brain science knowledge graph field completion assistant. "
+        "Synthesize the best value for each field from the available context (region names, connection type, evidence, etc.). "
+        "Always provide a non-null value. If uncertain, make your best inference and note it in uncertainty_reason. "
+        "Output valid JSON only, no markdown."
+    )
     override_text = (prompt_overrides or {}).get(prompt_key)
     if override_text:
         user_prompt = override_text + "\n\n" + json_dumps_safe(payload, ensure_ascii=False)
     else:
         user_prompt = (
-            tpl.system_prompt[:120] + "\n\n"
-            + f"Batch complete formal field `{field_name}` for records below. Output JSON only.\n"
+            f"Complete the formal field `{field_name}` for each record below. "
+            f"Return JSON: {{\"field_updates\": [{{\"target_id\": \"...\", \"value\": \"...\"}}]}}\n\n"
             + json_dumps_safe(payload, ensure_ascii=False)
         )
     prompt_json = to_jsonable({
@@ -260,5 +282,5 @@ def build_batch_field_prompt(
         "batch_size": len(records),
         "compact_context": True,
     })
-    return tpl.system_prompt, user_prompt, prompt_json, prompt_key
+    return system_prompt, user_prompt, prompt_json, prompt_key
 

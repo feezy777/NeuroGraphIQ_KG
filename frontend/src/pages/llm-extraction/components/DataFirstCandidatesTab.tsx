@@ -30,7 +30,7 @@ const STATUS_OPTIONS = [
   'manual_review_pending', 'manual_approved',
 ]
 
-const DEFAULT_PAGE_SIZE = 100
+const DEFAULT_PAGE_SIZE = 50
 const PAGE_SIZE_OPTIONS = [50, 100, 200]
 
 interface BatchOption {

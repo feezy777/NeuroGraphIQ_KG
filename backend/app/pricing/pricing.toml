@@ -1,0 +1,76 @@
+version = "2026-07-01"
+default_currency = "USD"
+cny_per_usd = 6.79
+
+# ── DeepSeek models ────────────────────────────────────────────────
+# Sources: https://api-docs.deepseek.com/quick_start/pricing
+# Model keys MUST match the API model_name strings used in provider calls.
+
+[providers.deepseek.models.deepseek-chat]
+input_cache_hit = 0.0028     # USD / 1M tokens (disk cache)
+input_cache_miss = 0.14      # USD / 1M tokens — flash-tier pricing
+output = 0.28                # USD / 1M tokens — flash-tier pricing
+unit = "per_1m_tokens"
+source = "https://api-docs.deepseek.com/quick_start/pricing"
+checked_at = "2026-07-01"
+
+[providers.deepseek.models.deepseek-reasoner]
+input_cache_hit = 0.14       # USD / 1M tokens (disk cache)
+input_cache_miss = 0.55      # USD / 1M tokens
+output = 2.19                # USD / 1M tokens
+unit = "per_1m_tokens"
+source = "https://api-docs.deepseek.com/quick_start/pricing"
+checked_at = "2026-07-01"
+
+[providers.deepseek.models.deepseek-v4-pro]
+input_cache_hit = 0.003625   # USD / 1M tokens (disk cache)
+input_cache_miss = 0.435     # USD / 1M tokens — pro-tier pricing
+output = 0.87                # USD / 1M tokens — pro-tier pricing
+unit = "per_1m_tokens"
+source = "https://api-docs.deepseek.com/quick_start/pricing"
+checked_at = "2026-07-01"
+
+[providers.deepseek.models.deepseek-v4-flash]
+input_cache_hit = 0.0028     # USD / 1M tokens (disk cache)
+input_cache_miss = 0.14      # USD / 1M tokens — flash-tier pricing
+output = 0.28                # USD / 1M tokens — flash-tier pricing
+unit = "per_1m_tokens"
+source = "https://api-docs.deepseek.com/quick_start/pricing"
+checked_at = "2026-07-01"
+
+# ── Kimi models ────────────────────────────────────────────────────
+# Source: https://platform.moonshot.cn/docs/pricing
+
+[providers.kimi.models.kimi-k2]
+input_cache_hit = 1.18       # USD / 1M tokens
+input_cache_miss = 1.18      # USD / 1M tokens
+output = 1.77                # USD / 1M tokens
+unit = "per_1m_tokens"
+source = "https://platform.moonshot.cn/docs/pricing"
+checked_at = "2026-07-01"
+
+[providers.kimi.models.kimi-k2-thinking]
+input_cache_hit = 1.18       # USD / 1M tokens
+input_cache_miss = 1.18      # USD / 1M tokens
+output = 1.77                # USD / 1M tokens
+unit = "per_1m_tokens"
+source = "https://platform.moonshot.cn/docs/pricing"
+checked_at = "2026-07-01"
+
+# ── Model aliases ──────────────────────────────────────────────────
+# Maps alternative names → canonical model key within the same provider.
+# Used when the frontend label or user input doesn't match the API model id.
+
+[aliases.deepseek]
+v4_pro = "deepseek-v4-pro"
+v4-pro = "deepseek-v4-pro"
+chat = "deepseek-chat"
+v3 = "deepseek-chat"
+reasoner = "deepseek-reasoner"
+r1 = "deepseek-reasoner"
+v4-reasoner = "deepseek-reasoner"
+v4-flash = "deepseek-v4-flash"
+
+[aliases.kimi]
+k2 = "kimi-k2"
+k2-thinking = "kimi-k2-thinking"

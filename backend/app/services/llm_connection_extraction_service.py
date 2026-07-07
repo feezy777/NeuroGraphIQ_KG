@@ -661,8 +661,11 @@ async def persist_connection_mirror_records(
         seen.add(key)
 
         if create_triples:
-            src_c = candidate_map[src]
-            tgt_c = candidate_map[tgt]
+            src_c = candidate_map.get(src)
+            tgt_c = candidate_map.get(tgt)
+            if src_c is None or tgt_c is None:
+                logger.warning(f"Skipping connection with unknown candidate: src={src}, tgt={tgt}")
+                continue
             predicate = CONNECTION_TO_PREDICATE.get(conn_type, "related_to")
             triple_payload = MirrorKgTripleCreate(
                 subject_type=TripleSubjectType.region_candidate,
@@ -1358,6 +1361,9 @@ async def run_same_granularity_connection_extraction(
                 await _persist_pack_trace(trace)
 
         if parsed is None:
+            if trace.get("status") == "cancelled":
+                await _persist_pack_trace(trace)
+                return [], [], [], set(), 0
             if trace.get("parse_error_type") not in {"transport_error", "empty_response"}:
                 audit.parse_error_count += 1
                 audit.processed_pack_count += 1

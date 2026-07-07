@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../../i18n-context'
 import {
   getFieldCompletionRelatedTargets,
   getFieldCompletionRun,
   runUniversalFieldCompletion,
   type FieldCompletionItem,
+  type FieldCompletionRunDetail,
   type UniversalFieldCompletionResponse,
 } from '../../api/endpoints'
 import {
@@ -25,8 +26,8 @@ import type {
   CircuitBundleFieldCompletionGroup,
   CircuitBundleTargetGroup,
 } from './circuitBundleTypes'
+import { FieldCompletionStatsCards } from './FieldCompletionStatsCards'
 import { translateBundleWarning } from './circuitBundleUtils'
-import { PromptWorkbenchSection } from './PromptWorkbenchSection'
 
 type ModalMode = 'preview' | 'dry_run_result' | 'execution_result'
 
@@ -74,13 +75,188 @@ export function MultiTargetFieldCompletionModal({
   const { t } = useI18n()
   const [mode, setMode] = useState<ModalMode>('preview')
   const [options, setOptions] = useState<FieldCompletionFormOptions>(DEFAULT_FIELD_COMPLETION_OPTIONS)
-  const [promptOverrides, setPromptOverrides] = useState<Record<string, string>>({})
   const [groupStates, setGroupStates] = useState<GroupRunState[]>([])
   const [running, setRunning] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [bundleWarnings, setBundleWarnings] = useState<string[]>([])
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [refreshingTargets, setRefreshingTargets] = useState(false)
+  // Async non-blocking execution state machine
+  const execRef = useRef<{
+    dryRun: boolean
+    groupIndex: number
+    runId: string | null
+    groups: GroupRunState[]
+    warnings: string[]
+    accumulatedPatch: OverlayPatch
+    pollTimer: ReturnType<typeof setInterval> | null
+  } | null>(null)
+  const [execTick, setExecTick] = useState(0) // triggers re-renders
+
+  // Cleanup poller on unmount
+  const mountedRef = useRef(true)
+  const notifiedRef = useRef(false)       // H4: prevent double onCompleted
+  const onCompletedRef = useRef(onCompleted)  // H4: stabilize poller deps
+  onCompletedRef.current = onCompleted
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false
+      if (execRef.current?.pollTimer) clearInterval(execRef.current.pollTimer)
+    }
+  }, [])
+
+  // Non-blocking async poller: polls current group's run, advances to next group on completion
+  useEffect(() => {
+    if (execTick === 0) return
+    const exec = execRef.current
+    if (!exec || exec.dryRun) return
+
+    if (exec.pollTimer) clearInterval(exec.pollTimer)
+
+    exec.pollTimer = setInterval(async () => {
+      const e = execRef.current
+      if (!e || !e.runId) return
+
+      try {
+        const detail = await getFieldCompletionRun(e.runId)
+        if (!detail || !['succeeded', 'partially_succeeded', 'failed', 'cancelled'].includes(detail.status)) return
+
+        // Group completed — update state
+        if (e.pollTimer) { clearInterval(e.pollTimer); e.pollTimer = null }
+
+        const group = e.groups[e.groupIndex]
+        const items = detail.items ?? []
+        const finalRes = {
+          run_id: detail.id,
+          status: detail.status,
+          provider: detail.provider,
+          model_name: detail.model_name,
+          target_type: detail.target_type as any,
+          target_count: detail.target_count,
+          updated_count: (detail.summary_json as any)?.updated_count ?? 0,
+          suggested_count: (detail.summary_json as any)?.suggested_count ?? 0,
+          skipped_count: (detail.summary_json as any)?.skipped_count ?? 0,
+          failed_count: (detail.summary_json as any)?.failed_count ?? 0,
+          field_updates: items.map((item: any) => ({
+            target_id: item.target_id,
+            field_name: item.field_name,
+            update_status: item.update_status as any,
+            suggested_value: item.suggested_value_json,
+            applied_value: item.applied_value_json,
+          })),
+          prompt_preview: null,
+          warnings: (detail.warnings_json ?? []) as string[],
+          errors: (detail.errors_json ?? []) as string[],
+          dry_run: false,
+          summary_json: detail.summary_json as Record<string, number>,
+        }
+
+        e.accumulatedPatch = mergeOverlayPatches(
+          e.accumulatedPatch,
+          extractOverlayPatchFromItems(items),
+        )
+        if ((finalRes as any).warnings?.length) e.warnings.push(...(finalRes as any).warnings)
+
+        e.groups[e.groupIndex] = {
+          ...group,
+          status: 'executed',
+          response: finalRes as any,
+          executionItems: items,
+          errorMessage: (finalRes as any).errors?.length ? (finalRes as any).errors.join('; ') : undefined,
+        }
+        setGroupStates([...e.groups])
+
+        // Advance to next group
+        e.groupIndex++
+        if (e.groupIndex >= e.groups.length) {
+          // All done
+          setBundleWarnings(e.warnings)
+          setMode('execution_result')
+          setRunning(false)
+          // H4: guard against double notification (executeNextGroup may also fire)
+          if (!notifiedRef.current) {
+            notifiedRef.current = true
+            onCompletedRef.current?.(e.accumulatedPatch)
+          }
+          execRef.current = null
+          return
+        }
+
+        // Start next group
+        await executeNextGroup(e)
+      } catch {
+        // polling error — continue
+      }
+    }, 2000)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [execTick])  // H4: removed onCompleted from deps; uses stable ref
+
+  async function executeNextGroup(exec: NonNullable<typeof execRef.current>) {
+    while (exec.groupIndex < exec.groups.length) {
+      const group = exec.groups[exec.groupIndex]
+      if (group.targetIds.length === 0 || group.status === 'unavailable' || group.status === 'no_data') {
+        exec.groups[exec.groupIndex] = { ...group, status: group.status === 'pending' ? 'skipped' : group.status }
+        setGroupStates([...exec.groups])
+        exec.groupIndex++
+        continue
+      }
+
+      const mapping = getFormalFieldMapping(group.targetType)
+      if (!mapping?.implemented) {
+        exec.groups[exec.groupIndex] = { ...group, status: 'unavailable', errorMessage: t('dataCenter.unsupportedTarget') }
+        setGroupStates([...exec.groups])
+        exec.groupIndex++
+        continue
+      }
+
+      exec.groups[exec.groupIndex] = { ...group, status: 'running', errorMessage: undefined, executionItems: undefined }
+      setGroupStates([...exec.groups])
+
+      const req = buildFieldCompletionRequest(mapping, group.targetIds, {
+        ...options,
+        dryRun: false,
+        promptOverrides: {},
+      })
+      try {
+        const res = await runUniversalFieldCompletion(req)
+        if ('run_id' in res && !('field_updates' in res)) {
+          exec.runId = res.run_id
+          return // poller will pick up from here
+        }
+        // Sync response fallback
+        const items = (res as any).items ?? (res as any).field_updates ?? []
+        exec.accumulatedPatch = mergeOverlayPatches(exec.accumulatedPatch, extractOverlayPatchFromFieldUpdates(items))
+        exec.groups[exec.groupIndex] = {
+          ...group,
+          status: 'executed',
+          response: res as any,
+          executionItems: items,
+        }
+        setGroupStates([...exec.groups])
+        exec.groupIndex++
+      } catch (err) {
+        exec.groups[exec.groupIndex] = {
+          ...group,
+          status: 'failed',
+          errorMessage: formatFieldCompletionErrorMessage(err, t),
+        }
+        setGroupStates([...exec.groups])
+        exec.warnings.push(`${group.targetType}: ${formatFieldCompletionErrorMessage(err, t)}`)
+        exec.groupIndex++
+      }
+    }
+
+    // All groups done
+    setBundleWarnings(exec.warnings)
+    setMode('execution_result')
+    setRunning(false)
+    // H4: guard against double notification (poller may also fire)
+    if (!notifiedRef.current) {
+      notifiedRef.current = true
+      onCompletedRef.current?.(exec.accumulatedPatch)
+    }
+    execRef.current = null
+  }
 
   useEffect(() => {
     if (!open || !bundle) return
@@ -88,7 +264,6 @@ export function MultiTargetFieldCompletionModal({
     setRunning(false)
     setShowConfirm(false)
     setBundleWarnings([])
-    setPromptOverrides({})
     setOptions(DEFAULT_FIELD_COMPLETION_OPTIONS)
     setGroupStates(
       bundle.groups.map(g => {
@@ -172,83 +347,54 @@ export function MultiTargetFieldCompletionModal({
   const runBundle = useCallback(async (dryRun: boolean) => {
     if (!bundle) return
     setRunning(true)
-    const warnings: string[] = []
-    let accumulatedPatch: OverlayPatch = {}
+    const groups: GroupRunState[] = groupStates.map(g => ({ ...g }))
+    setGroupStates(groups)
 
-    for (const group of groupStates) {
-      if (group.targetIds.length === 0 || group.status === 'unavailable' || group.status === 'no_data') {
-        if (group.status !== 'unavailable' && group.status !== 'no_data') {
-          updateGroup(group.targetType, { status: 'skipped' })
-        }
-        continue
-      }
-
-      const mapping = getFormalFieldMapping(group.targetType)
-      if (!mapping?.implemented) {
-        updateGroup(group.targetType, {
-          status: 'unavailable',
-          errorMessage: t('dataCenter.unsupportedTarget'),
-        })
-        continue
-      }
-
-      updateGroup(group.targetType, {
-        status: 'running',
-        errorMessage: undefined,
-        executionItems: undefined,
-      })
-      const req = buildFieldCompletionRequest(mapping, group.targetIds, {
-        ...options,
-        dryRun,
-        promptOverrides,
-      })
-      try {
-        const res = await runUniversalFieldCompletion(req)
-        let executionItems: FieldCompletionItem[] | undefined
-        if (!dryRun && res.run_id) {
-          try {
-            const detail = await getFieldCompletionRun(res.run_id)
-            executionItems = detail.items ?? []
-            accumulatedPatch = mergeOverlayPatches(
-              accumulatedPatch,
-              extractOverlayPatchFromItems(executionItems),
-            )
-          } catch {
-            accumulatedPatch = mergeOverlayPatches(
-              accumulatedPatch,
-              extractOverlayPatchFromFieldUpdates(res.field_updates),
-            )
+    if (dryRun) {
+      // Dry run: execute all groups synchronously (dry runs are fast)
+      const warnings: string[] = []
+      for (let i = 0; i < groups.length; i++) {
+        const group = groups[i]
+        if (group.targetIds.length === 0 || group.status === 'unavailable' || group.status === 'no_data') continue
+        const mapping = getFormalFieldMapping(group.targetType)
+        if (!mapping?.implemented) continue
+        groups[i] = { ...group, status: 'running', errorMessage: undefined }
+        setGroupStates([...groups])
+        const req = buildFieldCompletionRequest(mapping, group.targetIds, { ...options, dryRun: true, promptOverrides: {} })
+        try {
+          const res = await runUniversalFieldCompletion(req)
+          groups[i] = {
+            ...groups[i],
+            status: 'dry_run_done',
+            response: res as any,
+            allowedFields: getEnrichableFormalFields(mapping),
           }
+          if ((res as any).warnings?.length) warnings.push(...(res as any).warnings)
+        } catch (err) {
+          groups[i] = { ...groups[i], status: 'failed', errorMessage: formatFieldCompletionErrorMessage(err, t) }
         }
-        updateGroup(group.targetType, {
-          status: dryRun ? 'dry_run_done' : 'executed',
-          response: res,
-          executionItems,
-          allowedFields: getEnrichableFormalFields(mapping),
-          errorMessage: res.errors?.length ? res.errors.join('; ') : undefined,
-        })
-        if (res.warnings?.length) warnings.push(...res.warnings)
-      } catch (err) {
-        updateGroup(group.targetType, {
-          status: 'failed',
-          errorMessage: formatFieldCompletionErrorMessage(err, t),
-        })
-        warnings.push(`${group.targetType}: ${formatFieldCompletionErrorMessage(err, t)}`)
+        setGroupStates([...groups])
       }
+      setBundleWarnings(warnings)
+      setMode('dry_run_result')
+      setRunning(false)
+      return
     }
 
-    setBundleWarnings(warnings)
-    setMode(dryRun ? 'dry_run_result' : 'execution_result')
-    setRunning(false)
-    if (!dryRun) {
-      onCompleted?.(accumulatedPatch)
+    // Non-dry-run: non-blocking state machine
+    const exec = {
+      dryRun: false,
+      groupIndex: 0,
+      runId: null as string | null,
+      groups,
+      warnings: [] as string[],
+      accumulatedPatch: {} as OverlayPatch,
+      pollTimer: null as ReturnType<typeof setInterval> | null,
     }
-  }, [bundle, groupStates, options, promptOverrides, t, updateGroup, onCompleted])
-
-  const dryRunPreview = useMemo(() => {
-    const withPreview = groupStates.find(g => g.response?.prompt_preview)
-    return (withPreview?.response?.prompt_preview as Record<string, unknown> | undefined) ?? null
-  }, [groupStates])
+    execRef.current = exec
+    setExecTick(t => t + 1)
+    void executeNextGroup(exec)
+  }, [bundle, groupStates, options, t])
 
   const summary = useMemo(() => {
     const byType = (type: string) => groupStates.find(g => g.targetType === type)
@@ -307,13 +453,6 @@ export function MultiTargetFieldCompletionModal({
             </ul>
           </details>
         )}
-
-        <PromptWorkbenchSection
-          modeLabel={t('dataCenter.circuitBundleCompletion')}
-          dryRunPreview={dryRunPreview}
-          promptOverrides={promptOverrides}
-          onPromptOverridesChange={setPromptOverrides}
-        />
 
         {/* no_data: redirect to LLM Extraction Center */}
         {isCfNoData && !isMigrationMissing && (

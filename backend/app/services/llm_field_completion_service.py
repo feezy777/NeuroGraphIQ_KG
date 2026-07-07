@@ -5,6 +5,7 @@ Mirror/candidate writes only — never final_* / kg_* / auto-approve / auto-prom
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -691,6 +692,47 @@ def _make_item(
     )
 
 
+# ── Model tier priority for mirror_status ────────────────────────────────────
+_MODEL_TIER = {
+    "deepseek-reasoner": ("llm_reasoner", 40),
+    "deepseek-v4-pro": ("llm_v4_pro", 30),
+    "deepseek-chat": ("llm_suggested", 20),
+    "kimi": ("llm_kimi", 10),
+}
+_DEFAULT_TIER_STATUS = "llm_suggested"
+_DEFAULT_TIER_PRIORITY = 15
+
+
+def _resolve_model_status(model_name: str | None) -> tuple[str, int]:
+    """Return (mirror_status, priority) for a model. Higher priority wins."""
+    if not model_name:
+        return _DEFAULT_TIER_STATUS, _DEFAULT_TIER_PRIORITY
+    model_lower = model_name.lower()
+    # Check exact match first, then prefix match
+    for prefix, (status, pri) in _MODEL_TIER.items():
+        if model_lower == prefix or model_lower.startswith(prefix):
+            return status, pri
+    # Check for kimi prefix
+    if "kimi" in model_lower or "moonshot" in model_lower:
+        return _MODEL_TIER["kimi"]
+    return _DEFAULT_TIER_STATUS, _DEFAULT_TIER_PRIORITY
+
+
+def _should_update_mirror_status(target: Any, model_name: str | None) -> bool:
+    """Only update mirror_status if new model has equal or higher priority than existing."""
+    _, new_pri = _resolve_model_status(model_name)
+    existing = getattr(target, "mirror_status", None) or ""
+    # Map existing status to priority
+    existing_pri = 0
+    for _prefix, (_status, pri) in _MODEL_TIER.items():
+        if existing == _status:
+            existing_pri = pri
+            break
+    if existing_pri == 0:
+        existing_pri = _DEFAULT_TIER_PRIORITY if existing == _DEFAULT_TIER_STATUS else 5
+    return new_pri >= existing_pri
+
+
 def apply_field_update(
     target: Any,
     field_name: str,
@@ -703,6 +745,7 @@ def apply_field_update(
     confidence: float | None = None,
     overlay_source: str | None = None,
     overlay_meta_extra: dict[str, Any] | None = None,
+    resolved_model: str | None = None,
 ) -> ItemStatus:
     """Apply a formal field value to the mirror target (direct column or overlay).
 
@@ -715,17 +758,27 @@ def apply_field_update(
         return ItemStatus.skipped_invalid_field
 
     effective_policy = overwrite_policy
-    if overwrite_policy == OverwritePolicy.overwrite_with_review:
-        effective_policy = OverwritePolicy.suggest_only
+
+    # Resolve model-tier mirror_status
+    tier_status = _resolve_model_status(resolved_model)[0]
+
+    def _update_tier():
+        """Update mirror_status if model tier is higher than existing."""
+        if hasattr(target, "mirror_status") and _should_update_mirror_status(target, resolved_model):
+            target.mirror_status = tier_status
+
+    def _result(status: ItemStatus) -> ItemStatus:
+        _update_tier()
+        return status
 
     if effective_policy == OverwritePolicy.suggest_only or not create_mirror_updates:
-        return ItemStatus.suggested
+        return _result(ItemStatus.suggested)
 
     # ---- Overlay path (formal field with no direct mirror column) ------------
     if entry is not None and is_overlay_field(entry, field_name):
         existing = get_overlay_value(target, field_name)
         if not is_empty_value(existing) and effective_policy == OverwritePolicy.fill_missing_only:
-            return ItemStatus.skipped_existing_value
+            return _result(ItemStatus.skipped_existing_value)
         if write_to_overlay(
             target,
             field_name,
@@ -735,8 +788,8 @@ def apply_field_update(
             source=overlay_source or "llm_field_completion",
             meta_extra=overlay_meta_extra,
         ):
-            return ItemStatus.applied_overlay
-        return ItemStatus.suggested
+            return _result(ItemStatus.applied_overlay)
+        return _result(ItemStatus.suggested)
 
     # ---- Direct / alias write path -------------------------------------------
     mirror_col = get_mirror_column(entry, field_name) if entry is not None else field_name
@@ -753,17 +806,17 @@ def apply_field_update(
                 source=overlay_source or "llm_field_completion",
                 meta_extra=overlay_meta_extra,
             ):
-                return ItemStatus.applied_overlay
-            return ItemStatus.suggested
+                return _result(ItemStatus.applied_overlay)
+            return _result(ItemStatus.suggested)
     except AttributeError:
         pass
 
     current = getattr(target, mirror_col, None)
     if not is_empty_value(current) and effective_policy == OverwritePolicy.fill_missing_only:
-        return ItemStatus.skipped_existing_value
+        return _result(ItemStatus.skipped_existing_value)
 
     setattr(target, mirror_col, value)
-    return ItemStatus.applied_direct
+    return _result(ItemStatus.applied_direct)
 
 
 async def call_provider(
@@ -908,7 +961,7 @@ async def run_universal_field_completion(
             raise ProviderNotConfiguredServiceError(provider_key, f"provider is not configured: {provider_key}")
 
     if request.overwrite_policy == OverwritePolicy.overwrite_with_review:
-        warnings.append("overwrite_with_review is planned; treated as suggest_only.")
+        warnings.append("overwrite_with_review: values will be overwritten (review record creation not yet implemented).")
 
     if request.create_evidence:
         warnings.append("create_evidence is not implemented in Step 10.3; no new evidence rows created.")
@@ -944,7 +997,7 @@ async def run_universal_field_completion(
     from app.services.field_completion_execution import (
         apply_deterministic_fields,
         build_deterministic_plan,
-        execute_batched_llm_fields,
+        execute_per_connection_fields,
     )
     from app.services.field_completion_prompt_engineering import (
         build_batch_field_prompt,
@@ -1054,77 +1107,10 @@ async def run_universal_field_completion(
         })
         return _build_response(run, items, prompt_preview=preview, warnings=warnings, errors=errors)
 
-    run.status = RunStatus.running.value
-    await session.flush()
-
-    det_applied, canonical_cache, resolver_warn = await apply_deterministic_fields(
-        session,
-        run,
-        request,
-        entry,
-        targets,
-        items,
-        warnings,
-        make_item=_make_item,
-        apply_field_update=apply_field_update,
-        overwrite_policy=request.overwrite_policy,
-        create_mirror_updates=request.create_mirror_updates,
-    )
-    model_call_count, rejected_count, est_input, pack_count, llm_applied = await execute_batched_llm_fields(
-        session,
-        run,
-        request,
-        entry,
-        targets,
-        items,
-        warnings,
-        errors,
-        provider_key=provider_key,
-        resolved_model=resolved_model,
-        canonical_cache=canonical_cache,
-        make_item=_make_item,
-        apply_field_update=apply_field_update,
-        call_provider=call_provider,
-        parse_field_completion_provider_response=parse_field_completion_provider_response,
-        validate_field_updates=validate_field_updates,
-        validate_field_value_quality=validate_field_value_quality,
-        format_reasoning_with_consistency=format_reasoning_with_consistency,
-    )
-    warning_count = len(warnings)
-
-    counts = summarize_completion_run(run, items)
-    counts["model_call_count"] = model_call_count
-    counts["estimated_model_calls"] = estimated_model_calls
-    counts["deterministic_applied_count"] = det_applied
-    counts["llm_applied_count"] = llm_applied
-    counts["resolver_warning_count"] = resolver_warn
-    counts["estimated_input_tokens"] = est_input
-    counts["estimated_output_tokens"] = int(est_input * 0.15)
-    counts["pack_count"] = pack_count
-    counts["deterministic_fields_count"] = len(deterministic_plan)
-    counts["llm_fields_count"] = len(template_plan)
-    counts["rejected_count"] = rejected_count
-    counts["warning_count"] = warning_count
-    run.summary_json = to_jsonable(counts)
-
-    updated = counts.get("updated_count", 0)
-    failed = counts.get("failed_count", 0)
-    skipped = counts.get("skipped_count", 0)
-    if updated > 0 and failed == 0 and skipped == 0 and not errors:
-        run.status = RunStatus.succeeded.value
-    elif updated > 0 and (failed > 0 or skipped > 0 or errors):
-        run.status = RunStatus.partially_succeeded.value
-    elif updated == 0 and failed > 0:
-        run.status = RunStatus.failed.value
-    elif errors and updated == 0:
-        run.status = RunStatus.failed.value
-    else:
-        run.status = RunStatus.succeeded.value
-
-    run.completed_at = datetime.now(timezone.utc)
-    run.warnings_json = to_jsonable(warnings)
-    run.errors_json = to_jsonable(errors)
-    await session.commit()
+    # Non-dry-run: execute synchronously (used by legacy direct POST /run, and
+    # also from the background task via _execute_field_completion_core).
+    items, warnings, errors = await _execute_field_completion_core(session, run, request)
+    await session.refresh(run)
     return _build_response(run, items, prompt_preview=None, warnings=warnings, errors=errors)
 
 
@@ -1197,6 +1183,7 @@ async def get_field_completion_run(
     run = await session.get(LlmFieldCompletionRun, run_id)
     if run is None:
         return None
+    await session.refresh(run)  # ensure all attrs loaded before model_validate
     items, _ = await list_field_completion_items(session, run_id=run_id, limit=200, offset=0)
     base = FieldCompletionRunRead.model_validate(run)
     return FieldCompletionRunDetail(
@@ -1294,3 +1281,352 @@ async def get_related_field_completion_targets(
         groups=groups,
         warnings=warnings,
     )
+
+
+async def _check_cancelled(session: AsyncSession, run_id: uuid.UUID) -> bool:
+    """Return True if the run has been cancelled. Lightweight status-only query."""
+    stmt = select(LlmFieldCompletionRun.status).where(LlmFieldCompletionRun.id == run_id)
+    result = await session.execute(stmt)
+    status_val = result.scalar_one_or_none()
+    return status_val == RunStatus.cancelled.value
+
+
+async def cancel_field_completion_run(
+    session: AsyncSession,
+    run_id: uuid.UUID,
+) -> LlmFieldCompletionRun | None:
+    """Set a pending or running field completion run to cancelled."""
+    run = await session.get(LlmFieldCompletionRun, run_id)
+    if run is None:
+        return None
+    if run.status not in (RunStatus.pending.value, RunStatus.running.value):
+        return run
+    run.status = RunStatus.cancelled.value
+    run.completed_at = datetime.now(timezone.utc)
+    run.warnings_json = to_jsonable(list(run.warnings_json or []) + ["Cancelled by user"])
+    await session.commit()
+    await session.refresh(run)  # re-load to avoid MissingGreenlet on model_validate
+    return run
+
+
+async def start_field_completion_async(
+    session: AsyncSession,
+    request: UniversalFieldCompletionRequest,
+) -> FieldCompletionStartResponse:
+    """Validate, create a pending run, and return a start response.
+
+    The actual execution happens in ``execute_field_completion_background``.
+    """
+    from app.schemas.llm_field_completion import FieldCompletionStartResponse
+
+    try:
+        entry = get_registry_entry(request.target_type)
+    except UnsupportedTargetTypeError:
+        raise
+    except TargetTypeNotImplementedError:
+        raise
+
+    provider_key = request.provider.lower()
+    if provider_key not in ("deepseek", "kimi", "mock"):
+        raise UnknownProviderError(request.provider)
+
+    resolved_model = (
+        _resolve_model(provider_key, request.model_name)
+        if provider_key != "mock"
+        else (request.model_name or "mock")
+    )
+
+    if provider_key != "mock":
+        cfg = get_deepseek_runtime_config() if provider_key == "deepseek" else get_kimi_runtime_config()
+        if not (cfg.api_key or "").strip():
+            raise ProviderNotConfiguredServiceError(provider_key, f"provider is not configured: {provider_key}")
+
+    warnings: list[str] = []
+    if request.overwrite_policy == OverwritePolicy.overwrite_with_review:
+        warnings.append("overwrite_with_review: values will be overwritten (review record creation not yet implemented).")
+    if request.create_evidence:
+        warnings.append("create_evidence is not implemented; no new evidence rows created.")
+
+    run = LlmFieldCompletionRun(
+        id=uuid.uuid4(),
+        provider=provider_key,
+        model_name=resolved_model,
+        target_type=request.target_type.value,
+        target_count=len(request.target_ids),
+        field_scope=request.field_scope.value,
+        selected_fields_json=list(request.selected_fields),
+        overwrite_policy=request.overwrite_policy.value,
+        dry_run=False,
+        create_mirror_updates=request.create_mirror_updates,
+        create_evidence=request.create_evidence,
+        status=RunStatus.pending.value,
+        request_json=to_jsonable(request.model_dump(mode="json")),
+        warnings_json=to_jsonable(warnings),
+    )
+    session.add(run)
+    await session.commit()
+    await session.refresh(run)
+
+    return FieldCompletionStartResponse(
+        run_id=run.id,
+        status=RunStatus.pending,
+        provider=run.provider,
+        model_name=run.model_name,
+        target_type=TargetType(run.target_type),
+        target_count=run.target_count,
+        dry_run=False,
+        warnings=warnings,
+    )
+
+
+async def _mark_run_failed(run_id: uuid.UUID, error: str) -> None:
+    """Mark a run as failed in a recovery session."""
+    from app.database import AsyncSessionLocal
+
+    try:
+        if AsyncSessionLocal is None:
+            return
+        async with AsyncSessionLocal() as s:
+            r = await s.get(LlmFieldCompletionRun, run_id)
+            if r is not None and r.status not in (RunStatus.succeeded.value, RunStatus.failed.value):
+                r.status = RunStatus.failed.value
+                r.completed_at = datetime.now(timezone.utc)
+                errors = list(r.errors_json or [])
+                errors.append(error)
+                r.errors_json = to_jsonable(errors)
+                await s.commit()
+    except Exception:
+        logger.exception("[field-completion][background] mark_failed failed run_id=%s", run_id)
+
+
+async def execute_field_completion_background(
+    run_id: uuid.UUID,
+    request_payload: dict[str, Any],
+) -> None:
+    """Background worker — uses a fresh DB session for async field completion."""
+    from app.database import AsyncSessionLocal
+
+    print(f"[field-completion] BACKGROUND START run={run_id}", flush=True)
+    if AsyncSessionLocal is None:
+        logger.error("[field-completion][background] AsyncSessionLocal unavailable")
+        return
+
+    try:
+        request = UniversalFieldCompletionRequest.model_validate(request_payload)
+    except Exception as exc:
+        logger.exception("[field-completion][background] invalid payload run=%s", run_id)
+        await _mark_run_failed(run_id, f"Invalid payload: {exc}")
+        return
+
+    # Retry up to 3 times to find the run (DB commit may not be visible yet)
+    run_found = False
+    for attempt in range(3):
+        async with AsyncSessionLocal() as session:
+            run = await session.get(LlmFieldCompletionRun, run_id)
+            if run is not None:
+                run_found = True
+                break
+        if not run_found and attempt < 2:
+            await asyncio.sleep(0.5)
+    if not run_found:
+        logger.error("[field-completion][background] run not found after retries: %s", run_id)
+        await _mark_run_failed(run_id, "Run never started: not found in DB after retries")
+        return
+
+    async with AsyncSessionLocal() as session:
+        try:
+            run = await session.get(LlmFieldCompletionRun, run_id)
+            if run is None:
+                return
+
+            if await _check_cancelled(session, run_id):
+                return
+
+            run.status = RunStatus.running.value
+            run.started_at = datetime.now(timezone.utc)
+            await session.commit()
+
+            # Wrap execution with timeout proportional to target count
+            timeout = max(300, run.target_count * 5)  # ~5s per target
+            await asyncio.wait_for(
+                _execute_field_completion_core(session, run, request),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.error("[field-completion][background] timeout run_id=%s", run_id)
+            await _mark_run_failed(run_id, "Execution timed out after 5 minutes")
+        except Exception as exc:
+            logger.exception("[field-completion][background] unhandled failure run_id=%s", run_id)
+            await _mark_run_failed(run_id, f"Background failure: {exc}")
+
+
+async def _execute_field_completion_core(
+    session: AsyncSession,
+    run: LlmFieldCompletionRun,
+    request: UniversalFieldCompletionRequest,
+) -> tuple[list[LlmFieldCompletionItem], list[str], list[str]]:
+    """Core execution shared by sync (dry_run) and async (background) paths.
+
+    Returns (items, warnings, errors) for the caller to build a response.
+    """
+    warnings: list[str] = list(run.warnings_json or [])
+    errors: list[str] = list(run.errors_json or [])
+
+    try:
+        entry = get_registry_entry(request.target_type)
+    except UnsupportedTargetTypeError:
+        raise
+    except TargetTypeNotImplementedError:
+        raise
+
+    provider_key = request.provider.lower()
+    resolved_model = _resolve_model(provider_key, request.model_name) if provider_key != "mock" else (request.model_name or "mock")
+
+    if request.overwrite_policy == OverwritePolicy.overwrite_with_review:
+        warnings.append("overwrite_with_review: values will be overwritten (review record creation not yet implemented).")
+
+    if request.create_evidence:
+        warnings.append("create_evidence is not implemented in Step 10.3; no new evidence rows created.")
+
+    items: list[LlmFieldCompletionItem] = []
+
+    targets = await load_targets(session, request.target_type, request.target_ids)
+
+    for tid in request.target_ids:
+        if tid not in targets:
+            item = _make_item(
+                run.id,
+                request.target_type.value,
+                tid,
+                field_name="_target_",
+                old_value=None,
+                status=ItemStatus.skipped_target_not_found,
+                error_message="target not found",
+            )
+            session.add(item)
+            items.append(item)
+
+    from app.services.field_completion_execution import (
+        apply_deterministic_fields,
+        build_deterministic_plan,
+        execute_per_connection_fields,
+    )
+    from app.services.field_completion_prompt_engineering import (
+        build_batch_field_prompt,
+        build_compact_field_context,
+        estimate_prompt_tokens,
+    )
+
+    deterministic_plan = build_deterministic_plan(targets, entry, request)
+    template_plan = build_template_plan(targets, entry, request)
+    estimated_model_calls = estimate_model_calls(
+        template_plan,
+        set(),
+        target_type=request.target_type,
+    )
+
+    # ── Cancellation check ────────────────────────────────────────────────
+    if await _check_cancelled(session, run.id):
+        run.status = RunStatus.cancelled.value
+        run.completed_at = datetime.now(timezone.utc)
+        run.warnings_json = to_jsonable(warnings)
+        run.errors_json = to_jsonable(errors)
+        await session.commit()
+        return items, warnings, errors
+
+    det_applied, canonical_cache, resolver_warn = await apply_deterministic_fields(
+        session,
+        run,
+        request,
+        entry,
+        targets,
+        items,
+        warnings,
+        make_item=_make_item,
+        apply_field_update=apply_field_update,
+        overwrite_policy=request.overwrite_policy,
+        create_mirror_updates=request.create_mirror_updates,
+        resolved_model=resolved_model,
+    )
+
+    # ── Cancellation check ────────────────────────────────────────────────
+    if await _check_cancelled(session, run.id):
+        run.status = RunStatus.cancelled.value
+        run.completed_at = datetime.now(timezone.utc)
+        counts = summarize_completion_run(run, items)
+        counts["deterministic_applied_count"] = det_applied
+        counts["resolver_warning_count"] = resolver_warn
+        run.summary_json = to_jsonable(counts)
+        run.warnings_json = to_jsonable(warnings)
+        run.errors_json = to_jsonable(errors)
+        await session.commit()
+        return items, warnings, errors
+
+    model_call_count, llm_applied = await execute_per_connection_fields(
+        session,
+        run,
+        request,
+        entry,
+        targets,
+        items,
+        warnings,
+        errors,
+        provider_key=provider_key,
+        resolved_model=resolved_model,
+        make_item=_make_item,
+        apply_field_update=apply_field_update,
+        call_provider=call_provider,
+        check_cancelled=_check_cancelled,
+    )
+
+    # ── Post-LLM cancellation check ─────────────────────────────────────
+    if await _check_cancelled(session, run.id):
+        run.status = RunStatus.cancelled.value
+        run.completed_at = datetime.now(timezone.utc)
+        run.warnings_json = to_jsonable(list(warnings) + ["Cancelled by user during LLM execution"])
+        counts = summarize_completion_run(run, items)
+        counts["model_call_count"] = model_call_count
+        counts["rejected_count"] = 0
+        counts["estimated_input_tokens"] = 0
+        counts["pack_count"] = run.target_count
+        counts["llm_applied"] = llm_applied
+        run.summary_json = to_jsonable(counts)
+        run.errors_json = to_jsonable(errors)
+        await session.commit()
+        return items, warnings, errors
+
+    warning_count = len(warnings)
+    counts = summarize_completion_run(run, items)
+    counts["model_call_count"] = model_call_count
+    counts["estimated_model_calls"] = estimated_model_calls
+    counts["deterministic_applied_count"] = det_applied
+    counts["llm_applied_count"] = llm_applied
+    counts["resolver_warning_count"] = resolver_warn
+    counts["estimated_input_tokens"] = 0
+    counts["estimated_output_tokens"] = 0
+    counts["pack_count"] = run.target_count
+    counts["deterministic_fields_count"] = len(deterministic_plan)
+    counts["llm_fields_count"] = len(template_plan)
+    counts["rejected_count"] = 0
+    counts["warning_count"] = warning_count
+    run.summary_json = to_jsonable(counts)
+
+    updated = counts.get("updated_count", 0)
+    failed = counts.get("failed_count", 0)
+    skipped = counts.get("skipped_count", 0)
+    if updated > 0 and failed == 0 and skipped == 0 and not errors:
+        run.status = RunStatus.succeeded.value
+    elif updated > 0 and (failed > 0 or skipped > 0 or errors):
+        run.status = RunStatus.partially_succeeded.value
+    elif updated == 0 and failed > 0:
+        run.status = RunStatus.failed.value
+    elif errors and updated == 0:
+        run.status = RunStatus.failed.value
+    else:
+        run.status = RunStatus.succeeded.value
+
+    run.completed_at = datetime.now(timezone.utc)
+    run.warnings_json = to_jsonable(warnings)
+    run.errors_json = to_jsonable(errors)
+    await session.commit()
+    return items, warnings, errors

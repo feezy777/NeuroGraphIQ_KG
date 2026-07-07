@@ -225,6 +225,7 @@ class MirrorRegionConnectionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    canonical_id: str | None = None
     source_region_candidate_id: uuid.UUID | None
     target_region_candidate_id: uuid.UUID | None
     source_region_final_id: uuid.UUID | None
@@ -383,6 +384,7 @@ class MirrorRegionCircuitRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    canonical_id: str | None = None
     resource_id: uuid.UUID | None
     batch_id: uuid.UUID | None
     llm_run_id: uuid.UUID | None

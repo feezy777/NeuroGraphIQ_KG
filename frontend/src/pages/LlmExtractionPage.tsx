@@ -18,7 +18,8 @@ import type { MacroPipelineStepId } from './llm-extraction/tabs/macro/macroClini
 import { GovernanceDashboard } from './llm-extraction/tabs/governance/GovernanceDashboard'
 import type { GovernanceGateId } from './llm-extraction/tabs/governance/governanceTypes'
 import { DataFirstCandidatesTab } from './llm-extraction/components/DataFirstCandidatesTab'
-import { LlmTaskToolbar } from './llm-extraction/components/LlmTaskToolbar'
+import { ConnectionCandidatesTab } from './llm-extraction/components/ConnectionCandidatesTab'
+// (LlmTaskToolbar removed — extraction triggers via pool indicator bar)
 import { FinalLinksPanel } from './llm-extraction/components/FinalLinksPanel'
 import { MirrorExtractionPanel } from './llm-extraction/components/MirrorExtractionPanel'
 import { ExtractionResultPanel } from './llm-extraction/components/ExtractionResultPanel'
@@ -33,6 +34,8 @@ import { FieldCompletionTab } from './llm-extraction/components/FieldCompletionT
 import { QuickExtractionCards } from './llm-extraction/components/QuickExtractionCards'
 import { PoolExtractionModal } from './llm-extraction/components/PoolExtractionModal'
 import { useCandidatePool, type PoolScope, PoolSetupError } from './llm-extraction/hooks/useCandidatePool'
+import { useConnectionPool } from './llm-extraction/hooks/useConnectionPool'
+import { TASK_PRESETS, QUICK_CARD_PRESET_MAP, buildPresetLogPayload, type TaskPreset } from './llm-extraction/taskPresets'
 import {
   type LlmDataTabId,
   type MirrorSubTabId,
@@ -5805,6 +5808,7 @@ export function LlmExtractionPage() {
     parseMirrorSubTab(initialParams.get('mirrorTab') ?? rawTab),
   )
   const [mirrorViewMode, setMirrorViewMode] = useState<'table' | 'cards'>('table')
+  const [candidateSource, setCandidateSource] = useState<'region' | 'connection'>('region')
   const [legacyFinalTab, setLegacyFinalTab] = useState<LegacyFinalTab>(() =>
     rawTab && LEGACY_FINAL_TAB_SET.has(rawTab) ? (rawTab as LegacyFinalTab) : null,
   )
@@ -5823,6 +5827,7 @@ export function LlmExtractionPage() {
   const [compositeRunning, setCompositeRunning] = useState(false)
   const [compositeSubsteps, setCompositeSubsteps] = useState<CompositeSubstepResult[]>([])
   const [compositeResult, setCompositeResult] = useState<CompositeExtractionResult | null>(null)
+  const [selectedPreset, setSelectedPreset] = useState<TaskPreset | null>(null)
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([])
   const selectedCandidateIdsRef = useRef<string[]>([])
   const handleSelectionIdsChange = useCallback((ids: string[]) => {
@@ -5894,6 +5899,21 @@ export function LlmExtractionPage() {
     clearPool,
     refresh,
   } = useCandidatePool(poolScope)
+
+  // ── Connection Pool (only active on connection tab) ─────────────────────
+  const connPoolScope = useMemo(() => (candidateSource === 'connection' && scope.source_atlas && scope.granularity_level ? {
+    sourceAtlas: scope.source_atlas,
+    granularityLevel: scope.granularity_level || 'macro',
+  } : null), [candidateSource, scope.source_atlas, scope.granularity_level])
+
+  const {
+    pool: connPool,
+    pooledConnectionIds: connPooledIds,
+    addConnections,
+    setPoolConnections,
+    clearPool: clearConnPool,
+    refresh: refreshConnPool,
+  } = useConnectionPool(connPoolScope)
 
   const setupExtractionPoolFromCurrentSelection = useCallback(async () => {
     const ids = [...new Set(selectedCandidateIdsRef.current.filter(Boolean))]
@@ -6012,42 +6032,84 @@ export function LlmExtractionPage() {
         {t('llm.dataFirst.boundaryShort')}
       </div>
 
-      <LlmTaskToolbar
-        taskTypes={taskTypes}
-        selectedTask={selectedTask}
-        onTaskChange={setSelectedTask}
-        providers={providers}
-        provider={provider}
-        onProviderChange={setProvider}
-        modelName={modelName}
-        onModelChange={setModelName}
-        dryRun={dryRun}
-        onDryRunChange={setDryRun}
-        selectedCount={selectedCount}
-        onBatchExtract={handleBatchExtract}
-        onOpenMacroBatch={() => switchDataTab('macroClinical')}
-        batchDisabled={activeDataTab !== 'candidates' && !isCompositeTask(selectedTask)}
-        batchLoading={batchLoading}
-      />
+      {/* Candidate source toggle */}
+      {activeDataTab === 'candidates' && (
+        <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+          <button
+            className={`llm-btn${candidateSource === 'region' ? ' llm-btn-primary' : ''}`}
+            style={{ fontSize: 12, padding: '4px 14px' }}
+            onClick={() => { setCandidateSource('region'); setSelectedCount(0); setSelectedCandidateIds([]); selectedCandidateIdsRef.current = [] }}
+          >
+            🧠 脑区
+          </button>
+          <button
+            className={`llm-btn${candidateSource === 'connection' ? ' llm-btn-primary' : ''}`}
+            style={{ fontSize: 12, padding: '4px 14px' }}
+            onClick={() => { setCandidateSource('connection'); setSelectedCount(0); setSelectedCandidateIds([]); selectedCandidateIdsRef.current = [] }}
+          >
+            🔗 连接
+          </button>
+        </div>
+      )}
 
-      {/* Quick extraction cards — always visible */}
+      {/* Quick extraction cards */}
       {activeDataTab === 'candidates' && (
         <QuickExtractionCards
           selectedCount={selectedCount}
+          connectionCount={connPooledIds?.size ?? 0}
+          connectionMode={candidateSource === 'connection'}
           onExtractFunction={() => {
-            void openPoolExtractModal('same_granularity_function_completion', 'same_granularity_function_completion')
+            if (candidateSource === 'connection') return
+            const preset = TASK_PRESETS.region_to_function
+            setSelectedPreset(preset)
+            console.log('[llm-preset][selected]', buildPresetLogPayload('region', preset, { pool_id: pool?.id, candidate_count: selectedCount }))
+            if (selectedCount < 1) { setCandidateMinError('请至少选择 1 个脑区'); return }
+            setShowFullExtractModal(true)
           }}
           onExtractConnection={() => {
-            void openPoolExtractModal('connection_with_function', 'same_granularity_connection_completion')
+            const tab = candidateSource === 'connection' ? 'connection' : 'region'
+            const presetId = QUICK_CARD_PRESET_MAP[tab]?.conn
+            if (!presetId) return
+            const preset = TASK_PRESETS[presetId]
+            setSelectedPreset(preset)
+            console.log('[llm-preset][selected]', buildPresetLogPayload(tab, preset, { pool_id: pool?.id, candidate_count: selectedCount }))
+            if (selectedCount < 2) { setCandidateMinError('请至少选择 2 个脑区'); return }
+            setShowFullExtractModal(true)
           }}
-          onExtractCircuit={() => {
-            void openPoolExtractModal('circuit_with_function_steps', 'composite_circuit_with_function_and_steps')
+          onExtractCircuit={async () => {
+            const tab = candidateSource === 'connection' ? 'connection' : 'region'
+            const presetId = QUICK_CARD_PRESET_MAP[tab]?.circuit
+            if (!presetId) return
+            const preset = TASK_PRESETS[presetId]
+            setSelectedPreset(preset)
+            // Connection pool: sync pool first, then open modal
+            if (tab === 'connection') {
+              if (selectedCount < 2) { setCandidateMinError(`请至少勾选 2 条连接（当前已选 ${selectedCount} 条）`); return }
+              const connIds = [...new Set(selectedCandidateIds.filter(Boolean))]
+              if (connIds.length >= 2) {
+                try {
+                  const result = await setPoolConnections(connIds)
+                  console.log('[llm-preset] setPoolConnections SUCCESS:', { poolId: result.id, memberCount: result.memberships?.length ?? 0, connectionCount: result.connection_count })
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : String(err)
+                  console.error('[llm-preset] setPoolConnections FAILED:', { msg, connCount: connIds.length, scopeSourceAtlas: scope.source_atlas, scopeGranularity: scope.granularity_level, connIdSample: connIds.slice(0, 3).map((s: string) => s.slice(0, 12)) })
+                  setCandidateMinError(`连接池同步失败: ${msg}`)
+                  return
+                }
+              } else {
+                setCandidateMinError('未能获取选中的连接 ID，请重新勾选')
+                return
+              }
+            } else {
+              if (selectedCount < 2) { setCandidateMinError('请至少选择 2 个脑区'); return }
+            }
+            setShowFullExtractModal(true)
           }}
         />
       )}
 
       {/* Pool indicator — appears when there are pooled candidates */}
-      {activeDataTab === 'candidates' && pool && (
+      {activeDataTab === 'candidates' && candidateSource === 'region' && pool && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '10px 16px', marginBottom: 12,
@@ -6104,6 +6166,47 @@ export function LlmExtractionPage() {
         </div>
       )}
 
+      {/* Connection pool indicator */}
+      {activeDataTab === 'candidates' && candidateSource === 'connection' && connPool && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '10px 16px', marginBottom: 12,
+          background: 'linear-gradient(135deg, #ecfdf5, #f0fdfa)',
+          border: '1px solid #a7f3d0', borderRadius: 10, fontSize: 14,
+        }}>
+          <span>
+            🔗 <strong>{connPool.scope_atlas}</strong> · {connPool.scope_granularity}
+            &nbsp;当前池 <strong style={{ color: '#059669' }}>{connPool.connection_count}</strong> 连接
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="llm-btn"
+              style={{ fontSize: 12, background: '#059669', color: '#fff', border: 'none', padding: '4px 14px', borderRadius: 6, fontWeight: 500, cursor: 'pointer' }}
+              onClick={() => {
+                // Navigate to FieldCompletion tab with connection pool IDs
+                const poolIds = [...connPooledIds]
+                if (poolIds.length === 0) {
+                  alert('连接池中没有连接，请先选择连接')
+                  return
+                }
+                // Switch to field completions tab
+                switchDataTab('fieldCompletions')
+                // Pre-select the connection pool scope
+                localStorage.setItem('connPoolFieldCompletionIds', JSON.stringify(poolIds))
+              }}
+            >
+              ⚡ 字段补全
+            </button>
+            <button
+              className="llm-btn llm-btn-ghost"
+              style={{ fontSize: 12, color: '#cf1322' }}
+              onClick={() => { if (confirm('清空连接池？')) clearConnPool() }}
+            >
+              清空
+            </button>
+          </div>
+        </div>
+      )}
 
       {candidateMinError && (
         <div className="llm-validation-error">
@@ -6161,7 +6264,7 @@ export function LlmExtractionPage() {
           </>
         )}
 
-        {!legacyFinalTab && activeDataTab === 'candidates' && (
+        {!legacyFinalTab && activeDataTab === 'candidates' && candidateSource === 'region' && (
           <DataFirstCandidatesTab
             onSelectCandidate={setSelectedCandidate}
             onRunCreated={handleRunCreated}
@@ -6177,6 +6280,22 @@ export function LlmExtractionPage() {
             onSelectionChange={setSelectedCount}
             onSelectionIdsChange={handleSelectionIdsChange}
             pooledCandidateIds={pooledCandidateIds}
+          />
+        )}
+        {!legacyFinalTab && activeDataTab === 'candidates' && candidateSource === 'connection' && (
+          <ConnectionCandidatesTab
+            pooledIds={connPooledIds}
+            onSelectionChange={ids => {
+              console.log('[llm-conn-selection] selection changed:', { count: ids.length, sample: ids.slice(0, 2).map((s: string) => s.slice(0, 12)) })
+              setSelectedCount(ids.length)
+            }}
+            onSelectionIdsChange={ids => {
+              handleSelectionIdsChange(ids)
+              if (ids.length >= 1 && connPoolScope) {
+                const newIds = ids.filter(id => !connPooledIds.has(id))
+                if (newIds.length > 0) addConnections(newIds)
+              }
+            }}
           />
         )}
         {!legacyFinalTab && activeDataTab === 'runs' && (
@@ -6253,6 +6372,10 @@ export function LlmExtractionPage() {
         modelName={modelName}
         providers={providers}
         workflowType={poolWorkflowType}
+        preset={selectedPreset}
+        activeTab={candidateSource}
+        connPool={connPool}
+        connPooledIds={connPooledIds}
         onProviderChange={setProvider}
         onModelChange={setModelName}
         onPoolRefresh={refresh}

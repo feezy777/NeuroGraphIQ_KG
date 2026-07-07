@@ -106,7 +106,7 @@ WORKFLOW_STEP_DEFS: dict[str, list[dict[str, Any]]] = {
     CompositeWorkflowType.circuit_with_function_steps: [
         {
             "step_key": "extract_circuits",
-            "step_label": "Extract Circuits",
+            "step_label": "Extract Circuits from Connections",
             "step_order": 1,
             "dependency_step_key": None,
             "required": True,
@@ -122,7 +122,7 @@ WORKFLOW_STEP_DEFS: dict[str, list[dict[str, Any]]] = {
             "step_key": "extract_circuit_functions",
             "step_label": "Extract Circuit Functions",
             "step_order": 3,
-            "dependency_step_key": "extract_circuits",
+            "dependency_step_key": "extract_circuit_steps",
             "required": False,
         },
     ],

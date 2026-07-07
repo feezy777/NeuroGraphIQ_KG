@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -16,6 +16,7 @@ from app.schemas.llm_field_completion import (
     FieldCompletionRunDetail,
     FieldCompletionRunListResponse,
     FieldCompletionRunRead,
+    FieldCompletionStartResponse,
     TargetType,
     UniversalFieldCompletionRequest,
     UniversalFieldCompletionResponse,
@@ -76,9 +77,10 @@ async def list_prompt_templates():
     return FieldCompletionPromptTemplateListResponse(items=raw)
 
 
-@router.post("/run", response_model=UniversalFieldCompletionResponse)
+@router.post("/run")
 async def run_field_completion(
     body: UniversalFieldCompletionRequest,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
 ):
     # Step 10.4.2: validate selected_fields use real formal field names
@@ -106,6 +108,44 @@ async def run_field_completion(
         except (UnsupportedTargetTypeError, TargetTypeNotImplementedError):
             pass  # Let the service return the proper error
 
+    # ── Async path: non-dry-run runs in background ────────────────────────
+    if not body.dry_run:
+        try:
+            start_response = await svc.start_field_completion_async(session, body)
+        except TargetTypeNotImplementedError as exc:
+            raise HTTPException(
+                status_code=501,
+                detail={"code": "TARGET_TYPE_NOT_IMPLEMENTED", "message": str(exc)},
+            ) from exc
+        except UnsupportedTargetTypeError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "UNSUPPORTED_TARGET_TYPE", "message": str(exc)},
+            ) from exc
+        except UnknownProviderError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "UNKNOWN_PROVIDER", "message": str(exc)},
+            ) from exc
+        except ProviderNotConfiguredServiceError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "PROVIDER_NOT_CONFIGURED", "message": str(exc)},
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "INVALID_REQUEST", "message": str(exc)},
+            ) from exc
+
+        background_tasks.add_task(
+            svc.execute_field_completion_background,
+            start_response.run_id,
+            body.model_dump(mode="json"),
+        )
+        return start_response
+
+    # ── Sync path: dry_run returns immediately ────────────────────────────
     try:
         return await svc.run_universal_field_completion(session, body)
     except TargetTypeNotImplementedError as exc:
@@ -187,6 +227,20 @@ async def get_run(
             detail={"code": "RUN_NOT_FOUND", "message": f"run {run_id} not found"},
         )
     return detail
+
+
+@router.post("/runs/{run_id}/cancel", response_model=FieldCompletionRunRead)
+async def cancel_run(
+    run_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+):
+    run = await svc.cancel_field_completion_run(session, run_id)
+    if run is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "RUN_NOT_FOUND", "message": f"run {run_id} not found"},
+        )
+    return FieldCompletionRunRead.model_validate(run)
 
 
 @router.get("/items", response_model=FieldCompletionItemListResponse)

@@ -41,6 +41,7 @@ class RunStatus(str, Enum):
     succeeded = "succeeded"
     partially_succeeded = "partially_succeeded"
     failed = "failed"
+    cancelled = "cancelled"
     dry_run = "dry_run"
 
 
@@ -74,7 +75,7 @@ class UniversalFieldCompletionRequest(BaseModel):
     prompt_template_key: str = "universal_field_completion_v1"
     prompt_overrides: dict[str, str] = Field(default_factory=dict)
     temperature: float = 0.2
-    max_tokens: int = 4000
+    max_tokens: int = 2000
 
 
 class FieldUpdateSummary(BaseModel):
@@ -125,6 +126,19 @@ class FieldCompletionItemRead(BaseModel):
     error_message: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class FieldCompletionStartResponse(BaseModel):
+    """Returned when a non-dry-run field completion is launched asynchronously (202)."""
+
+    run_id: uuid.UUID
+    status: RunStatus
+    provider: str
+    model_name: str | None
+    target_type: TargetType
+    target_count: int
+    dry_run: bool
+    warnings: list[str] = Field(default_factory=list)
 
 
 class FieldCompletionRunRead(BaseModel):

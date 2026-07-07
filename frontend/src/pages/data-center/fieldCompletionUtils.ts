@@ -125,19 +125,19 @@ export interface FieldCompletionFormOptions {
 export const DEFAULT_FIELD_COMPLETION_OPTIONS: FieldCompletionFormOptions = {
   provider: 'deepseek',
   modelName: 'deepseek-chat',
-  fieldScope: 'missing_only',
+  fieldScope: 'all_enrichable_fields',
   selectedFieldKeys: [],
-  dryRun: true,
+  dryRun: false,
   createMirrorUpdates: true,
   createEvidence: false,
-  overwritePolicy: 'fill_missing_only',
+  overwritePolicy: 'overwrite_with_review',
   includeExistingEvidence: true,
   includeRelatedObjects: true,
   includeProvenance: true,
   promptTemplateKey: 'universal_field_completion_v1',
   promptOverrides: {},
   temperature: 0.2,
-  maxTokens: 4000,
+  maxTokens: 2000,
 }
 
 export function buildFieldCompletionRequest(

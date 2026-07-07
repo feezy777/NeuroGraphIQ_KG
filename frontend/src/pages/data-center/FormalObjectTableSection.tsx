@@ -12,6 +12,7 @@ import type { CircuitBundleFieldCompletionGroup } from './circuitBundleTypes'
 import { buildFormalColumns } from './formalColumnBuilders'
 import type { FormalFieldMapping } from './formalFieldMappings'
 import type { FormalRow, OverlayPatch } from './fieldCompletionUtils'
+import { addConnectionPoolMembers, createConnectionPool, listConnectionPools } from '../../api/endpoints'
 
 interface Props {
   mapping: FormalFieldMapping
@@ -21,9 +22,15 @@ interface Props {
   error?: string | null
   emptyText?: string
   pageSize?: number
+  // Server-side pagination (when provided, overrides client-side pagination)
+  serverTotal?: number
+  serverPage?: number
+  onServerPageChange?: (page: number) => void
   onOpenDetail: (row: FormalRow) => void
   onRefresh?: (overlayPatch?: OverlayPatch) => void
   onDeleteSelected?: (ids: string[]) => void
+  onFetchAll?: () => Promise<FormalRow[]>
+  extraToolbarButtons?: React.ReactNode
 }
 
 export function FormalObjectTableSection({
@@ -34,9 +41,14 @@ export function FormalObjectTableSection({
   error,
   emptyText,
   pageSize: pageSizeProp,
+  serverTotal,
+  serverPage,
+  onServerPageChange,
+  extraToolbarButtons,
   onOpenDetail,
   onRefresh,
   onDeleteSelected,
+  onFetchAll,
 }: Props) {
   const { t } = useI18n()
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -50,19 +62,23 @@ export function FormalObjectTableSection({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
 
   const isCircuitBundle = mapping.targetType === 'circuit'
+  const isServerPaged = serverTotal != null
 
-  const {
-    page,
-    pageSize,
-    total,
-    pagedItems,
-    setPage,
-  } = useDataCenterPagination({ items, pageSize: pageSizeProp, resetKeys })
+  const clientPagination = useDataCenterPagination({ items, pageSize: pageSizeProp, resetKeys })
+
+  // When server pagination is active, use server values; otherwise use client pagination
+  const page = isServerPaged ? (serverPage ?? 1) : clientPagination.page
+  const pageSize = isServerPaged ? (pageSizeProp ?? 200) : clientPagination.pageSize
+  const total = isServerPaged ? serverTotal : clientPagination.total
+  const pagedItems = isServerPaged ? items : clientPagination.pagedItems
+  const setPage = isServerPaged
+    ? (p: number) => { if (onServerPageChange) onServerPageChange(p) }
+    : clientPagination.setPage
 
   useEffect(() => {
     setSelectedIds(new Set())
     setSelectAllFiltered(false)
-  }, [mapping.targetType, ...resetKeys])
+  }, [mapping.targetType, ...(isServerPaged ? [serverPage, serverTotal] : resetKeys)])
 
   const pageIds = useMemo(() => pagedItems.map(r => r.id), [pagedItems])
   const allIds = useMemo(() => items.map(r => r.id), [items])
@@ -118,12 +134,21 @@ export function FormalObjectTableSection({
     setCompletionOpen(true)
   }, [isCircuitBundle])
 
-  const openBulkCompletion = useCallback(() => {
+  const openBulkCompletion = useCallback(async () => {
     const ids = [...effectiveSelected]
     if (ids.length === 0) return
-    const rows = ids.map(id => itemById.get(id)).filter(Boolean) as FormalRow[]
+    // Server-paginated: fetch all items if selection exceeds current page
+    let lookup = itemById
+    const allInLookup = ids.every(id => lookup.has(id))
+    if (isServerPaged && onFetchAll && !allInLookup) {
+      try {
+        const allItems = await onFetchAll()
+        lookup = new Map(allItems.map(r => [r.id, r]))
+      } catch { /* fall back to current page items */ }
+    }
+    const rows = ids.map(id => lookup.get(id)).filter(Boolean) as FormalRow[]
     openCompletionForRows(rows)
-  }, [effectiveSelected, itemById, openCompletionForRows])
+  }, [effectiveSelected, itemById, items.length, isServerPaged, onFetchAll, openCompletionForRows])
 
   const completionIds = useMemo(
     () => completionTargets.map(r => r.id),
@@ -178,9 +203,17 @@ export function FormalObjectTableSection({
         <button
           type="button"
           className="btn"
-          onClick={() => {
-            setSelectAllFiltered(true)
-            setSelectedIds(new Set(allIds))
+          onClick={async () => {
+            if (isServerPaged && onFetchAll) {
+              try {
+                const allItems = await onFetchAll()
+                setSelectAllFiltered(false)
+                setSelectedIds(new Set(allItems.map(r => r.id)))
+              } catch { /* fallback to page */ }
+            } else {
+              setSelectAllFiltered(true)
+              setSelectedIds(new Set(allIds))
+            }
           }}
         >
           {t('dataCenter.selectAllFiltered')}
@@ -195,6 +228,33 @@ export function FormalObjectTableSection({
         >
           {t('dataCenter.clearSelection')}
         </button>
+        {mapping.targetType === 'projection' && effectiveSelected.size > 0 && (
+          <button
+            type="button"
+            className="btn"
+            style={{ borderColor: '#059669', color: '#059669' }}
+            onClick={async () => {
+              const ids = [...effectiveSelected]
+              try {
+                const firstItem = items.find(i => ids.includes(i.id))
+                const atlas = (firstItem as any)?.source_atlas || 'AAL3'
+                const granularity = (firstItem as any)?.granularity_level || 'macro'
+                // Check if connection pool exists for this scope
+                const { items: pools } = await listConnectionPools({ scope_atlas: atlas, scope_granularity: granularity })
+                if (pools.length > 0) {
+                  await addConnectionPoolMembers(pools[0].id, { connection_ids: ids })
+                } else {
+                  await createConnectionPool({ connection_ids: ids, scope_atlas: atlas, scope_granularity: granularity })
+                }
+              } catch (e) {
+                console.error('Failed to add connections to pool', e)
+              }
+            }}
+          >
+            🔗 加入连接池 ({effectiveSelected.size})
+          </button>
+        )}
+        {extraToolbarButtons}
         <span className="data-center-formal-selection-meta">
           {t('dataCenter.selectedCount', { count: effectiveSelected.size })}
         </span>

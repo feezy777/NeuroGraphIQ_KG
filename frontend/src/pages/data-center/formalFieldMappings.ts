@@ -23,6 +23,7 @@ export type FormalTargetType = FormalObjectType
 export type FormalFieldRenderType =
   | 'text'
   | 'id'
+  | 'canonical_id'
   | 'status'
   | 'confidence'
   | 'date'
@@ -121,17 +122,20 @@ const BASE_MAPPINGS: FormalFieldMapping[] = [
     implemented: true,
     columns: [
       col('id', 'id', 'id', ['id'], { renderType: 'id', width: 130 }),
+      col('canonical_id', 'canonical_id', 'canonical_id', ['canonical_id'], { renderType: 'canonical_id', width: 200 }),
       col('name_en', 'name_en（英文名）', 'name_en', ['name_en'], { enrichable: true }),
       col('name_cn', 'name_cn（中文名）', 'name_cn', ['name_cn'], { enrichable: true }),
       col('source_region_id', 'source_region_id（起始脑区）', 'source_region_id', ['source_region_candidate_id', 'source_region_final_id', 'source_region_id'], { required: true, renderType: 'id' }),
+      col('source_region_name', 'source_region_name（起始脑区名）', 'source_region_name', ['source_region_name_cn', 'source_region_name_en'], { renderType: 'text' }),
       col('target_region_id', 'target_region_id（目标脑区）', 'target_region_id', ['target_region_candidate_id', 'target_region_final_id', 'target_region_id'], { required: true, renderType: 'id' }),
+      col('target_region_name', 'target_region_name（目标脑区名）', 'target_region_name', ['target_region_name_cn', 'target_region_name_en'], { renderType: 'text' }),
       col('projection_type', 'projection_type（投射类型）', 'projection_type', ['connection_type', 'projection_type'], { required: true }),
       col('directionality', 'directionality（方向性）', 'directionality', ['directionality'], { enrichable: true }),
       col('strength_score', 'strength_score（强度）', 'strength_score', ['strength', 'strength_score'], { enrichable: true }),
       col('confidence_score', 'confidence_score（置信度）', 'confidence_score', ['confidence', 'confidence_score'], { renderType: 'confidence', enrichable: true }),
-      col('evidence_level', 'evidence_level（证据级别）', 'evidence_level', ['evidence_level'], { enrichable: true }),
+      col('evidence_level', 'evidence_level（证据级别）', 'evidence_level', ['evidence_level']),
       col('description', 'description（描述）', 'description', ['description', 'evidence_text'], { enrichable: true }),
-      col('remark', 'remark（备注）', 'remark', ['remark'], { enrichable: true }),
+      col('remark', 'remark（备注）', 'remark', ['remark']),
       col('attributes', 'attributes（属性）', 'attributes', ['attributes', 'raw_payload_json'], { renderType: 'json' }),
       col('source_db', 'source_db（来源库）', 'source_db', ['source_atlas', 'source_db']),
       col('status', 'status（状态）', 'status', ['status'], { renderType: 'status' }),
@@ -165,9 +169,9 @@ const BASE_MAPPINGS: FormalFieldMapping[] = [
       col('function_role', 'function_role（功能角色）', 'function_role', ['relation_type', 'function_role'], { enrichable: true }),
       col('effect_type', 'effect_type（效应类型）', 'effect_type', ['effect_type'], { enrichable: true }),
       col('confidence_score', 'confidence_score（置信度）', 'confidence_score', ['confidence', 'confidence_score'], { renderType: 'confidence', enrichable: true }),
-      col('evidence_level', 'evidence_level（证据级别）', 'evidence_level', ['evidence_level'], { enrichable: true }),
+      col('evidence_level', 'evidence_level（证据级别）', 'evidence_level', ['evidence_level']),
       col('description', 'description（描述）', 'description', ['description', 'evidence_text'], { enrichable: true }),
-      col('remark', 'remark（备注）', 'remark', ['remark'], { enrichable: true }),
+      col('remark', 'remark（备注）', 'remark', ['remark']),
       col('attributes', 'attributes（属性）', 'attributes', ['attributes', 'raw_payload_json'], { renderType: 'json' }),
       col('source_db', 'source_db（来源库）', 'source_db', ['source_atlas', 'source_db']),
       col('status', 'status（状态）', 'status', ['status'], { renderType: 'status' }),
@@ -193,13 +197,14 @@ const BASE_MAPPINGS: FormalFieldMapping[] = [
     implemented: true,
     columns: [
       col('id', 'id', 'id', ['id'], { renderType: 'id', width: 130 }),
+      col('canonical_id', 'canonical_id', 'canonical_id', ['canonical_id', 'circuit_name'], { renderType: 'canonical_id', width: 200 }),
       col('name_cn', 'name_cn（中文名）', 'name_cn', ['name_cn', 'circuit_name_cn'], { required: true, enrichable: true }),
       col('name_en', 'name_en（英文名）', 'name_en', ['circuit_name', 'name_en', 'name'], { required: true, enrichable: true }),
       col('circuit_class', 'circuit_class（回路类别）', 'circuit_class', ['circuit_type', 'circuit_class'], { required: true, enrichable: true }),
       col('canonical_start_region_id', 'canonical_start_region_id（起始端标准脑区）', 'canonical_start_region_id', ['canonical_start_region_id'], { enrichable: true, renderType: 'id' }),
       col('canonical_end_region_id', 'canonical_end_region_id（终止端标准脑区）', 'canonical_end_region_id', ['canonical_end_region_id'], { enrichable: true, renderType: 'id' }),
       col('description', 'description（描述）', 'description', ['description', 'function_association'], { enrichable: true }),
-      col('remark', 'remark（备注）', 'remark', ['remark'], { enrichable: true }),
+      col('remark', 'remark（备注）', 'remark', ['remark']),
       col('attributes', 'attributes（属性）', 'attributes', ['attributes', 'raw_payload_json'], { renderType: 'json' }),
       col('source_db', 'source_db（来源库）', 'source_db', ['source_atlas', 'source_db']),
       col('status', 'status（状态）', 'status', ['status'], { renderType: 'status' }),
@@ -234,7 +239,7 @@ const BASE_MAPPINGS: FormalFieldMapping[] = [
       col('projection_id', 'projection_id（关联投射）', 'projection_id', ['projection_id'], { renderType: 'id' }),
       col('role_in_circuit', 'role_in_circuit（回路角色）', 'role_in_circuit', ['role', 'role_in_circuit', 'step_role'], { enrichable: true }),
       col('description', 'description（描述）', 'description', ['description', 'evidence_text'], { enrichable: true }),
-      col('remark', 'remark（备注）', 'remark', ['remark'], { enrichable: true }),
+      col('remark', 'remark（备注）', 'remark', ['remark']),
       col('attributes', 'attributes（属性）', 'attributes', ['attributes', 'raw_payload_json'], { renderType: 'json' }),
       col('source_db', 'source_db（来源库）', 'source_db', ['source_atlas', 'source_db']),
       col('status', 'status（状态）', 'status', ['status'], { renderType: 'status' }),
@@ -268,7 +273,7 @@ const BASE_MAPPINGS: FormalFieldMapping[] = [
       col('confidence_score', 'confidence_score（置信度）', 'confidence_score', ['confidence', 'confidence_score'], { renderType: 'confidence', enrichable: true }),
       col('evidence_level', 'evidence_level（证据级别）', 'evidence_level', ['evidence_level'], { enrichable: true }),
       col('description', 'description（描述）', 'description', ['description', 'evidence_text'], { enrichable: true }),
-      col('remark', 'remark（备注）', 'remark', ['remark'], { enrichable: true }),
+      col('remark', 'remark（备注）', 'remark', ['remark']),
       col('attributes', 'attributes（属性）', 'attributes', ['attributes', 'raw_payload_json'], { renderType: 'json' }),
       col('source_db', 'source_db（来源库）', 'source_db', ['source_atlas', 'source_db']),
       col('status', 'status（状态）', 'status', ['status'], { renderType: 'status' }),
@@ -303,9 +308,9 @@ const BASE_MAPPINGS: FormalFieldMapping[] = [
       col('function_term_cn', 'function_term_cn（功能术语中文）', 'function_term_cn', ['function_term_cn'], { enrichable: true }),
       col('function_domain', 'function_domain（功能域）', 'function_domain', ['function_category', 'function_domain'], { enrichable: true }),
       col('confidence_score', 'confidence_score（置信度）', 'confidence_score', ['confidence', 'confidence_score'], { renderType: 'confidence', enrichable: true }),
-      col('evidence_level', 'evidence_level（证据级别）', 'evidence_level', ['evidence_level'], { enrichable: true }),
+      col('evidence_level', 'evidence_level（证据级别）', 'evidence_level', ['evidence_level']),
       col('description', 'description（描述）', 'description', ['description', 'evidence_text'], { enrichable: true }),
-      col('remark', 'remark（备注）', 'remark', ['remark'], { enrichable: true }),
+      col('remark', 'remark（备注）', 'remark', ['remark']),
       col('attributes', 'attributes（属性）', 'attributes', ['attributes', 'raw_payload_json'], { renderType: 'json' }),
       col('source_db', 'source_db（来源库）', 'source_db', ['source_atlas', 'source_db']),
       col('status', 'status（状态）', 'status', ['status'], { renderType: 'status' }),
@@ -336,7 +341,7 @@ const BASE_MAPPINGS: FormalFieldMapping[] = [
       col('source_step_id', 'source_step_id', 'source_step_id', ['source_step_id'], { renderType: 'id' }),
       col('target_step_id', 'target_step_id', 'target_step_id', ['target_step_id'], { renderType: 'id' }),
       col('role_in_circuit', 'role_in_circuit（回路角色）', 'role_in_circuit', ['role_in_circuit', 'membership_role'], { enrichable: true }),
-      col('confidence', 'confidence（置信度）', 'membership_confidence', ['confidence', 'membership_confidence'], { renderType: 'confidence', enrichable: true }),
+      col('confidence', 'confidence（置信度）', 'confidence_score', ['confidence', 'confidence_score'], { renderType: 'confidence', enrichable: true }),
       col('source_method', 'source_method', 'source_method', ['source_method']),
       col('verification_status', 'verification_status', 'verification_status', ['verification_status'], { renderType: 'status' }),
       col('cross_validation_status', 'cross_validation_status', 'cross_validation_status', ['cross_validation_status'], { derived: true, renderType: 'status' }),
@@ -456,9 +461,15 @@ function resolveDerived(column: FormalFieldColumn, item: Record<string, unknown>
       if (item.evidence_count != null) return item.evidence_count
       return item.evidence_text ? 1 : null
     case 'provenance': {
-      const parts = [item.llm_run_id, item.batch_id, item.resource_id, item.created_by].filter(
-        v => v != null && v !== '',
-      )
+      const ts = typeof item.created_at === 'string'
+        ? item.created_at.slice(0, 16).replace('T', ' ')
+        : ''
+      const parts: string[] = []
+      if (ts) parts.push(ts)
+      if (item.llm_run_id) parts.push(`run:${(item.llm_run_id as string).slice(0, 8)}`)
+      if (item.batch_id) parts.push(`batch:${(item.batch_id as string).slice(0, 8)}`)
+      if (item.source_atlas) parts.push(item.source_atlas as string)
+      if (item.created_by) parts.push(`by:${item.created_by}`)
       return parts.length > 0 ? parts.join(' · ') : null
     }
     default:
@@ -600,7 +611,8 @@ export function computeMissingFields(
 ): string[] {
   const missing: string[] = []
   for (const column of mapping.columns) {
-    if (!column.required) continue
+    // Check ALL enrichable fields (not just required), skip governance
+    if (!column.enrichable) continue
     if (column.group === 'governance') continue
     const value = getFieldValue(item, column)
     if (isFieldValueEmpty(value)) missing.push(column.finalField)
@@ -612,12 +624,12 @@ export function computeCompleteness(
   items: Record<string, unknown>[],
   mapping: FormalFieldMapping,
 ): number {
-  const requiredCols = mapping.columns.filter(c => c.required && c.group !== 'governance')
-  if (requiredCols.length === 0 || items.length === 0) return 100
+  const enrichableCols = mapping.columns.filter(c => c.enrichable && c.group !== 'governance')
+  if (enrichableCols.length === 0 || items.length === 0) return 100
   let filled = 0
   let total = 0
   for (const item of items) {
-    for (const col of requiredCols) {
+    for (const col of enrichableCols) {
       total += 1
       if (!isFieldValueEmpty(getFieldValue(item, col))) filled += 1
     }

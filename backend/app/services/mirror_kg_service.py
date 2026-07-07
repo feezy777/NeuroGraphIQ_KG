@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -281,7 +282,7 @@ async def create_mirror_connection(
     existing = await _find_existing_connection_for_merge(session, payload)
 
     if existing is not None and existing.review_status in (
-        MirrorReviewStatus.pending, MirrorReviewStatus.needs_review
+        MirrorReviewStatus.pending, MirrorReviewStatus.needs_revision
     ):
         old_conf = existing.confidence or 0.0
         new_conf = payload.confidence or 0.0
@@ -339,11 +340,31 @@ async def create_mirror_connection(
             confidence=payload.confidence,
         )
     data["raw_payload_json"] = raw
-    row = MirrorRegionConnection(**data)
-    session.add(row)
-    await session.flush()
-    await session.refresh(row)
-    return row
+    try:
+        row = MirrorRegionConnection(**data)
+        session.add(row)
+        await session.flush()
+        await session.refresh(row)
+        return row
+    except IntegrityError:
+        await session.rollback()
+        existing = await _find_existing_connection_for_merge(session, payload)
+        if existing is not None:
+            new_conf = payload.confidence or 0.0
+            old_conf = existing.confidence or 0.0
+            if new_conf > old_conf:
+                for f in ('connection_type','directionality','strength','modality','confidence','evidence_text'):
+                    if getattr(payload, f, None) is not None:
+                        setattr(existing, f, getattr(payload, f))
+            old_prov = _extract_provenance(existing)
+            merged_prov = _update_provenance(old_prov, llm_run_id=payload.llm_run_id, llm_item_id=payload.llm_item_id, action='updated' if new_conf > old_conf else 'skipped')
+            existing_raw = dict(existing.raw_payload_json or {})
+            existing_raw['provenance'] = merged_prov
+            existing.raw_payload_json = existing_raw
+            flag_modified(existing, 'raw_payload_json')
+            await session.flush()
+            await session.refresh(existing)
+        return existing
 
 
 async def list_mirror_connections(
@@ -456,7 +477,7 @@ async def create_mirror_function(
     )
 
     if existing is not None and existing.review_status in (
-        MirrorReviewStatus.pending, MirrorReviewStatus.needs_review
+        MirrorReviewStatus.pending, MirrorReviewStatus.needs_revision
     ):
         old_conf = existing.confidence or 0.0
         new_conf = payload.confidence or 0.0
@@ -674,7 +695,7 @@ async def create_mirror_circuit(
     )
 
     if existing is not None and existing.review_status in (
-        MirrorReviewStatus.pending, MirrorReviewStatus.needs_review
+        MirrorReviewStatus.pending, MirrorReviewStatus.needs_revision
     ):
         old_conf = existing.confidence or 0.0
         new_conf = payload.confidence or 0.0

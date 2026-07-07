@@ -495,6 +495,65 @@ export const removePoolMembers = (poolId: string, body: CandidatePoolMembersRequ
 export const deleteCandidatePool = (poolId: string) =>
   deleteJson<void>(`/api/candidates/pools/${poolId}`)
 
+// ── Connection Pools ──────────────────────────────────────────────────────
+
+export interface ConnectionPoolMember {
+  id: string
+  pool_id: string
+  connection_id: string
+  added_source: string
+  added_at: string
+}
+
+export interface ConnectionPool {
+  id: string
+  name: string | null
+  scope_atlas: string
+  scope_granularity: string
+  source: string
+  resource_id: string | null
+  batch_id: string | null
+  connection_count: number
+  created_at: string
+  updated_at: string
+  memberships: ConnectionPoolMember[]
+}
+
+export interface ConnectionPoolCreateRequest {
+  name?: string | null
+  connection_ids: string[]
+  scope_atlas: string
+  scope_granularity: string
+  source?: string
+  resource_id?: string | null
+  batch_id?: string | null
+}
+
+export interface ConnectionPoolMembersRequest {
+  connection_ids: string[]
+}
+
+export const createConnectionPool = (body: ConnectionPoolCreateRequest) =>
+  postJson<ConnectionPool>('/api/connection-pools', body)
+
+export const replaceConnectionPool = (body: ConnectionPoolCreateRequest) =>
+  postJson<ConnectionPool>('/api/connection-pools/replace', body)
+
+export const listConnectionPools = (params?: Record<string, string | number | undefined>) =>
+  getJson<{ items: ConnectionPool[]; total: number }>('/api/connection-pools', params)
+
+export const getConnectionPool = (poolId: string) =>
+  getJson<ConnectionPool>(`/api/connection-pools/${poolId}`)
+
+export const addConnectionPoolMembers = (poolId: string, body: ConnectionPoolMembersRequest) =>
+  postJson<ConnectionPool>(`/api/connection-pools/${poolId}/members`, body)
+
+export const removeConnectionPoolMembers = (poolId: string, body: ConnectionPoolMembersRequest) =>
+  deleteJson<ConnectionPool>(`/api/connection-pools/${poolId}/members`, undefined, body)
+
+export const deleteConnectionPool = (poolId: string) =>
+  deleteJson<void>(`/api/connection-pools/${poolId}`)
+
 // ── Rule Validation ───────────────────────────────────────────────────────────
 export interface RuleValidationRun {
   id: string
@@ -1377,6 +1436,17 @@ export interface UniversalFieldCompletionResponse {
   dry_run: boolean
 }
 
+export interface FieldCompletionStartResponse {
+  run_id: string
+  status: string
+  provider: string
+  model_name: string | null
+  target_type: string
+  target_count: number
+  dry_run: boolean
+  warnings: string[]
+}
+
 export interface FieldCompletionRun {
   id: string
   provider: string
@@ -1424,7 +1494,10 @@ export interface FieldCompletionRunDetail extends FieldCompletionRun {
 }
 
 export const runUniversalFieldCompletion = (body: UniversalFieldCompletionRequest) =>
-  postJson<UniversalFieldCompletionResponse>('/api/llm-extraction/field-completion/run', body)
+  postJson<UniversalFieldCompletionResponse | FieldCompletionStartResponse>('/api/llm-extraction/field-completion/run', body)
+
+export const cancelFieldCompletionRun = (runId: string) =>
+  postJson<FieldCompletionRun>(`/api/llm-extraction/field-completion/runs/${runId}/cancel`)
 
 export const listFieldCompletionRuns = (p?: {
   target_type?: FieldCompletionTargetType
@@ -1489,6 +1562,70 @@ export const getFieldCompletionPromptTemplates = () =>
   getJson<{ items: FieldCompletionPromptTemplate[] }>(
     '/api/llm-extraction/field-completion/prompt-templates',
   )
+
+// ── Circuit Pack Extraction ────────────────────────────────────────────────
+
+export interface CircuitExtractionRequest {
+  provider: string
+  model_name?: string | null
+  candidate_ids?: string[]
+  connection_ids?: string[]
+  pool_id?: string | null
+  candidates_per_pack?: number
+  shuffle_rounds?: number
+  pack_concurrency?: number
+  temperature?: number
+  max_tokens?: number
+  dry_run?: boolean
+}
+
+export interface CircuitExtractionStartResponse {
+  run_id: string
+  status: string
+  provider: string
+  model_name: string | null
+  candidate_count: number
+  dry_run: boolean
+  estimated_packs: number
+  estimated_llm_calls: number
+  estimated_input_tokens: number
+  estimated_output_tokens: number
+  estimated_cost_cny: number
+}
+
+export interface CircuitExtractionRunRead {
+  id: string
+  provider: string
+  model_name: string | null
+  candidate_count: number
+  pack_count: number
+  circuit_count: number
+  step_count: number
+  function_count: number
+  succeeded_packs: number
+  no_findings_packs: number
+  failed_packs: number
+  status: string
+  request_json: Record<string, unknown> | null
+  result_summary_json: Record<string, unknown> | null
+  usage_summary_json: Record<string, unknown> | null
+  pack_results_json: Record<string, unknown>[] | null
+  errors_json: unknown[]
+  warnings_json: unknown[]
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  updated_at: string
+}
+
+export const runCircuitExtraction = (body: CircuitExtractionRequest) =>
+  postJson<CircuitExtractionStartResponse>('/api/llm-extraction/circuit-extraction/run', body)
+
+export const getCircuitExtractionRun = (runId: string) =>
+  getJson<CircuitExtractionRunRead>(`/api/llm-extraction/circuit-extraction/runs/${runId}`)
+
+export const cancelCircuitExtractionRun = (runId: string) =>
+  postJson<CircuitExtractionRunRead>(`/api/llm-extraction/circuit-extraction/runs/${runId}/cancel`)
 
 export interface ExtractionPromptTemplate {
   key: string
@@ -3237,6 +3374,43 @@ export interface CompositeWorkflowCancelResponse {
   deleted: Record<string, number>
   warnings?: string[]
   errors?: string[]
+}
+
+/** Stage-level dry run cost estimation plan */
+export interface StagePlan {
+  step_order: number
+  stage_name: string
+  estimation_method: string
+  required: boolean
+  depends_on?: string
+  planned_call_count: number
+  total_input_tokens: number
+  total_expected_output_tokens: number
+  total_max_output_tokens: number
+  total_base_cost: number
+  total_retry_risk_cost: number
+  total_upper_bound_cost: number
+}
+
+/** Top-level dry run cost estimation plan */
+export interface DryRunPlan {
+  workflow_type: string
+  extraction_mode?: string
+  provider: string
+  model: string
+  candidate_count: number
+  total_pair_count?: number
+  pair_count?: number
+  total_planned_llm_calls: number
+  skipped_existing_connections?: number
+  total_base_cost: number
+  total_upper_bound_cost: number
+  budget_cny?: number
+  pricing_model_version?: string
+  cache_strategy?: string
+  pricing_missing?: string[]
+  warnings?: string[]
+  stages: StagePlan[]
 }
 
 export interface CompositeWorkflowRunRequest {

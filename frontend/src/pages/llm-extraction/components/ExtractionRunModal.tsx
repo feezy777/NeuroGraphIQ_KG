@@ -102,28 +102,35 @@ export function ExtractionRunModal(props: ExtractionRunModalProps) {
   const [error, setError] = useState<string | null>(null)
   // Batch progress
   const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0, created: 0, packDone: 0, packTotal: 0 })
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const cancelledRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
 
   const { data: templatesData } = useData(() => getExtractionPromptTemplates(taskDef.promptCategory ?? 'extraction'), [taskDef.promptCategory])
   const templates = templatesData?.items ?? []
 
-  useEffect(() => { if (timerRef.current) clearInterval(timerRef.current) }, [])
   useEffect(() => {
     if (taskDef.taskParams) { const d: Record<string,number> = {}; for (const p of taskDef.taskParams) d[p.key] = p.default; setTaskParamValues(d) }
   }, [taskId])
   useEffect(() => {
     if (promptTemplateKey && templates.length) { const tm = templates.find(t => t.key === promptTemplateKey); if (tm) { setSystemPrompt(tm.system_prompt ?? ''); setUserPrompt(tm.template ?? '') } }
-  }, [promptTemplateKey, templates])
+  }, [promptTemplateKey, templatesData?.items])
 
   // ── Execution ──────────────────────────────────────────────────────────
+  const execStartRef = useRef(0)
+
+  // Elapsed timer — starts when phase becomes 'running', auto-cleans on unmount
+  useEffect(() => {
+    if (phase !== 'running') return
+    const startTime = execStartRef.current || Date.now()
+    const timer = setInterval(() => setElapsedMs(Date.now() - startTime), 1000)
+    return () => clearInterval(timer)
+  }, [phase])
+
   const startExecution = useCallback(async () => {
     setPhase('running'); setError(null); cancelledRef.current = false
     abortRef.current = new AbortController()
     const signal = abortRef.current.signal
-    const startTime = Date.now()
-    timerRef.current = setInterval(() => setElapsedMs(Date.now() - startTime), 1000)
+    execStartRef.current = Date.now()
 
     const commonParams = {
       provider, model_name: modelName || undefined,
@@ -156,7 +163,7 @@ export function ExtractionRunModal(props: ExtractionRunModalProps) {
               const connStep = steps.find(s => s.id === 'connection')
               const es = connStep?.executionSummary as Record<string, unknown> | undefined
               const packTotal = Number(es?.pack_count ?? 0)
-              const packDone = Number(es?.executed_pack_count ?? es?.processed_pack_count ?? 0)
+              const packDone = Number(es?.processed_pack_count ?? 0)
               setBatchProgress({ done: doneSteps, total: steps.length || 1, created: totalCreated, packDone, packTotal })
             } },
           signal)
@@ -237,23 +244,21 @@ export function ExtractionRunModal(props: ExtractionRunModalProps) {
       setError(e instanceof ApiError ? e.message : String(e))
       setSubsteps(s => s.map(st => ({ ...st, status: 'failed' as const })))
     } finally {
-      if (timerRef.current) clearInterval(timerRef.current)
-      setElapsedMs(Date.now() - startTime)
+      setElapsedMs(Date.now() - execStartRef.current)
       setPhase('complete')
     }
   }, [taskId, isComposite, provider, modelName, dryRun, temperature, maxTokens, taskParamValues, createMirror, createTriples, createEvidence, promptTemplateKey, systemPrompt, selectedCandidateIds, scope, debugSinglePack, taskLabel])
 
   const handleCancel = useCallback(async () => {
     cancelledRef.current = true
-    if (timerRef.current) clearInterval(timerRef.current)
     // Abort the polling signal so runCompositeExtractionTask stops cleanly
-    try { abortRef.current?.abort() } catch (_) { /* ignore */ }
+    try { abortRef.current?.abort() } catch (err) { console.error('[ExtractionRunModal] Abort failed:', err) }
     // Call backend cancel API so the server stops processing
     if (workflowRunId) {
       try {
         await cancelCompositeWorkflow(workflowRunId, { cleanup: true, reason: 'user_cancelled' })
-      } catch (_) {
-        // Ignore cancel errors — the modal is closing anyway
+      } catch (err) {
+        console.error('[ExtractionRunModal] Cancel API failed:', err)
       }
     }
     onClose()

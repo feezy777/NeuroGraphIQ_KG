@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.llm_field_completion import LlmFieldCompletionItem, LlmFieldCompletionRun
 from app.schemas.llm_field_completion import (
@@ -82,6 +83,7 @@ async def apply_deterministic_fields(
     apply_field_update,
     overwrite_policy,
     create_mirror_updates,
+    resolved_model: str | None = None,
 ) -> tuple[int, dict[uuid.UUID, dict[str, Any]], int]:
     """Returns (applied_count, canonical_resolution_by_circuit_id, resolver_warning_count)."""
     from app.services.llm_field_completion_service import determine_fields_to_complete
@@ -238,6 +240,8 @@ async def apply_deterministic_fields(
             if entry is not None and is_overlay_field(entry, field_name):
                 existing = get_field_value(target, field_name)
                 if not is_empty_value(existing) and overwrite_policy == OverwritePolicy.fill_missing_only:
+                    # fill_missing_only: skip non-empty fields
+                    # overwrite_with_review: overwrite existing values
                     item = make_item(
                         run.id,
                         request.target_type.value,
@@ -261,6 +265,15 @@ async def apply_deterministic_fields(
                     meta_extra=meta_extra,
                 ):
                     status = ItemStatus.applied_overlay
+                    # Update mirror_status for overlay writes too
+                    if hasattr(target, "mirror_status") and resolved_model:
+                        from app.services.llm_field_completion_service import (
+                            _resolve_model_status,
+                            _should_update_mirror_status,
+                        )
+                        tier_status = _resolve_model_status(resolved_model)[0]
+                        if _should_update_mirror_status(target, resolved_model):
+                            target.mirror_status = tier_status
                 else:
                     status = ItemStatus.suggested
             else:
@@ -275,6 +288,7 @@ async def apply_deterministic_fields(
                     confidence=confidence,
                     overlay_source=overlay_source,
                     overlay_meta_extra=meta_extra,
+                    resolved_model=resolved_model,
                 )
 
             if status in (ItemStatus.applied, ItemStatus.applied_direct, ItemStatus.applied_overlay):
@@ -303,6 +317,183 @@ async def apply_deterministic_fields(
     return applied, canonical_cache, resolver_warnings
 
 
+_PER_CONN_SYSTEM_PROMPT = (
+    "You are a neuroscientist annotating brain connectivity data. "
+    "For each connection, infer all metadata fields based on source/target region names "
+    "and neuroanatomical knowledge. Output ONLY valid JSON. "
+    "Never use UUIDs or hash values in any field. "
+    "Use descriptive English names for name_en, evidence-based descriptions."
+)
+
+_PER_CONN_USER_TEMPLATE = (
+    "Connection: {source_name} → {target_name}\n"
+    "Atlas: {atlas}\nGranularity: {granularity}\n\n"
+    "Current metadata:\n{current_metadata}\n\n"
+    "Based on neuroanatomical knowledge about these regions, "
+    "infer the most accurate values for ALL fields. "
+    "Improve existing values where possible; fill in missing ones.\n\n"
+    "Output ONLY this JSON:\n"
+    '{{"projection_type":"structural_connection|functional_connectivity|effective_connectivity|projection|association|coactivation|uncertain_connection|unknown",'
+    '"directionality":"directed|undirected|bidirectional|unknown",'
+    '"modality":"structural_connection|functional_connection|diffusion_tensor|other",'
+    '"strength_score":0.0,"confidence_score":0.0,'
+    '"evidence_text":"...","canonical_id":"region1→region2","name_en":"...","name_cn":"...",'
+    '"description":"...","source_db":"neuroanatomical_literature|inferred|computational_model|unknown",'
+    '"status":"validated|proposed|uncertain"}}'
+)
+
+
+async def execute_per_connection_fields(
+    session: AsyncSession,
+    run: LlmFieldCompletionRun,
+    request: UniversalFieldCompletionRequest,
+    entry,
+    targets: dict[uuid.UUID, Any],
+    items: list[LlmFieldCompletionItem],
+    warnings: list[str],
+    errors: list[str],
+    *,
+    provider_key: str,
+    resolved_model: str,
+    make_item,
+    apply_field_update,
+    call_provider,
+    check_cancelled=None,
+) -> tuple[int, int]:
+    """One LLM call per connection — all 11 fields at once. Returns (model_call_count, llm_applied)."""
+    import json as _json
+    from app.services.field_completion_registry import is_deterministic_field, is_empty_value, get_field_value
+    from app.services.llm_field_completion_service import OverwritePolicy
+
+    enrichable = list(entry.enrichable_fields)
+    det_fields = {f for f in enrichable if is_deterministic_field(entry, f)}
+    llm_fields = [f for f in enrichable if f not in det_fields]
+
+    model_call_count = 0
+    llm_applied = 0
+    processed = 0
+    total = len(targets)
+
+    for tid, target in targets.items():
+        if check_cancelled and await check_cancelled(session, run.id):
+            warnings.append(f"Cancelled after {processed}/{total} connections")
+            break
+
+        # Build context from existing data
+        src_name = getattr(target, 'source_region_name_en', '') or getattr(target, 'source_region_name_cn', '') or str(getattr(target, 'source_region_candidate_id', ''))[:8]
+        tgt_name = getattr(target, 'target_region_name_en', '') or getattr(target, 'target_region_name_cn', '') or str(getattr(target, 'target_region_candidate_id', ''))[:8]
+        atlas = getattr(target, 'source_atlas', '') or ''
+
+        current_lines = []
+        for f in enrichable:
+            val = get_field_value(target, f)
+            if not is_empty_value(val):
+                current_lines.append(f"  {f}: {val}")
+        current_metadata = '\n'.join(current_lines) if current_lines else '  (no existing values)'
+
+        user_prompt = _PER_CONN_USER_TEMPLATE.format(
+            source_name=src_name or 'unknown',
+            target_name=tgt_name or 'unknown',
+            atlas=atlas or 'unknown',
+            granularity=getattr(target, 'granularity_level', '') or 'macro',
+            current_metadata=current_metadata,
+        )
+
+        try:
+            response = await call_provider(
+                provider_key,
+                model=resolved_model,
+                system_prompt=_PER_CONN_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                response_schema=None,
+            )
+            model_call_count += 1
+            raw_text = response.raw_text or ''
+            parsed = response.parsed_json
+            if parsed is None and raw_text:
+                cleaned = raw_text.strip()
+                if cleaned.startswith('```'):
+                    lines = cleaned.split('\n')
+                    lines = [l for l in lines if not l.startswith('```')]
+                    cleaned = '\n'.join(lines).strip()
+                try:
+                    parsed = _json.loads(cleaned)
+                except _json.JSONDecodeError:
+                    pass
+            if parsed is None:
+                parsed = {}
+        except Exception as exc:
+            errors.append(f"Connection {str(tid)[:12]}: LLM failed - {exc}")
+            processed += 1
+            continue
+
+        # Normalize values to DB-valid enums
+        _conn_type_map = {
+            'structural': 'structural_connection', 'functional': 'functional_connectivity',
+            'diffusion_tensor': 'structural_connection', 'other': 'uncertain_connection',
+        }
+        _dir_map = {'directed': 'directed', 'undirected': 'undirected', 'bidirectional': 'bidirectional'}
+
+        # Apply each field from LLM response
+        for field_name in llm_fields:
+            value = parsed.get(field_name)
+            if value is None or is_empty_value(value):
+                continue
+            # Normalize connection_type and directionality to DB-valid values
+            if field_name == 'projection_type':
+                v = str(value).strip().lower()
+                value = _conn_type_map.get(v, v if v in (
+                    'structural_connection','functional_connectivity','effective_connectivity',
+                    'projection','association','coactivation','uncertain_connection','unknown'
+                ) else 'uncertain_connection')
+            elif field_name == 'directionality':
+                v = str(value).strip().lower()
+                value = _dir_map.get(v, v if v in ('directed','undirected','bidirectional','unknown') else 'unknown')
+            try:
+                old_value = get_field_value(target, field_name)  # Capture BEFORE mutation
+                status = apply_field_update(
+                    target, field_name, value,
+                    entry=entry, overwrite_policy=request.overwrite_policy,
+                    create_mirror_updates=request.create_mirror_updates,
+                    run_id=run.id, resolved_model=resolved_model,
+                    confidence=parsed.get('confidence_score'),
+                )
+                if status and 'applied' in (status.value if hasattr(status, 'value') else str(status)):
+                    llm_applied += 1
+                item = make_item(
+                    run.id, request.target_type.value, tid, field_name,
+                    old_value=old_value,
+                    status=status,
+                    suggested=value,
+                    reasoning_summary=f"Per-connection LLM completion for {field_name}",
+                )
+                session.add(item)
+                items.append(item)
+            except Exception as exc:
+                logger.warning("field completion failed target=%s field=%s: %s", tid, field_name, exc)
+                errors.append(f"target {str(tid)[:12]} field {field_name}: {exc}")
+
+        processed += 1
+        # Progress update every 10 connections
+        if processed % 10 == 0 or processed == total:
+            run.summary_json = to_jsonable({
+                **(run.summary_json or {}),
+                "total_packs": total,
+                "processed_packs": processed,
+                "current_field": "all_fields",
+                "processed_items": len(items),
+                "model_call_count": model_call_count,
+                "llm_applied": llm_applied,
+                "skipped_existing": len(items) - llm_applied,
+            })
+            flag_modified(run, "summary_json")
+            await session.commit()
+
+    return model_call_count, llm_applied
+
+
 async def execute_batched_llm_fields(
     session: AsyncSession,
     run: LlmFieldCompletionRun,
@@ -323,6 +514,7 @@ async def execute_batched_llm_fields(
     validate_field_updates,
     validate_field_value_quality,
     format_reasoning_with_consistency,
+    check_cancelled=None,
 ) -> tuple[int, int, int, int, int]:
     """Returns model_call_count, rejected_count, estimated_input_tokens, pack_count, llm_applied."""
     from app.services.llm_field_completion_service import determine_fields_to_complete
@@ -332,6 +524,7 @@ async def execute_batched_llm_fields(
     llm_applied = 0
     estimated_input_tokens = 0
     pack_count = 0
+    processed_packs = 0
 
     llm_field_names: set[str] = set()
     for target in targets.values():
@@ -343,6 +536,41 @@ async def execute_batched_llm_fields(
         )
         _, llm_fields = split_deterministic_and_llm_fields(entry, fields)
         llm_field_names.update(llm_fields)
+
+    # Pre-count total packs for progress tracking
+    total_packs = 0
+    for pf_name in sorted(llm_field_names):
+        pf_records: list[dict[str, Any]] = []
+        for ptid, ptarget in targets.items():
+            pf_fields = determine_fields_to_complete(
+                ptarget, entry,
+                field_scope=request.field_scope,
+                selected_fields=request.selected_fields,
+            )
+            if pf_name not in pf_fields or is_deterministic_field(entry, pf_name):
+                continue
+            pcircuit_id = ptid if request.target_type == TargetType.circuit else None
+            pcanonical = canonical_cache.get(pcircuit_id or ptid, {})
+            pcompact = build_compact_field_context(
+                ptarget, pf_name, canonical_resolution=pcanonical,
+            )
+            pcompact["target_id"] = str(ptid)
+            pf_records.append(pcompact)
+        if pf_records:
+            sys_prompt, usr_prompt, _, _ = build_batch_field_prompt(
+                entry, pf_name, pf_records, request, prompt_overrides=request.prompt_overrides,
+            )
+            total_packs += len(pack_target_batches(pf_records, system_prompt=sys_prompt, template_body=usr_prompt))
+
+    run.summary_json = to_jsonable({
+        **(run.summary_json or {}),
+        "total_packs": total_packs,
+        "processed_packs": 0,
+        "current_field": "",
+        "processed_items": 0,
+    })
+    flag_modified(run, "summary_json")
+    await session.commit()
 
     for field_name in sorted(llm_field_names):
         records: list[dict[str, Any]] = []
@@ -390,6 +618,11 @@ async def execute_batched_llm_fields(
             )
             estimated_input_tokens += estimate_prompt_tokens(system_prompt) + estimate_prompt_tokens(batch_user_prompt)
 
+            # ── Cancellation check before LLM call ────────────────────────
+            if check_cancelled is not None and await check_cancelled(session, run.id):
+                # Abort mid-execution: return current counts without processing remaining packs
+                return model_call_count, rejected_count, estimated_input_tokens, pack_count, llm_applied
+
             try:
                 if provider_key == "mock":
                     raise RuntimeError("mock provider must be patched in tests")
@@ -434,7 +667,13 @@ async def execute_batched_llm_fields(
                     items.append(item)
                 continue
 
-            validated = validate_field_updates(entry, parsed.get("field_updates", []))
+            # Inject field_name into each update before validation (LLM may omit it)
+            raw_updates = parsed.get("field_updates", [])
+            for u in raw_updates:
+                if isinstance(u, dict) and "field_name" not in u:
+                    u["field_name"] = field_name
+
+            validated = validate_field_updates(entry, raw_updates)
             handled_targets: set[str] = set()
             for upd, err in validated:
                 upd_field = upd.get("field_name", field_name)
@@ -520,6 +759,7 @@ async def execute_batched_llm_fields(
                     entry=entry,
                     run_id=run.id,
                     confidence=confidence,
+                    resolved_model=resolved_model,
                 )
                 if status in (ItemStatus.applied, ItemStatus.applied_direct, ItemStatus.applied_overlay):
                     llm_applied += 1
@@ -567,5 +807,23 @@ async def execute_batched_llm_fields(
                 )
                 session.add(item)
                 items.append(item)
+
+            # ── Incremental progress update after each pack ───────────────
+            processed_packs += 1
+            # Count live stats from items list (covers both deterministic + LLM phases)
+            live_applied = sum(1 for i in items if getattr(i, 'update_status', None) in ('applied_direct', 'applied_overlay'))
+            live_skipped = sum(1 for i in items if getattr(i, 'update_status', None) in ('skipped_existing_value', 'skipped_readonly_field', 'skipped_invalid_field'))
+            run.summary_json = to_jsonable({
+                **(run.summary_json or {}),
+                "total_packs": total_packs,
+                "processed_packs": processed_packs,
+                "current_field": field_name,
+                "processed_items": len(items),
+                "model_call_count": model_call_count,
+                "skipped_existing": live_skipped,
+                "llm_applied": live_applied,
+            })
+            flag_modified(run, "summary_json")
+            await session.commit()
 
     return model_call_count, rejected_count, estimated_input_tokens, pack_count, llm_applied

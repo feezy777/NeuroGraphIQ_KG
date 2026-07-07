@@ -76,7 +76,9 @@
       "Bash(git -C \"D:/Tool/Coding/IDE/PyCharm/NeuroGraphIQ_KG_V3_1\" add frontend/src/pages/llm-extraction/components/PoolExtractionModal.tsx)",
       "Bash(git -C D:/Tool/Coding/IDE/PyCharm/NeuroGraphIQ_KG_V3_1 commit -m 'feat: thread temperature/maxTokens/prompt params into extraction API calls *)",
       "Bash(git -C 'D:/Tool/Coding/IDE/PyCharm/NeuroGraphIQ_KG_V3_1' rev-parse --short HEAD)",
-      "Bash(echo \"Task 3: complete $\\(git -C 'D:/Tool/Coding/IDE/PyCharm/NeuroGraphIQ_KG_V3_1' rev-parse --short HEAD\\)\")"
+      "Bash(echo \"Task 3: complete $\\(git -C 'D:/Tool/Coding/IDE/PyCharm/NeuroGraphIQ_KG_V3_1' rev-parse --short HEAD\\)\")",
+      "Bash(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest tests/ -q --tb=short)",
+      "Bash(python -m pytest tests/ -q --tb=short)"
     ]
   }
 }

@@ -1,14 +1,20 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { DataTable, type Column } from '../../../components/DataTable'
 import { StatusBadge } from '../../../components/StatusBadge'
 import { useData } from '../../../hooks/useData'
 import { ModelSelector } from './ModelSelector'
+import { FieldCompletionStatsCards } from '../../data-center/FieldCompletionStatsCards'
 import {
   listMirrorConnections,
   listMirrorCircuits,
-  runRegionFieldCompletion,
+  runUniversalFieldCompletion,
+  cancelFieldCompletionRun,
+  getFieldCompletionRun,
   type MirrorRegionConnection,
   type MirrorRegionCircuit,
+  type UniversalFieldCompletionRequest,
+  type FieldCompletionStartResponse,
+  type FieldCompletionRunDetail,
 } from '../../../api/endpoints'
 
 type TargetType = 'connection' | 'circuit' | 'circuit_bundle'
@@ -17,16 +23,46 @@ interface FieldCompletionTabProps {
   providers: Array<{ name: string; configured: boolean; default_model: string }>
 }
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+const TERMINAL_STATUSES = new Set([
+  'succeeded',
+  'partially_succeeded',
+  'failed',
+  'cancelled',
+  'dry_run',
+])
+
+function isTerminal(status: string): boolean {
+  return TERMINAL_STATUSES.has(status)
+}
+
+function elapsedStr(sec: number): string {
+  if (sec < 60) return `${Math.round(sec)}s`
+  const m = Math.floor(sec / 60)
+  const s = Math.round(sec % 60)
+  return `${m}m ${s}s`
+}
+
+// ── Component ───────────────────────────────────────────────────────────────
+
 export function FieldCompletionTab({ providers }: FieldCompletionTabProps) {
   const [targetType, setTargetType] = useState<TargetType>('connection')
   const [provider, setProvider] = useState('deepseek')
   const [modelName, setModelName] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [running, setRunning] = useState(false)
-  const [result, setResult] = useState<any>(null)
+  const [runId, setRunId] = useState<string | null>(null)
+  const [runStatus, setRunStatus] = useState<string>('')
+  const [runDetail, setRunDetail] = useState<FieldCompletionRunDetail | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [elapsedSec, setElapsedSec] = useState(0)
+  const [cancelling, setCancelling] = useState(false)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const startRef = useRef<number>(0)
 
   const currentProvider = providers.find(p => p.name === provider)
-  useMemo(() => {
+  useEffect(() => {
     if (currentProvider && !modelName) setModelName(currentProvider.default_model)
   }, [currentProvider, modelName])
 
@@ -73,30 +109,125 @@ export function FieldCompletionTab({ providers }: FieldCompletionTabProps) {
   const conns = (connections as any)?.items ?? []
   const circs = (circuits as any)?.items ?? []
 
+  // ── Polling ───────────────────────────────────────────────────────────────
+
+  const startPolling = useCallback((id: string) => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    pollRef.current = setInterval(async () => {
+      try {
+        const detail = await getFieldCompletionRun(id)
+        setRunDetail(detail)
+        setRunStatus(detail.status)
+        setElapsedSec(Math.round((Date.now() - startRef.current) / 1000))
+        if (isTerminal(detail.status)) {
+          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+          setRunning(false)
+          setCancelling(false)  // Clear cancelling state on terminal
+        }
+      } catch (e: any) {
+        // polling error — ignore transient failures
+      }
+    }, 2000)
+  }, [])
+
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [])
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+
   const handleRun = async () => {
     if (selectedIds.length === 0) return
     setRunning(true)
-    setResult(null)
+    setError(null)
+    setRunDetail(null)
+    setRunStatus('pending')
+    setElapsedSec(0)
+    startRef.current = Date.now()
+
     try {
       if (targetType === 'circuit_bundle') {
-        setResult({ type: 'bundle', count: selectedIds.length, message: '回路 Bundle 补全请在 Data Center 中操作' })
+        setError('回路 Bundle 补全请在 Data Center 中操作')
+        setRunning(false)
         return
       }
-      for (const id of selectedIds) {
-        const res = await runRegionFieldCompletion({
-          provider,
-          model_name: modelName || undefined,
-          candidate_ids: [id],
-          dry_run: false,
-        })
-        setResult(res)
+
+      const apiTargetType = targetType === 'connection' ? 'projection' : 'circuit'
+
+      const body: UniversalFieldCompletionRequest = {
+        provider,
+        model_name: modelName || undefined,
+        target_type: apiTargetType as any,
+        target_ids: selectedIds,
+        dry_run: false,
       }
+
+      const res = await runUniversalFieldCompletion(body)
+
+      // Check if async start response
+      if ('run_id' in res && res.status === 'pending') {
+        setRunId(res.run_id)
+        startPolling(res.run_id)
+        setRunStatus('pending')
+        return
+      }
+
+      // Legacy sync response (e.g. dry_run)
+      setRunDetail(res as any)
+      setRunStatus(res.status)
+      setRunning(false)
     } catch (e: any) {
-      setResult({ error: e.message || String(e) })
-    } finally {
+      setError(e.message || String(e))
       setRunning(false)
     }
   }
+
+  const handleCancel = async () => {
+    if (!runId || cancelling) return
+    setCancelling(true)
+    try {
+      await cancelFieldCompletionRun(runId)
+      // Let poller detect the status change — backend will check cancellation at next pack boundary
+    } catch (e: any) {
+      setError(e.message || String(e))
+      setCancelling(false)
+    }
+  }
+
+  const handleClose = () => {
+    setRunning(false)
+    setRunDetail(null)
+    setRunStatus('')
+    setRunId(null)
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+  }
+
+  // ── Progress panel ────────────────────────────────────────────────────────
+
+  const showProgressPanel = running && runId
+
+  if (showProgressPanel) {
+    return (
+      <div className="field-completion-tab">
+        <FieldCompletionStatsCards
+          detail={runDetail}
+          status={runStatus}
+          targetCount={selectedIds.length}
+          elapsedSec={elapsedSec}
+          onCancel={!cancelling ? handleCancel : undefined}
+          onClose={handleClose}
+          cancelling={cancelling}
+        />
+        {error && (
+          <div style={{ background: '#fff2f0', borderRadius: 6, padding: '8px 12px', border: '1px solid #ffccc7', margin: '10px 22px' }}>
+            <div style={{ fontSize: 13, color: '#cf1322' }}>{error}</div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ── Normal mode: target selection + run button ────────────────────────────
 
   return (
     <div className="field-completion-tab">
@@ -133,14 +264,47 @@ export function FieldCompletionTab({ providers }: FieldCompletionTabProps) {
       </div>
 
       <div className="field-completion-actions">
-        <button className="btn btn-primary" disabled={selectedIds.length === 0 || running || !currentProvider?.configured} onClick={handleRun}>
+        <button
+          className="btn btn-primary"
+          disabled={selectedIds.length === 0 || running || !currentProvider?.configured}
+          onClick={handleRun}
+        >
           {running ? '补全中…' : `✨ 执行字段补全 (${selectedIds.length})`}
         </button>
+        {!currentProvider?.configured && (
+          <span style={{ fontSize: 12, color: '#dc2626', marginLeft: 8 }}>
+            请先在设置中配置 {provider} API Key
+          </span>
+        )}
       </div>
 
-      {result && (
+      {error && !running && (
         <div className="field-completion-result">
-          <pre>{JSON.stringify(result, null, 2)}</pre>
+          <div style={{ background: '#fff2f0', borderRadius: 6, padding: '10px 14px', border: '1px solid #ffccc7' }}>
+            <div style={{ fontSize: 13, color: '#cf1322' }}>{error}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Show last completed run result even when not actively running */}
+      {runDetail && !running && (
+        <div className="field-completion-result" style={{ marginTop: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
+            {([
+              { label: '已更新', value: (runDetail.summary_json as any)?.updated_count ?? 0, color: '#16a34a', bg: '#f0fdf4' },
+              { label: '已建议', value: (runDetail.summary_json as any)?.suggested_count ?? 0, color: '#2563eb', bg: '#eff6ff' },
+              { label: '已跳过', value: (runDetail.summary_json as any)?.skipped_count ?? 0, color: '#d97706', bg: '#fffbeb' },
+              { label: '失败', value: (runDetail.summary_json as any)?.failed_count ?? 0, color: '#dc2626', bg: '#fef2f2' },
+            ] as const).map((item, i) => (
+              <div key={i} style={{ background: item.bg, borderRadius: 8, padding: '12px 8px', textAlign: 'center', border: '1px solid #e5e7eb' }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: item.color }}>{item.value}</div>
+                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{item.label}</div>
+              </div>
+            ))}
+          </div>
+          <button className="btn btn-secondary" onClick={() => setRunDetail(null)} style={{ fontSize: 12 }}>
+            清除结果
+          </button>
         </div>
       )}
     </div>
