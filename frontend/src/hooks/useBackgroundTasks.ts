@@ -54,10 +54,10 @@ export function useBackgroundTasks(pollMs = 3000) {
           return resp.json()
         }
         const [fcRes, cwRes, ceRes, cceRes] = await Promise.allSettled([
-          listFieldCompletionRuns({ limit: 200 }),
-          listCompositeWorkflowRuns({ limit: 200 }),
+          listFieldCompletionRuns({ limit: 50 }),
+          listCompositeWorkflowRuns({ limit: 50 }),
           listCircuitRuns(),
-          listCircuitConnectionExtractionRuns({ limit: 200 }),
+          listCircuitConnectionExtractionRuns({ limit: 50 }),
         ])
 
         if (cancelled) return

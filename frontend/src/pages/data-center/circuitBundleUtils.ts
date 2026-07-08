@@ -158,7 +158,9 @@ export async function resolveCircuitBundleFromCircuitIds(
   circuitIds: string[],
   source: CircuitBundleSource,
 ): Promise<{ bundle: CircuitBundleFieldCompletionGroup; warnings: string[] }> {
-  if (circuitIds.length === 0) {
+  // Limit to prevent HTTP 431 (URL too long with 450+ UUIDs)
+  const limitedIds = circuitIds.slice(0, 100)
+  if (limitedIds.length === 0) {
     return {
       bundle: buildCircuitBundleFromGroups(
         BUNDLE_GROUP_DEFS.map(def => ({
@@ -177,10 +179,10 @@ export async function resolveCircuitBundleFromCircuitIds(
   try {
     const response = await getFieldCompletionRelatedTargets({
       target_type: 'circuit',
-      target_ids: circuitIds,
+      target_ids: limitedIds,
       include: ['circuit_step', 'circuit_function'],
     })
-    return buildCircuitBundleFromRelatedResponse(circuitIds, response, source)
+    return buildCircuitBundleFromRelatedResponse(limitedIds, response, source)
   } catch (err) {
     const msg = String(err instanceof Error ? err.message : err)
     const detail = err instanceof ApiError ? err.meta?.responseBody : undefined
