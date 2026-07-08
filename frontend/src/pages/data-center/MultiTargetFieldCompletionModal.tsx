@@ -134,7 +134,6 @@ export function MultiTargetFieldCompletionModal({
   const [dryRunLoading, setDryRunLoading] = useState(false)
   const [dryRunElapsed, setDryRunElapsed] = useState(0)
   const [dryRunError, setDryRunError] = useState<string | null>(null)
-  const [refreshingTargets, setRefreshingTargets] = useState(false)
 
   // ── Recent runs drawer ────────────────────────────────────────────────────
   const [drawerRun, setDrawerRun] = useState<FieldCompletionRunDetail | null>(null)
@@ -225,18 +224,10 @@ export function MultiTargetFieldCompletionModal({
     [groupStates],
   )
 
-  const circuitIds = useMemo(
-    () => groupStates.find(g => g.targetType === 'circuit')?.targetIds ?? [],
+  const isMigrationMissing = useMemo(
+    () => groupStates.find(g => g.targetType === 'circuit_function')?.status === 'unavailable',
     [groupStates],
   )
-
-  const cfGroup = useMemo(
-    () => groupStates.find(g => g.targetType === 'circuit_function'),
-    [groupStates],
-  )
-
-  const isCfNoData = cfGroup?.status === 'no_data'
-  const isMigrationMissing = cfGroup?.status === 'unavailable'
 
   // ── Aggregate dry run stats ───────────────────────────────────────────────
   const dryRunAggStats = useMemo(() => {
@@ -682,28 +673,6 @@ export function MultiTargetFieldCompletionModal({
           </details>
         )}
 
-        {/* ── Migration / no_data notices ─────────────────────────────────── */}
-        {!isExecuting && !isExecDone && isCfNoData && !isMigrationMissing && (
-          <div className="data-center-bundle-no-data-notice">
-            <strong>{t('dataCenter.bundleCfNoDataTitle')}</strong>
-            <p>{t('dataCenter.bundleCfNoDataDesc')}</p>
-            <p style={{ color: '#16a34a', fontSize: 12, marginTop: 4 }}>
-              Circuit 和 Circuit Step 字段补全仍可继续执行，Function 分组将自动跳过。
-            </p>
-            <div className="data-center-bundle-extraction-actions">
-              <button type="button" className="btn" onClick={goToLlmExtractionCenter}>
-                {t('dataCenter.bundleGoToLlmCenter')}
-              </button>
-              <button type="button" className="btn" disabled={refreshingTargets || circuitIds.length === 0}
-                onClick={() => void refreshRelatedTargets()}>
-                {refreshingTargets ? t('dataCenter.bundleRefreshing') : t('dataCenter.bundleRefreshRelatedTargets')}
-              </button>
-              <button type="button" className="btn btn-primary" onClick={() => setStep(1)}>
-                继续补全 (跳过 Function) →
-              </button>
-            </div>
-          </div>
-        )}
         {!isExecuting && !isExecDone && isMigrationMissing && (
           <p className="data-center-bundle-warning">{t('dataCenter.mirrorCircuitFunctionsNotInitialized')}</p>
         )}
