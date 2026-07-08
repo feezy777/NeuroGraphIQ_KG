@@ -893,14 +893,24 @@ async def execute_circuit_bundle_fields(
                         except Exception as _e:
                             logger.warning("Circuit bundle: func field failed field=%s: %s", fname, _e)
 
-        # Compute circuit_strength heuristic when LLM doesn't output it
-        if request.create_mirror_updates:
-            existing_str = get_field_value(circuit, 'circuit_strength')
-            if is_empty_value(existing_str):
-                _s = 0.2 + (0.15 if desc and len(desc) > 20 else 0) + (0.15 if func and func != 'unknown_function' else 0)
-                _s += min(len(steps) * 0.05, 0.2) + (0.15 if _type and _type not in ('unknown', 'uncertain_connection') else 0)
-                write_to_overlay(circuit, 'circuit_strength', round(min(_s, 0.95), 2),
-                                 run_id=run.id, confidence=0.5, source='heuristic_from_context')
+        # circuit_strength: dedicated LLM call (always, since bundle prompt buries this field)
+        if request.create_mirror_updates and not request.dry_run:
+                try:
+                    _sr = await call_provider(
+                        provider_key, model=resolved_model,
+                        system_prompt='Rate this brain circuit impact 0-1. Output ONLY a number.',
+                        user_prompt=f'Circuit: {name}\nType: {_type}\nDesc: {desc}\nFunc: {func}',
+                        temperature=0.1, max_tokens=20, response_schema=None,
+                    )
+                    model_call_count += 1
+                    _raw = getattr(_sr, 'raw_text', '') or ''
+                    _val = float(_raw.strip()) if _raw.strip() else None
+                    if _val is not None and 0 <= _val <= 1:
+                        write_to_overlay(circuit, 'circuit_strength', _val,
+                                         run_id=run.id, confidence=0.9,
+                                         source='llm_strength_rating')
+                except Exception:
+                    pass
 
         processed += 1
         if processed % 10 == 0 or processed == total:
