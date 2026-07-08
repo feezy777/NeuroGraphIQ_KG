@@ -157,24 +157,50 @@ function ForceGraph({ nodes, edges, focusMode }: { nodes: GraphNode[]; edges: Gr
     const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.1, 4]).on('zoom', (ev) => g.attr('transform', ev.transform))
     svg.call(zoom)
 
-    // Filter edges to only those where both source and target are in nodes
-    const nodeIds = new Set(nodes.map(n => n.id))
+    // Add connection nodes from edge data so edges can link properly
+    const connNodes: GraphNode[] = []
+    const regionIds = new Set(nodes.filter(n => n.type === 'region').map(n => n.id))
+    for (const e of edges) {
+      if (e.type !== 'STARTS_AT' && e.type !== 'ENDS_AT' && e.type !== 'INCLUDES') {
+        // This edge IS a connection — make a node for it
+        const exists = nodes.find(n => n.id === e.id) || connNodes.find(n => n.id === e.id)
+        if (!exists) {
+          connNodes.push({
+            id: e.id, type: 'connection', label: `${(e as any).source_name || ''} → ${(e as any).target_name || ''}`,
+            group: 'connection',
+          })
+        }
+      }
+    }
+    const allNodes = [...nodes, ...connNodes]
+
+    // Filter edges to only those where both source and target are in allNodes
+    const nodeIds = new Set(allNodes.map(n => n.id))
     const validEdges = edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
 
     // Initialize positions
-    nodes.forEach((n: any) => { n.x = w / 2 + (Math.random() - 0.5) * 100; n.y = h / 2 + (Math.random() - 0.5) * 100 })
+    allNodes.forEach((n: any) => { n.x = w / 2 + (Math.random() - 0.5) * 100; n.y = h / 2 + (Math.random() - 0.5) * 100 })
 
     const link = g.append('g').selectAll('line').data(validEdges).join('line')
       .attr('stroke', (d: any) => COLORS[d.type] || '#999')
       .attr('stroke-opacity', (d: any) => Math.min(1, (d.confidence || 0.3) + 0.3))
       .attr('stroke-width', (d: any) => Math.max(0.5, (d.confidence || 0.3) * 2))
 
-    const node = g.append('g').selectAll('circle').data(nodes).join('circle')
+    const nodeGroup = g.append('g').selectAll('g').data(allNodes).join('g')
+    nodeGroup.append('circle')
       .attr('r', (d: any) => d.type === 'region' ? 6 : d.type === 'circuit' ? 5 : 3)
       .attr('fill', (d: any) => COLORS[d.type] || '#999')
       .attr('stroke', '#fff').attr('stroke-width', 1)
+    nodeGroup.append('text')
+      .text((d: any) => d.label.slice(0, 15))
+      .attr('dx', 8).attr('dy', 4)
+      .style('font-size', '9px')
+      .style('fill', '#333')
+      .style('pointer-events', 'none')
 
-    const sim = d3.forceSimulation(nodes as any)
+    nodeGroup.append('title').text((d: any) => `${d.type}: ${d.label}`)
+
+    const sim = d3.forceSimulation(allNodes as any)
       .force('link', d3.forceLink(validEdges).id((d: any) => d.id).distance(60))
       .force('charge', d3.forceManyBody().strength(focusMode ? -200 : -80))
       .force('center', d3.forceCenter(w / 2, h / 2))
@@ -182,16 +208,14 @@ function ForceGraph({ nodes, edges, focusMode }: { nodes: GraphNode[]; edges: Gr
       .on('tick', () => {
         link.attr('x1', (d: any) => d.source.x).attr('y1', (d: any) => d.source.y)
             .attr('x2', (d: any) => d.target.x).attr('y2', (d: any) => d.target.y)
-        node.attr('cx', (d: any) => d.x).attr('cy', (d: any) => d.y)
+        nodeGroup.attr('transform', (d: any) => `translate(${d.x},${d.y})`)
       })
 
-    const drag = d3.drag<SVGCircleElement, any>()
+    const drag = d3.drag<SVGGElement, any>()
       .on('start', (ev: any, d: any) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y })
       .on('drag', (ev: any, d: any) => { d.fx = ev.x; d.fy = ev.y })
       .on('end', (ev: any, d: any) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null })
-    node.call(drag as any)
-
-    node.append('title').text((d: any) => `${d.type}: ${d.label}`)
+    nodeGroup.call(drag as any)
 
     return () => { sim.stop() }
   }, [nodes.length, edges.length, focusMode])  // stable deps — only re-run when data changes
