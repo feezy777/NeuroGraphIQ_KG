@@ -258,10 +258,10 @@ function drawGraph(el: HTMLDivElement, nodes: GNode[], edges: GEdge[], W: number
 
   // Simulation with strong spreading force
   const sim = d3.forceSimulation(nodes as any)
-    .force('link', d3.forceLink(edges).id((d: any) => d.id).distance(80))
-    .force('charge', d3.forceManyBody().strength(-300))
+    .force('link', d3.forceLink(edges).id((d: any) => d.id).distance(120))
+    .force('charge', d3.forceManyBody().strength(-600))
     .force('center', d3.forceCenter(W / 2, H / 2))
-    .force('collision', d3.forceCollide(15))
+    .force('collision', d3.forceCollide(25))
     .on('tick', () => {
       link.attr('x1', (d: any) => d.source.x).attr('y1', (d: any) => d.source.y)
           .attr('x2', (d: any) => d.target.x).attr('y2', (d: any) => d.target.y)
@@ -270,11 +270,11 @@ function drawGraph(el: HTMLDivElement, nodes: GNode[], edges: GEdge[], W: number
 
   // Run simulation longer for better spread
   sim.alpha(1).restart()
-  for (let i = 0; i < 120; i++) sim.tick()
+  for (let i = 0; i < 300; i++) sim.tick()
 
   // Drag
   ng.call(d3.drag<SVGGElement, any>()
     .on('start', (ev: any, d: any) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y })
     .on('drag', (ev: any, d: any) => { d.fx = ev.x; d.fy = ev.y })
-    .on('end', (ev: any, d: any) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null }) as any)
+    .on('end', (ev: any, d: any) => { if (!ev.active) sim.alphaTarget(0) }) as any)
 }
