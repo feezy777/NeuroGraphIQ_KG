@@ -5795,6 +5795,8 @@ class LlmErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
 
 // ── CircuitCandidatesTab ──────────────────────────────────────────────────────
 
+const DEFAULT_CIRCUIT_PAGE_SIZE = 50
+
 function CircuitCandidatesTab({
   selectedIds,
   onSelectionChange,
@@ -5802,15 +5804,28 @@ function CircuitCandidatesTab({
   selectedIds: string[]
   onSelectionChange: (ids: string[]) => void
 }) {
-  const [page, setPage] = useState(0)
-  const [limit] = useState(100)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_CIRCUIT_PAGE_SIZE)
 
+  // Fetch ALL circuits once, client-side paginate (same pattern as DataFirstCandidatesTab)
   const { data, loading } = useData(
-    () => listMirrorCircuits({ limit, offset: page * limit }),
-    [page, limit],
+    () => listMirrorCircuits({ limit: 500, offset: 0 }),
+    [],
   )
-  const circuits = (data as any)?.items ?? []
-  const total = (data as any)?.total ?? 0
+  const allCircuits: MirrorRegionCircuit[] = (data as any)?.items ?? []
+  const total = allCircuits.length
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+
+  // Clamp page when it exceeds totalPages (e.g. after pageSize increase)
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages)
+  }, [page, totalPages])
+
+  const pageItems = useMemo(
+    () => allCircuits.slice((page - 1) * pageSize, page * pageSize),
+    [allCircuits, page, pageSize],
+  )
 
   const cols: Column<MirrorRegionCircuit>[] = useMemo(() => [
     {
@@ -5825,13 +5840,25 @@ function CircuitCandidatesTab({
           }} />
       ),
     },
-    { key: 'circuit_name', header: '回路名称', width: 220 },
-    { key: 'circuit_type', header: '类型', width: 140 },
-    { key: 'function_association', header: '功能关联', render: (r) => r.function_association?.slice(0, 60) || '—' },
+    {
+      key: 'name_cn', header: '中文名', width: 160,
+      render: (r) => {
+        const overlay = (r.normalized_payload_json as any)?.formal_field_overlay
+        return (overlay?.name_cn as string) || (r.circuit_name ?? '—').slice(0, 30)
+      },
+    },
+    {
+      key: 'name_en', header: '英文名', width: 200,
+      render: (r) => {
+        const overlay = (r.normalized_payload_json as any)?.formal_field_overlay
+        return (overlay?.name_en as string) || (r.circuit_name ?? '—').slice(0, 40)
+      },
+    },
+    { key: 'circuit_type', header: '连接类型', width: 140, render: (r) => r.circuit_type || '—' },
+    { key: 'source_atlas', header: 'Atlas', width: 100, render: (r) => r.source_atlas || '—' },
     { key: 'mirror_status', header: '状态', width: 90, render: (r) => <StatusBadge status={r.mirror_status} /> },
+    { key: 'id', header: 'ID', width: 110, render: (r) => <code style={{ fontSize: 11 }}>{r.id.slice(0, 12)}…</code> },
   ], [selectedIds])
-
-  const totalPages = Math.ceil(total / limit)
 
   return (
     <div>
@@ -5839,13 +5866,25 @@ function CircuitCandidatesTab({
         <span style={{ fontSize: 12, color: '#666' }}>
           共 {total} 条回路 · 已选 {selectedIds.length}
         </span>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <button className="llm-btn llm-btn-sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>上一页</button>
-          <span style={{ fontSize: 12, color: '#666', alignSelf: 'center' }}>{page + 1} / {totalPages || 1}</span>
-          <button className="llm-btn llm-btn-sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>下一页</button>
-        </div>
       </div>
-      <DataTable columns={cols} rows={circuits} loading={loading} getKey={r => r.id} emptyText="暂无回路数据" />
+      <DataTable columns={cols} rows={pageItems} loading={loading} getKey={r => r.id} emptyText="暂无回路数据" />
+      <div className="llm-candidate-pagination llm-table-pagination">
+        <label className="llm-pagination-pagesize">
+          每页
+          <select className="llm-select llm-select-sm" value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1) }}>
+            <option value={20}>20</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+          </select>
+        </label>
+        <button type="button" className="llm-btn" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          上一页
+        </button>
+        <span className="llm-pagination-page">{page} / {totalPages}</span>
+        <button type="button" className="llm-btn" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          下一页
+        </button>
+      </div>
     </div>
   )
 }
