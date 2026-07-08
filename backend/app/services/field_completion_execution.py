@@ -926,8 +926,8 @@ async def execute_circuit_bundle_fields(
                 MirrorCircuitRegion.circuit_id == cid)
             _m_count = (await session.execute(_mq)).scalar_one()
             _r_count = (await session.execute(_rq)).scalar_one()
-        except Exception:
-            pass
+        except Exception as _cnt_exc:
+            logger.warning("Circuit %s: membership/region count failed: %s", str(cid)[:12], _cnt_exc)
 
         if processed % 10 == 0 or processed == total:
             run.summary_json = to_jsonable({
