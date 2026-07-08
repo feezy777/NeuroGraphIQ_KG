@@ -86,7 +86,12 @@ export function GraphExplorerPage() {
       .catch(() => setLoading(false))
   }, [])
 
-  const graph = useMemo(() => raw ? normalizeGraph(raw) : null, [raw])
+  const [graphError, setGraphError] = useState<string | null>(null)
+  const graph = useMemo(() => {
+    if (!raw) return null
+    try { return normalizeGraph(raw) }
+    catch (e: any) { setGraphError(e.message); return null }
+  }, [raw])
 
   // Visible edges: apply type + confidence filters
   const visibleEdges = useMemo(() => {
@@ -121,6 +126,7 @@ export function GraphExplorerPage() {
   const handleBgClick = useCallback(() => setFocusNode(null), [])
 
   if (loading) return <div style={{ padding: 40, color: '#888' }}>加载图谱数据…</div>
+  if (graphError) return <div style={{ padding: 40, color: '#dc2626' }}>图谱数据错误: {graphError}</div>
 
   return (
     <div style={{ padding: 16, height: 'calc(100vh - 60px)', display: 'flex', flexDirection: 'column' }}>
@@ -190,6 +196,20 @@ export function GraphExplorerPage() {
           />
         )}
       </div>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: 16, fontSize: 11, color: '#666', marginTop: 4, flexWrap: 'wrap' }}>
+        <span><strong>节点:</strong></span>
+        <span><span style={{ color: '#3b82f6' }}>●</span> 脑区</span>
+        <span><span style={{ color: '#f59e0b' }}>●</span> 回路</span>
+        <span><span style={{ color: '#10b981' }}>●</span> 连接</span>
+        <span style={{ marginLeft: 8 }}><strong>边:</strong></span>
+        <span><span style={{ color: '#3b82f6' }}>─</span> 结构连接</span>
+        <span><span style={{ color: '#f59e0b', borderBottom: '2px dashed #f59e0b' }}>---</span> 功能连接</span>
+        <span><span style={{ color: '#10b981', borderBottom: '2px dotted #10b981' }}>···</span> 投射</span>
+        <span><span style={{ color: '#fcd34d' }}>─</span> 回路起止</span>
+        <span><span style={{ color: '#c4b5fd', borderBottom: '2px dashed #c4b5fd' }}>---</span> 回路包含</span>
+      </div>
     </div>
   )
 }
@@ -241,6 +261,30 @@ function ForceGraph({ nodes, edges, focusMode, focusNode, onNodeClick }: {
     const H = container.clientHeight || 700
 
     d3.select(container).html('')
+
+    // Show placeholders while large datasets load
+    if (nodes.length > 500 || edges.length > 2000) {
+      d3.select(container).append('div').style('padding', '20px').style('color', '#888')
+        .text(`渲染中… ${nodes.length} 节点, ${edges.length} 边`)
+    }
+
+    // Render with a small delay to avoid blocking UI
+    const timer = setTimeout(() => {
+      d3.select(container).html('')
+      renderGraph(container, nodes, edges, W, H, focusNode, onNodeClick)
+    }, 50)
+
+    return () => clearTimeout(timer)
+  }, [nodes.length, edges.length, focusNode])
+
+  return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+}
+
+function renderGraph(
+  container: HTMLDivElement, nodes: NormNode[], edges: NormEdge[],
+  W: number, H: number, focusNode: string | null,
+  onNodeClick?: (id: string) => void,
+) {
     const svg = d3.select(container).append('svg').attr('width', W).attr('height', H)
     const g = svg.append('g')
 
