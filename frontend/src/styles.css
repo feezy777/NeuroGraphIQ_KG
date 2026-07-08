@@ -10751,3 +10751,51 @@ input[type="range"]::-webkit-slider-thumb {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ── Circuit Connection Extraction Quick Cards ────────────────────────── */
+.llm-quick-cards {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.llm-quick-cards .llm-quick-card {
+  cursor: pointer;
+  flex: 1;
+  min-width: 240px;
+  padding: 14px;
+  border-left: 4px solid #0891b2;
+  transition: all 0.15s;
+}
+.llm-quick-cards .llm-quick-card:hover {
+  border-color: #06b6d4;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  transform: translateY(-1px);
+}
+.llm-quick-card-icon {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+.llm-quick-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a2e;
+  margin-bottom: 4px;
+}
+.llm-quick-card-desc {
+  font-size: 12px;
+  color: #666;
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+.llm-quick-card-features {
+  margin: 0;
+  padding: 0 0 0 16px;
+  font-size: 12px;
+  color: #888;
+  list-style: disc;
+}
+.llm-quick-card-features li {
+  margin-bottom: 2px;
+  line-height: 1.5;
+}

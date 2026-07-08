@@ -31,6 +31,8 @@ import { useWorkbenchLog } from '../logging/useWorkbenchLog'
 import { CircuitToFunctionsPendingBanner } from './llm-extraction/components/CircuitToFunctionsPendingBanner'
 import { formatExtractionApiError } from './llm-extraction/utils/formatExtractionApiError'
 import { FieldCompletionTab } from './llm-extraction/components/FieldCompletionTab'
+// Will be created in Task 5
+import { CircuitConnectionExtractionModal } from './llm-extraction/components/CircuitConnectionExtractionModal'
 import { QuickExtractionCards } from './llm-extraction/components/QuickExtractionCards'
 import { PoolExtractionModal } from './llm-extraction/components/PoolExtractionModal'
 import { useCandidatePool, type PoolScope, PoolSetupError } from './llm-extraction/hooks/useCandidatePool'
@@ -5822,6 +5824,9 @@ export function LlmExtractionPage() {
   const [bulkConfirmTrigger, setBulkConfirmTrigger] = useState(0)
   const [batchLoading, setBatchLoading] = useState(false)
   const [selectedCount, setSelectedCount] = useState(0)
+  const [circuitSubTab, setCircuitSubTab] = useState<'browse' | 'connection-extraction'>('browse')
+  const [extractionModalOpen, setExtractionModalOpen] = useState(false)
+  const [extractionMode, setExtractionMode] = useState<'multi_connection' | 'main_pair'>('main_pair')
   // Composite task state
   const [compositeConfirmOpen, setCompositeConfirmOpen] = useState(false)
   const [compositeRunning, setCompositeRunning] = useState(false)
@@ -6330,7 +6335,57 @@ export function LlmExtractionPage() {
           </div>
         )}
         {!legacyFinalTab && activeDataTab === 'mirror' && (
-          <MirrorExtractionPanel initialSubTab={mirrorSubTab} />
+          <>
+            <div className="llm-data-tabs" style={{ marginBottom: 8 }}>
+              <button
+                type="button"
+                className={`llm-data-tab${circuitSubTab === 'browse' ? ' llm-data-tab-active' : ''}`}
+                onClick={() => setCircuitSubTab('browse')}
+              >
+                回路数据浏览
+              </button>
+              <button
+                type="button"
+                className={`llm-data-tab${circuitSubTab === 'connection-extraction' ? ' llm-data-tab-active' : ''}`}
+                onClick={() => setCircuitSubTab('connection-extraction')}
+              >
+                回路→连接提取
+              </button>
+            </div>
+            {circuitSubTab === 'browse' ? (
+              <MirrorExtractionPanel initialSubTab={mirrorSubTab} />
+            ) : (
+              <>
+                <div className="llm-quick-cards">
+                  <div className="llm-quick-card" onClick={() => { setExtractionMode('multi_connection'); setExtractionModalOpen(true) }}>
+                    <div className="llm-quick-card-icon">🔗</div>
+                    <div className="llm-quick-card-title">多连接提取</div>
+                    <div className="llm-quick-card-desc">从回路全量数据中推断所有可能遗漏的脑区连接</div>
+                    <ul className="llm-quick-card-features">
+                      <li>每条回路可产出N条连接</li>
+                      <li>基于步骤+功能上下文推断</li>
+                    </ul>
+                  </div>
+                  <div className="llm-quick-card" onClick={() => { setExtractionMode('main_pair'); setExtractionModalOpen(true) }}>
+                    <div className="llm-quick-card-icon">🎯</div>
+                    <div className="llm-quick-card-title">主连接对提取</div>
+                    <div className="llm-quick-card-desc">推断回路主入口→主出口区域对，回填回路脑区字段</div>
+                    <ul className="llm-quick-card-features">
+                      <li>每条回路1对区域</li>
+                      <li>同步回填start/end region ID</li>
+                    </ul>
+                  </div>
+                </div>
+                {extractionModalOpen && (
+                  <CircuitConnectionExtractionModal
+                    open={extractionModalOpen}
+                    mode={extractionMode}
+                    onClose={() => setExtractionModalOpen(false)}
+                  />
+                )}
+              </>
+            )}
+          </>
         )}
         {!legacyFinalTab && activeDataTab === 'macroClinical' && (
           <MacroClinicalSchemaTab dataFirstMode />

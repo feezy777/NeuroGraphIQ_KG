@@ -1563,6 +1563,98 @@ export const getFieldCompletionPromptTemplates = () =>
     '/api/llm-extraction/field-completion/prompt-templates',
   )
 
+// ── Circuit Connection Extraction ─────────────────────────────────────────
+
+export interface CircuitConnectionExtractionRequest {
+  mode: 'multi_connection' | 'main_pair'
+  circuit_ids: string[]
+  dry_run?: boolean
+  provider?: string
+  model_name?: string | null
+  temperature?: number
+  max_tokens?: number
+  create_mirror_updates?: boolean
+  overwrite_policy?: string
+}
+
+export interface CircuitConnectionExtractionStartResponse {
+  run_id: string
+  status: string
+  provider: string
+  model_name: string | null
+  mode: string
+  circuit_count: number
+  dry_run: boolean
+  warnings: string[]
+}
+
+export interface CircuitConnectionExtractionItem {
+  id: string
+  run_id: string
+  circuit_id: string | null
+  source_region_name: string | null
+  target_region_name: string | null
+  source_candidate_id: string | null
+  target_candidate_id: string | null
+  connection_type: string | null
+  confidence: number | null
+  evidence_text: string | null
+  connection_id: string | null
+  action: string
+  action_reason: string | null
+  created_at: string
+}
+
+export interface CircuitConnectionExtractionRun {
+  id: string
+  provider: string
+  model_name: string | null
+  mode: string
+  circuit_count: number
+  dry_run: boolean
+  create_mirror_updates: boolean
+  status: string
+  summary_json: Record<string, number>
+  warnings_json: string[]
+  errors_json: string[]
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface CircuitConnectionExtractionRunDetail extends CircuitConnectionExtractionRun {
+  items: CircuitConnectionExtractionItem[]
+}
+
+export interface CircuitConnectionExtractionRunListResponse {
+  items: CircuitConnectionExtractionRun[]
+  total: number
+}
+
+export async function runCircuitConnectionExtraction(
+  body: CircuitConnectionExtractionRequest,
+): Promise<CircuitConnectionExtractionStartResponse | CircuitConnectionExtractionRun> {
+  return postJson('/api/llm-extraction/circuit-connection-extraction/run', body)
+}
+
+export async function listCircuitConnectionExtractionRuns(
+  params?: { mode?: string; limit?: number; offset?: number },
+): Promise<CircuitConnectionExtractionRunListResponse> {
+  return getJson('/api/llm-extraction/circuit-connection-extraction/runs', params as Record<string, string | number | boolean | null | undefined>)
+}
+
+export async function getCircuitConnectionExtractionRun(
+  runId: string,
+): Promise<CircuitConnectionExtractionRunDetail> {
+  return getJson(`/api/llm-extraction/circuit-connection-extraction/runs/${runId}`)
+}
+
+export async function cancelCircuitConnectionExtractionRun(
+  runId: string,
+): Promise<CircuitConnectionExtractionRun> {
+  return postJson(`/api/llm-extraction/circuit-connection-extraction/runs/${runId}/cancel`) as Promise<CircuitConnectionExtractionRun>
+}
+
 // ── Circuit Pack Extraction ────────────────────────────────────────────────
 
 export interface CircuitExtractionRequest {
