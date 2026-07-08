@@ -124,34 +124,36 @@ function DataView({ data }: { data: GraphData | null }) {
 }
 
 function ForceGraph({ nodes, edges, focusMode }: { nodes: GraphNode[]; edges: GraphEdge[]; focusMode: boolean }) {
-  const ref = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const svgRef = useRef<SVGSVGElement | null>(null)
 
   useEffect(() => {
-    if (!ref.current || nodes.length === 0) return
-    const w = ref.current.clientWidth
-    const h = ref.current.clientHeight
+    const container = containerRef.current
+    if (!container || nodes.length === 0) return
+    const w = container.clientWidth || 800
+    const h = container.clientHeight || 600
 
-    const svg = d3.select(ref.current).html('').append('svg').attr('width', w).attr('height', h)
+    // Clear previous
+    d3.select(container).html('')
+    const svg = d3.select(container).append('svg').attr('width', w).attr('height', h)
+    svgRef.current = svg.node()
     const g = svg.append('g')
 
     const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.1, 4]).on('zoom', (ev) => g.attr('transform', ev.transform))
     svg.call(zoom)
 
+    // Initialize positions
+    nodes.forEach((n: any) => { n.x = w / 2 + (Math.random() - 0.5) * 100; n.y = h / 2 + (Math.random() - 0.5) * 100 })
+
     const link = g.append('g').selectAll('line').data(edges).join('line')
-      .attr('stroke', d => COLORS[d.type] || '#999')
-      .attr('stroke-opacity', d => Math.min(1, (d.confidence || 0.3) + 0.3))
-      .attr('stroke-width', d => Math.max(0.5, (d.confidence || 0.3) * 2))
+      .attr('stroke', (d: any) => COLORS[d.type] || '#999')
+      .attr('stroke-opacity', (d: any) => Math.min(1, (d.confidence || 0.3) + 0.3))
+      .attr('stroke-width', (d: any) => Math.max(0.5, (d.confidence || 0.3) * 2))
 
     const node = g.append('g').selectAll('circle').data(nodes).join('circle')
-      .attr('r', d => d.type === 'region' ? 6 : d.type === 'circuit' ? 5 : 3)
-      .attr('fill', d => COLORS[d.type] || '#999')
+      .attr('r', (d: any) => d.type === 'region' ? 6 : d.type === 'circuit' ? 5 : 3)
+      .attr('fill', (d: any) => COLORS[d.type] || '#999')
       .attr('stroke', '#fff').attr('stroke-width', 1)
-      .call(d3.drag<SVGCircleElement, GraphNode>()
-        .on('start', (ev, d) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y })
-        .on('drag', (ev, d) => { d.fx = ev.x; d.fy = ev.y })
-        .on('end', (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null }))
-
-    node.append('title').text(d => `${d.type}: ${d.label}`)
 
     const sim = d3.forceSimulation(nodes as any)
       .force('link', d3.forceLink(edges).id((d: any) => d.id).distance(60))
@@ -164,8 +166,16 @@ function ForceGraph({ nodes, edges, focusMode }: { nodes: GraphNode[]; edges: Gr
         node.attr('cx', (d: any) => d.x).attr('cy', (d: any) => d.y)
       })
 
-    return () => { sim.stop() }
-  }, [nodes, edges, focusMode, ref.current?.clientWidth, ref.current?.clientHeight])
+    const drag = d3.drag<SVGCircleElement, any>()
+      .on('start', (ev: any, d: any) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y })
+      .on('drag', (ev: any, d: any) => { d.fx = ev.x; d.fy = ev.y })
+      .on('end', (ev: any, d: any) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null })
+    node.call(drag as any)
 
-  return <div ref={ref} style={{ width: '100%', height: '100%' }} />
+    node.append('title').text((d: any) => `${d.type}: ${d.label}`)
+
+    return () => { sim.stop() }
+  }, [nodes.length, edges.length, focusMode])  // stable deps — only re-run when data changes
+
+  return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 }
