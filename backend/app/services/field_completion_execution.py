@@ -344,36 +344,56 @@ _PER_CONN_USER_TEMPLATE = (
 
 
 _CIRCUIT_BUNDLE_SYSTEM = (
-    "You are a neuroscientist analyzing brain circuits.\n"
-    "For the circuit and its steps described below, complete ALL fields.\n"
-    "For each step, select the best matching projection from the candidates,\n"
-    "or indicate no match with projection_id: null.\n"
-    "If match confidence is below 0.5, set is_suspected: true.\n\n"
-    "Output ONLY valid JSON. Do NOT wrap in markdown.\n\n"
-    "SCHEMA:\n"
-    '{"circuit":{"name_en":"str","name_cn":"str","circuit_class":"str",'
-    '"description":"str","start_region_name":"str","end_region_name":"str",'
-    '"circuit_strength":0.0,"source_db":"str","status":"proposed|validated|uncertain"},'
-    '"steps":[{"step_name_en":"str","step_name_cn":"str","step_no":1,'
-    '"role_in_circuit":"source|relay|output|unknown","description":"str",'
-    '"region_name":"str","source_db":"str","status":"proposed",'
-    '"connection":{"projection_id":"uuid-or-null","match_confidence":0.0,'
-    '"is_suspected":false,"evidence":"str"},'
-    '"functions":[{"function_term_en":"str","function_term_cn":"str",'
-    '"function_domain":"str","function_role":"str","effect_type":"str",'
-    '"confidence_score":0.0,"evidence_level":"str","description":"str",'
-    '"source_db":"str","status":"str"}]}]}'
+    "You are a neuroscientist annotating brain circuit data.\n"
+    "Based on the circuit description and step information below, infer and fill in ALL missing values.\n"
+    "Output ONLY valid JSON matching the exact structure below. No markdown, no explanation.\n\n"
+    'JSON STRUCTURE:\n'
+    '{"circuit":{"name_en":"English circuit name","name_cn":"Chinese circuit name",'
+    '"circuit_class":"functional classification","description":"circuit function description",'
+    '"start_region_name":"entry brain region name","end_region_name":"exit brain region name",'
+    '"circuit_strength":0.5,"source_db":"inferred","status":"proposed"},'
+    '"steps":[{"step_name_en":"Step English name","step_name_cn":"Step Chinese name",'
+    '"step_no":1,"role_in_circuit":"source|relay|output","description":"step description",'
+    '"region_name":"brain region this step operates on",'
+    '"source_db":"inferred","status":"proposed",'
+    '"connection":{"projection_id":"uuid from candidates or null",'
+    '"match_confidence":0.5,"is_suspected":false,"evidence":"matching rationale"},'
+    '"functions":[{"function_term_en":"function name","function_term_cn":"Chinese function name",'
+    '"function_domain":"cognitive|memory|motor|sensory|emotional|autonomic|other",'
+    '"function_role":"execution|modulation|inhibition|gating|integration|other",'
+    '"effect_type":"excitatory|inhibitory|modulatory|unknown",'
+    '"confidence_score":0.5,"evidence_level":"moderate|weak|strong",'
+    '"description":"function description","source_db":"inferred","status":"proposed"}]}]}\n\n'
+    "IMPORTANT: Always include ALL provided steps in the steps array. Never return an empty steps array."
 )
 
 _CIRCUIT_BUNDLE_USER = (
-    "Circuit: {name}\n"
-    "Type: {type}\n"
+    "Complete the fields for this brain circuit:\n\n"
+    "{name} (type: {type})\n"
     "Description: {desc}\n"
-    "Function: {func}\n"
-    "Existing overlay values: {overlay}\n\n"
-    "Steps with connection candidates:\n{steps_context}\n\n"
-    "Functions:\n{functions_context}\n\n"
-    "Complete all fields in the JSON schema above."
+    "Function: {func}\n\n"
+    "Step context:\n{steps_context}\n\n"
+    "Functions:\n{functions_context}"
+)
+
+# ── Step-only prompt (Call 2 — separate LLM call per circuit with steps) ─
+_CIRCUIT_STEPS_SYSTEM = (
+    "You are a neuroscientist. For each circuit step, infer its name, role,\n"
+    "description, and brain region. Then match it to the best projection from\n"
+    "the candidates provided, or set projection_id to null if none matches.\n"
+    "If confidence < 0.5, set is_suspected: true.\n\n"
+    'Output ONLY a JSON array. No markdown, no explanation.\n'
+    '[{"step_no":1,"step_name_en":"Amygdala to Accumbens","step_name_cn":"杏仁核至伏隔核",'
+    '"role_in_circuit":"source","description":"Projects from amygdala to nucleus accumbens",'
+    '"region_name":"left amygdala","source_db":"inferred","status":"proposed",'
+    '"connection":{"projection_id":"uuid-or-null","match_confidence":0.5,"is_suspected":false,'
+    '"evidence":"matching rationale"},"functions":[]}]'
+)
+
+_CIRCUIT_STEPS_USER = (
+    "Circuit: {name} (type: {type})\nDescription: {desc}\n\n"
+    "Steps to complete ({step_count} total):\n{steps_context}\n\n"
+    "Output all {step_count} steps as a JSON array."
 )
 
 
@@ -589,12 +609,11 @@ async def execute_circuit_bundle_fields(
                     type=_type,
                     desc=desc,
                     func=func,
-                    overlay=overlay_str,
                     steps_context=steps_context,
                     functions_context=functions_context,
                 ),
                 temperature=request.temperature,
-                max_tokens=request.max_tokens,
+                max_tokens=max(request.max_tokens, 2000 + len(steps) * 800),
                 response_schema=None,
             )
             model_call_count += 1
@@ -752,8 +771,50 @@ async def execute_circuit_bundle_fields(
         if end_id:
             await _ensure_circuit_region(session, cid, end_id, sort_order=1)
 
+        # ── Step LLM call (Call 2) — if circuit LLM didn't return steps ────
+        steps_data = parsed.get('steps', [])
+        if not steps_data and steps:
+            try:
+                step_response = await call_provider(
+                    provider_key,
+                    model=resolved_model,
+                    system_prompt=_CIRCUIT_STEPS_SYSTEM,
+                    user_prompt=_CIRCUIT_STEPS_USER.format(
+                        name=name, type=_type, desc=desc,
+                        step_count=len(steps),
+                        steps_context=steps_context,
+                    ),
+                    temperature=request.temperature,
+                    max_tokens=max(2000, len(steps) * 800),
+                    response_schema=None,
+                )
+                model_call_count += 1
+                steps_parsed = getattr(step_response, 'parsed_json', None)
+                if not isinstance(steps_parsed, list):
+                    raw = getattr(step_response, 'raw_text', '') or ''
+                    if raw:
+                        cleaned = raw.strip()
+                        if cleaned.startswith('```'):
+                            lines = cleaned.split('\n')
+                            lines = [l for l in lines if not l.startswith('```')]
+                            cleaned = '\n'.join(lines).strip()
+                        try:
+                            steps_parsed = _json.loads(cleaned)
+                        except (_json.JSONDecodeError, TypeError):
+                            _re = __import__('re')
+                            _match = _re.search(r'\[.*\]', cleaned, _re.DOTALL)
+                            if _match:
+                                try:
+                                    steps_parsed = _json.loads(_match.group(0))
+                                except (_json.JSONDecodeError, TypeError):
+                                    pass
+                if isinstance(steps_parsed, list):
+                    steps_data = steps_parsed
+            except Exception as _step_exc:
+                logger.warning("Circuit %s: step LLM call failed: %s", str(cid)[:12], _step_exc)
+
         # ── Apply step + function fields ─────────────────────────────────────
-        for sdata in parsed.get('steps', []):
+        for sdata in steps_data:
             step_no = sdata.get('step_no', 1)
             match_step = _find_step_by_order(steps, step_no)
             if not match_step:
