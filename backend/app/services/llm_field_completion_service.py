@@ -997,6 +997,8 @@ async def run_universal_field_completion(
     from app.services.field_completion_execution import (
         apply_deterministic_fields,
         build_deterministic_plan,
+        execute_batched_llm_fields,
+        execute_circuit_bundle_fields,
         execute_per_connection_fields,
     )
     from app.services.field_completion_prompt_engineering import (
@@ -1447,7 +1449,7 @@ async def execute_field_completion_background(
             await session.commit()
 
             # Wrap execution with timeout proportional to target count
-            timeout = max(300, run.target_count * 5)  # ~5s per target
+            timeout = max(300, run.target_count * 30)  # ~30s per circuit (2-3 LLM calls each)
             await asyncio.wait_for(
                 _execute_field_completion_core(session, run, request),
                 timeout=timeout,
@@ -1509,6 +1511,8 @@ async def _execute_field_completion_core(
     from app.services.field_completion_execution import (
         apply_deterministic_fields,
         build_deterministic_plan,
+        execute_batched_llm_fields,
+        execute_circuit_bundle_fields,
         execute_per_connection_fields,
     )
     from app.services.field_completion_prompt_engineering import (
@@ -1562,22 +1566,43 @@ async def _execute_field_completion_core(
         await session.commit()
         return items, warnings, errors
 
-    model_call_count, llm_applied = await execute_per_connection_fields(
-        session,
-        run,
-        request,
-        entry,
-        targets,
-        items,
-        warnings,
-        errors,
-        provider_key=provider_key,
-        resolved_model=resolved_model,
-        make_item=_make_item,
-        apply_field_update=apply_field_update,
-        call_provider=call_provider,
-        check_cancelled=_check_cancelled,
-    )
+    estimated_input_tokens = 0
+    pack_count = 0
+    rejected_count = 0
+
+    if request.target_type == TargetType.circuit:
+        if template_plan:
+            model_call_count, llm_applied = await execute_circuit_bundle_fields(
+                session, run, request, targets, items, warnings, errors,
+                provider_key=provider_key, resolved_model=resolved_model,
+                make_item=_make_item, apply_field_update=apply_field_update,
+                call_provider=call_provider, check_cancelled=_check_cancelled,
+            )
+        else:
+            model_call_count, llm_applied = 0, 0
+    elif request.target_type == TargetType.projection:
+        model_call_count, llm_applied = await execute_per_connection_fields(
+            session, run, request, entry, targets,
+            items, warnings, errors,
+            provider_key=provider_key, resolved_model=resolved_model,
+            make_item=_make_item, apply_field_update=apply_field_update,
+            call_provider=call_provider, check_cancelled=_check_cancelled,
+        )
+    else:
+        model_call_count, rejected_count, estimated_input_tokens, pack_count, llm_applied = (
+            await execute_batched_llm_fields(
+                session, run, request, entry, targets, items, warnings, errors,
+                provider_key=provider_key, resolved_model=resolved_model,
+                canonical_cache=canonical_cache or {},
+                make_item=_make_item, apply_field_update=apply_field_update,
+                call_provider=call_provider,
+                parse_field_completion_provider_response=parse_field_completion_provider_response,
+                validate_field_updates=validate_field_updates,
+                validate_field_value_quality=validate_field_value_quality,
+                format_reasoning_with_consistency=format_reasoning_with_consistency,
+                check_cancelled=_check_cancelled,
+            )
+        )
 
     # ── Post-LLM cancellation check ─────────────────────────────────────
     if await _check_cancelled(session, run.id):
@@ -1602,12 +1627,12 @@ async def _execute_field_completion_core(
     counts["deterministic_applied_count"] = det_applied
     counts["llm_applied_count"] = llm_applied
     counts["resolver_warning_count"] = resolver_warn
-    counts["estimated_input_tokens"] = 0
+    counts["estimated_input_tokens"] = estimated_input_tokens
     counts["estimated_output_tokens"] = 0
-    counts["pack_count"] = run.target_count
+    counts["pack_count"] = pack_count if pack_count > 0 else run.target_count
     counts["deterministic_fields_count"] = len(deterministic_plan)
     counts["llm_fields_count"] = len(template_plan)
-    counts["rejected_count"] = 0
+    counts["rejected_count"] = rejected_count
     counts["warning_count"] = warning_count
     run.summary_json = to_jsonable(counts)
 
