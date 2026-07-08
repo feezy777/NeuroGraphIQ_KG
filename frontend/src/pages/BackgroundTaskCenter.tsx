@@ -4,6 +4,7 @@ import { useTaskDetailModal } from '../components/TaskDetailModal'
 import { StatusBadge } from '../components/StatusBadge'
 import { ModelBadge } from '../components/ModelBadge'
 import { CancelConfirmDialog } from '../components/CancelConfirmDialog'
+import { cancelFieldCompletionRun, cancelCompositeWorkflow, cancelCircuitConnectionExtractionRun } from '../api/endpoints'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -68,6 +69,8 @@ export function BackgroundTaskCenterPage() {
   const [search, setSearch] = useState('')
   const [drawerTask, setDrawerTask] = useState<BgTask | null>(null)
   const [cancelTarget, setCancelTarget] = useState<BgTask | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkCancelling, setBulkCancelling] = useState(false)
 
   // Filter + sort
   const filtered = useMemo(() => {
@@ -125,6 +128,34 @@ export function BackgroundTaskCenterPage() {
           <p className="tc-subtitle">统一管理后台运行中的 LLM 提取及异步任务</p>
         </div>
         <div className="tc-header-actions">
+          {selectedIds.size > 0 && (
+            <>
+              <span style={{ fontSize: 12, color: '#666' }}>已选 {selectedIds.size}</span>
+              <button className="btn" style={{ color: '#dc2626', borderColor: '#dc2626' }}
+                disabled={bulkCancelling}
+                onClick={async () => {
+                  setBulkCancelling(true)
+                  const ids = [...selectedIds]
+                  for (const id of ids) {
+                    const t = tasks.find(x => x.id === id)
+                    if (!t || !['pending','queued','running'].includes(t.status)) continue
+                    try {
+                      if (t.type === 'field_completion') await cancelFieldCompletionRun(t.id)
+                      else if (t.type === 'circuit_connection_extraction') await cancelCircuitConnectionExtractionRun(t.id)
+                      else await cancelCompositeWorkflow(t.id)
+                    } catch {}
+                  }
+                  setSelectedIds(new Set())
+                  setBulkCancelling(false)
+                }}>
+                {bulkCancelling ? '取消中…' : `取消选中 (${selectedIds.size})`}
+              </button>
+            </>
+          )}
+          <button className="btn" onClick={() => {
+            const queued = filtered.filter(t => t.status === 'pending' || t.status === 'queued')
+            setSelectedIds(new Set(queued.map(t => t.id)))
+          }}>全选排队</button>
           <input className="tc-search" placeholder="搜索任务名 / ID / 类型…" value={search}
             onChange={e => setSearch(e.target.value)} />
           <button className="btn" onClick={() => window.location.reload()}>刷新</button>
@@ -226,6 +257,10 @@ export function BackgroundTaskCenterPage() {
           ) : (
             filtered.map(task => (
               <TaskCard key={task.id} task={task}
+                selected={selectedIds.has(task.id)}
+                onSelect={(id, checked) => setSelectedIds(prev => {
+                  const next = new Set(prev); checked ? next.add(id) : next.delete(id); return next
+                })}
                 onClick={() => openTask(task)}
                 onViewDrawer={() => setDrawerTask(task)}
                 onCancel={() => setCancelTarget(task)} />
@@ -265,8 +300,9 @@ function FilterGroup({ title, children }: { title: string; children: React.React
 
 // ── Task Card ───────────────────────────────────────────────────────────────
 
-function TaskCard({ task, onClick, onViewDrawer, onCancel }: {
+function TaskCard({ task, onClick, onViewDrawer, onCancel, selected, onSelect }: {
   task: BgTask; onClick: () => void; onViewDrawer: () => void; onCancel: () => void
+  selected?: boolean; onSelect?: (id: string, checked: boolean) => void
 }) {
   const isRunning = task.status === 'running'
   const isPending = task.status === 'pending' || task.status === 'queued'
@@ -283,8 +319,13 @@ function TaskCard({ task, onClick, onViewDrawer, onCancel }: {
     : '#9ca3af'
 
   return (
-    <div className="tc-card" style={{ borderLeft: `3px solid ${edgeColor}` }} onClick={onClick}>
-      <div className="tc-card-main">
+    <div className="tc-card" style={{ borderLeft: `3px solid ${edgeColor}` }}>
+      {(isRunning || isPending) && onSelect && (
+        <input type="checkbox" checked={selected ?? false} style={{ margin: '0 8px 0 0', flexShrink: 0, cursor: 'pointer' }}
+          onChange={e => onSelect(task.id, e.target.checked)}
+          onClick={e => e.stopPropagation()} />
+      )}
+      <div className="tc-card-main" onClick={onClick}>
         <div className="tc-card-col">
           <div className="tc-card-title">
             {task.type === 'field_completion' ? '🔧' : task.type === 'circuit_extraction' ? '⭕' : '🔗'} {task.label}
