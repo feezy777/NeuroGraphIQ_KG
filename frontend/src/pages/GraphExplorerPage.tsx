@@ -139,17 +139,20 @@ export function GraphExplorerPage() {
         {tab==='data'?<DataView edges={visEdges} graph={graph}/>:<ForceGraph nodes={visNodes} edges={visEdges} focusNode={focusNode} onNodeClick={tab==='focus'?setFocusNode:undefined}/>}
       </div>
 
-      <div style={{display:'flex',gap:16,fontSize:11,color:'#666',marginTop:4,flexWrap:'wrap'}}>
-        <span><strong>节点:</strong></span>
-        <span><span style={{color:'#3b82f6'}}>●</span> 脑区</span>
-        <span><span style={{color:'#f59e0b'}}>●</span> 回路</span>
-        <span><span style={{color:'#10b981'}}>●</span> 连接</span>
-        <span style={{marginLeft:8}}><strong>边:</strong></span>
-        <span>─ 结构连接</span>
-        <span style={{borderBottom:'2px dashed #f59e0b'}}>--- 功能连接</span>
-        <span style={{borderBottom:'2px dotted #10b981'}}>··· 投射</span>
-        <span style={{color:'#fcd34d'}}>─ 回路起止</span>
-        <span style={{borderBottom:'2px dashed #c4b5fd'}}>--- 回路包含</span>
+      <div style={{display:'flex',gap:24,fontSize:11,color:'#555',marginTop:6,flexWrap:'wrap',lineHeight:'18px'}}>
+        <div><strong>节点:</strong></div>
+        <div><span style={{color:'#3b82f6',fontSize:14}}>●</span> 脑区(Region)</div>
+        <div><span style={{color:'#f59e0b',fontSize:14}}>●</span> 回路(Circuit)</div>
+        <div><span style={{color:'#10b981',fontSize:14}}>●</span> 连接(Connection)</div>
+        <div style={{borderLeft:'1px solid #ddd',paddingLeft:12}}><strong>边:</strong></div>
+        <div><span style={{color:'#3b82f6'}}>━━</span> 结构连接</div>
+        <div><span style={{color:'#f59e0b',borderBottom:'2px dashed #f59e0b'}}>╌╌╌</span> 功能连接</div>
+        <div><span style={{color:'#10b981',borderBottom:'2px dotted #10b981'}}>┈┈┈</span> 投射</div>
+        <div><span style={{color:'#8b5cf6'}}>━━</span> 关联</div>
+        <div><span style={{color:'#ec4899'}}>━━</span> 共激活</div>
+        <div><span style={{color:'#fcd34d'}}>━━</span> 回路起止</div>
+        <div><span style={{borderBottom:'2px dashed #c4b5fd',color:'#c4b5fd'}}>╌╌╌</span> 回路包含</div>
+        <div><span style={{color:'#9ca3af'}}>━━</span> 不确定</div>
       </div>
     </div>
   )
@@ -238,6 +241,13 @@ function drawGraph(el: HTMLDivElement, nodes: GNode[], edges: GEdge[], W: number
     .attr('stroke-width', (d: any) => Math.max(0.3, (d.confidence || 0.3) * 1.5))
     .attr('stroke-opacity', (d: any) => Math.min(0.5, 0.1 + (d.confidence || 0.3)))
     .attr('stroke-dasharray', (d: any) => EDGE_DASH[d.type] || '')
+    .attr('style', 'cursor:pointer')
+    .on('mouseenter', (ev: any, d: any) => {
+      const typeNames: Record<string,string> = {structural_connection:'结构连接',functional_connectivity:'功能连接',projection:'投射',association:'关联',coactivation:'共激活',effective_connectivity:'有效连接',STARTS_AT:'回路起点',ENDS_AT:'回路终点',INCLUDES:'回路包含'}
+      tip.style('opacity','1').html(`<strong>${typeNames[d.type]||d.type}</strong> 置信度:${((d.confidence||0)*100).toFixed(0)}%<br/>${d.label}`)
+    })
+    .on('mousemove', (ev: any) => { tip.style('left',(ev.offsetX+12)+'px').style('top',(ev.offsetY-10)+'px') })
+    .on('mouseleave', () => { tip.style('opacity','0') })
 
   const ng = g.append('g').selectAll('g').data(nodes).join('g')
     .attr('cursor', 'pointer')
