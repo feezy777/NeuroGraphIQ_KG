@@ -373,7 +373,9 @@ _CIRCUIT_BUNDLE_USER = (
     "Description: {desc}\n"
     "Function: {func}\n\n"
     "Step context:\n{steps_context}\n\n"
-    "Functions:\n{functions_context}"
+    "Functions:\n{functions_context}\n\n"
+    "MUST include: name_en, name_cn, circuit_class, circuit_strength,"
+    "start_region_name, end_region_name, description, source_db, status"
 )
 
 # ── Step-only prompt (Call 2 — separate LLM call per circuit with steps) ─
