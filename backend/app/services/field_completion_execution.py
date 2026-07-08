@@ -346,12 +346,15 @@ _PER_CONN_USER_TEMPLATE = (
 _CIRCUIT_BUNDLE_SYSTEM = (
     "You are a neuroscientist annotating brain circuit data.\n"
     "Based on the circuit description and step information below, infer and fill in ALL missing values.\n"
+    "circuit_strength (0.0-1.0) rates the circuit's IMPACT/SIGNIFICANCE in brain function:\n"
+    "  0.0-0.3 = minor/auxiliary, 0.4-0.6 = moderate, 0.7-0.9 = major pathway, 1.0 = critical\n"
+    "Judge this based on clinical relevance, functional importance, and network centrality.\n"
     "Output ONLY valid JSON matching the exact structure below. No markdown, no explanation.\n\n"
     'JSON STRUCTURE:\n'
     '{"circuit":{"name_en":"English circuit name","name_cn":"Chinese circuit name",'
     '"circuit_class":"functional classification","description":"circuit function description",'
     '"start_region_name":"entry brain region name","end_region_name":"exit brain region name",'
-    '"circuit_strength":0.5,"source_db":"inferred","status":"proposed"},'
+    '"circuit_strength":0.7,"source_db":"inferred","status":"proposed"},'
     '"steps":[{"step_name_en":"Step English name","step_name_cn":"Step Chinese name",'
     '"step_no":1,"role_in_circuit":"source|relay|output","description":"step description",'
     '"region_name":"brain region this step operates on",'
@@ -890,19 +893,14 @@ async def execute_circuit_bundle_fields(
                         except Exception as _e:
                             logger.warning("Circuit bundle: func field failed field=%s: %s", fname, _e)
 
-        # Compute circuit_strength from membership confidences (LLM fallback)
-        if steps and request.create_mirror_updates:
-            _strength_values = []
-            for s in steps:
-                if s.region_candidate_id:
-                    _strength_values.append(0.5)  # base for having a region match
-            if _strength_values:
-                _computed_strength = round(sum(_strength_values) / len(_strength_values), 2)
-                existing_str = get_field_value(circuit, 'circuit_strength')
-                if is_empty_value(existing_str):
-                    write_to_overlay(circuit, 'circuit_strength', _computed_strength,
-                                     run_id=run.id, confidence=0.5,
-                                     source='computed_from_memberships')
+        # Compute circuit_strength heuristic when LLM doesn't output it
+        if request.create_mirror_updates:
+            existing_str = get_field_value(circuit, 'circuit_strength')
+            if is_empty_value(existing_str):
+                _s = 0.2 + (0.15 if desc and len(desc) > 20 else 0) + (0.15 if func and func != 'unknown_function' else 0)
+                _s += min(len(steps) * 0.05, 0.2) + (0.15 if _type and _type not in ('unknown', 'uncertain_connection') else 0)
+                write_to_overlay(circuit, 'circuit_strength', round(min(_s, 0.95), 2),
+                                 run_id=run.id, confidence=0.5, source='heuristic_from_context')
 
         processed += 1
         if processed % 10 == 0 or processed == total:
