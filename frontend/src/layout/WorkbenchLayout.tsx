@@ -54,8 +54,8 @@ export function WorkbenchLayout({ currentPath, children }: WorkbenchLayoutProps)
     setDdLoading(true)
     try {
       const [fcRes, cwRes] = await Promise.allSettled([
-        listFieldCompletionRuns({ limit: 200 }),
-        listCompositeWorkflowRuns({ limit: 200 }),
+        listFieldCompletionRuns({ limit: 50 }),
+        listCompositeWorkflowRuns({ limit: 50 }),
       ])
       const merged: BgTask[] = []
       if (fcRes.status === 'fulfilled') {
