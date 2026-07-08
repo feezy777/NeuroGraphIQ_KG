@@ -273,6 +273,7 @@ export function MultiTargetFieldCompletionModal({
     let totalUpdated = 0; let totalSuggested = 0; let totalSkipped = 0; let totalFailed = 0
     let totalOverlay = 0; let totalDirect = 0; let totalModelCalls = 0
     let totalStepItems = 0; let totalCircuitItems = 0
+    let totalMemberships = 0; let totalRegions = 0
     for (const g of done) {
       totalUpdated += g.response!.updated_count
       totalSuggested += g.response!.suggested_count
@@ -281,7 +282,8 @@ export function MultiTargetFieldCompletionModal({
       totalOverlay += g.response!.applied_overlay_count ?? (g.response!.summary_json as any)?.applied_overlay_count ?? 0
       totalDirect += g.response!.applied_direct_count ?? (g.response!.summary_json as any)?.applied_direct_count ?? 0
       totalModelCalls += (g.response!.summary_json as any)?.model_call_count ?? 0
-      // Count step items from execution detail
+      totalMemberships += (g.response!.summary_json as any)?.memberships_count ?? 0
+      totalRegions += (g.response!.summary_json as any)?.regions_count ?? 0
       if (g.executionItems) {
         for (const item of g.executionItems) {
           if (item.target_type === 'circuit_step') totalStepItems++
@@ -289,7 +291,7 @@ export function MultiTargetFieldCompletionModal({
         }
       }
     }
-    return { totalUpdated, totalSuggested, totalSkipped, totalFailed, totalOverlay, totalDirect, totalModelCalls, totalStepItems, totalCircuitItems }
+    return { totalUpdated, totalSuggested, totalSkipped, totalFailed, totalOverlay, totalDirect, totalModelCalls, totalStepItems, totalCircuitItems, totalMemberships, totalRegions }
   }, [groupStates])
 
   // ── Poller for async execution ────────────────────────────────────────────
@@ -568,38 +570,6 @@ export function MultiTargetFieldCompletionModal({
     setExecTick(t => t + 1)
     void executeNextGroup(exec)
   }, [bundle, groupStates, options, selProvider, effectiveModel, t])
-
-  // ── Navigation ────────────────────────────────────────────────────────────
-  const goToLlmExtractionCenter = useCallback(() => {
-    if (circuitIds.length > 0) {
-      sessionStorage.setItem('pendingCircuitFunctionExtractionCircuitIds', JSON.stringify(circuitIds))
-      sessionStorage.setItem('pendingCircuitFunctionExtractionSource', 'data_center_bundle')
-    }
-    window.location.hash = '/llm-extraction'
-  }, [circuitIds])
-
-  const refreshRelatedTargets = useCallback(async () => {
-    if (!circuitIds.length) return
-    setRefreshingTargets(true)
-    try {
-      const related = await getFieldCompletionRelatedTargets({
-        target_type: 'circuit',
-        target_ids: circuitIds,
-        include: ['circuit_function'],
-      })
-      const cfEntry = related.groups.find(g => g.target_type === 'circuit_function')
-      const newIds = cfEntry?.target_ids ?? []
-      setGroupStates(prev => prev.map(g =>
-        g.targetType === 'circuit_function'
-          ? { ...g, targetIds: newIds, status: newIds.length > 0 ? 'pending' : 'no_data' }
-          : g,
-      ))
-    } catch {
-      // keep current state
-    } finally {
-      setRefreshingTargets(false)
-    }
-  }, [circuitIds])
 
   // ── Recent runs ───────────────────────────────────────────────────────────
   const loadRecentRuns = useCallback(async () => {
@@ -961,6 +931,7 @@ export function MultiTargetFieldCompletionModal({
                     <div><strong>步骤字段</strong>: {execAggStats.totalStepItems} 项</div>
                     <div><strong>更新/建议/跳过/失败</strong>: {execAggStats.totalUpdated}/{execAggStats.totalSuggested}/{execAggStats.totalSkipped}/{execAggStats.totalFailed}</div>
                     <div><strong>Overlay</strong>: {execAggStats.totalOverlay} · <strong>Direct</strong>: {execAggStats.totalDirect}</div>
+                    <div><strong>Connection映射</strong>: {execAggStats.totalMemberships} · <strong>Region关联</strong>: {execAggStats.totalRegions}</div>
                     <div style={{ gridColumn: '1 / -1', fontSize: 11, color: '#888', marginTop: 4 }}>
                       ⚡ V2 Bundle: 回路字段 + 步骤字段 + 脑区匹配 + step→connection映射（自动）
                     </div>

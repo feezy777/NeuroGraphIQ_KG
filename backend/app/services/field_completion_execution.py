@@ -913,8 +913,31 @@ async def execute_circuit_bundle_fields(
                     pass
 
         processed += 1
+        # Count memberships + regions for this circuit
+        _m_count = 0
+        _r_count = 0
+        try:
+            from app.models.mirror_macro_clinical import MirrorCircuitProjectionMembership
+            from app.models.mirror_kg import MirrorCircuitRegion
+            from sqlalchemy import func as _sa_func
+            _mq = select(_sa_func.count()).select_from(MirrorCircuitProjectionMembership).where(
+                MirrorCircuitProjectionMembership.circuit_id == cid)
+            _rq = select(_sa_func.count()).select_from(MirrorCircuitRegion).where(
+                MirrorCircuitRegion.circuit_id == cid)
+            _m_count = (await session.execute(_mq)).scalar_one()
+            _r_count = (await session.execute(_rq)).scalar_one()
+        except Exception:
+            pass
+
         if processed % 10 == 0 or processed == total:
-            run.summary_json = to_jsonable({**(run.summary_json or {}), "total_packs": total, "processed_packs": processed, "processed_items": len(items), "model_call_count": model_call_count, "llm_applied": llm_applied})
+            run.summary_json = to_jsonable({
+                **(run.summary_json or {}),
+                "total_packs": total, "processed_packs": processed,
+                "processed_items": len(items),
+                "model_call_count": model_call_count, "llm_applied": llm_applied,
+                "memberships_count": (run.summary_json or {}).get("memberships_count", 0) + _m_count,
+                "regions_count": (run.summary_json or {}).get("regions_count", 0) + _r_count,
+            })
             flag_modified(run, "summary_json")
             await session.commit()
 
