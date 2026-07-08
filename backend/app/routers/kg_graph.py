@@ -14,7 +14,7 @@ router = APIRouter()
 @router.get("/data")
 async def get_graph_data(
     session: AsyncSession = Depends(get_db),
-    limit_connections: int = Query(default=200, ge=1, le=500),
+    limit_connections: int = Query(default=500, ge=1, le=5000),
     include_circuits: bool = Query(default=True),
 ):
     """Return nodes + edges for graph visualization."""
