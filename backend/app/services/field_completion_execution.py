@@ -703,7 +703,12 @@ async def execute_circuit_bundle_fields(
 
         # Fix garbage names: propagate overlay name_en to circuit_name column
         current_col_name = getattr(circuit, 'circuit_name', '') or ''
-        if 'unknown_region' in str(current_col_name).lower():
+        _is_garbage = (
+            'unknown_region' in str(current_col_name).lower()
+            or 'unknown' in str(current_col_name).lower()
+            or bool(__import__('re').match(r'^R\d+_', str(current_col_name)))
+        )
+        if _is_garbage:
             overlay_name = get_field_value(circuit, 'name_en')
             if not is_empty_value(overlay_name) and 'unknown_region' not in str(overlay_name).lower():
                 circuit.circuit_name = str(overlay_name)
@@ -717,7 +722,9 @@ async def execute_circuit_bundle_fields(
             _effective_policy = request.overwrite_policy
             if fname in ('name_en', 'name_cn') and not is_empty_value(value):
                 current_name = getattr(circuit, 'circuit_name', '') or ''
-                if 'unknown_region' in str(current_name).lower():
+                if ('unknown_region' in str(current_name).lower()
+                    or 'unknown' in str(current_name).lower()
+                    or __import__('re').match(r'^R\d+_', str(current_name))):
                     _effective_policy = OverwritePolicy.overwrite_with_review
             try:
                 old_val = get_field_value(circuit, fname)
