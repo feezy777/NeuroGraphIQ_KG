@@ -27,6 +27,7 @@ from app.routers import (
     import_batches,
     llm_extraction,
     llm_field_completion,
+    llm_circuit_connection_extraction,
     llm_circuit_extraction,
     llm_composite_workflow,
     final_kg,
@@ -224,6 +225,11 @@ app.include_router(
     llm_circuit_extraction.router,
     prefix="/api/llm-extraction/circuit-extraction",
     tags=["Circuit Extraction"],
+)
+app.include_router(
+    llm_circuit_connection_extraction.router,
+    prefix="/api/llm-extraction/circuit-connection-extraction",
+    tags=["Circuit Connection Extraction"],
 )
 app.include_router(
     llm_composite_workflow.router, prefix="/api/llm-extraction", tags=["LLM Composite Workflow"]
