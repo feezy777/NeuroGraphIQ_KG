@@ -379,20 +379,16 @@ _CIRCUIT_BUNDLE_USER = (
 # ── Step-only prompt (Call 2 — separate LLM call per circuit with steps) ─
 _CIRCUIT_STEPS_SYSTEM = (
     "You are a neuroscientist. For each circuit step, infer its name, role,\n"
-    "description, and brain region. Then match it to the best projection from\n"
-    "the candidates provided, or set projection_id to null if none matches.\n"
-    "If confidence < 0.5, set is_suspected: true.\n\n"
+    "description, and brain region name from the circuit description.\n\n"
     'Output ONLY a JSON array. No markdown, no explanation.\n'
     '[{"step_no":1,"step_name_en":"Amygdala to Accumbens","step_name_cn":"杏仁核至伏隔核",'
     '"role_in_circuit":"source","description":"Projects from amygdala to nucleus accumbens",'
-    '"region_name":"left amygdala","source_db":"inferred","status":"proposed",'
-    '"connection":{"projection_id":"uuid-or-null","match_confidence":0.5,"is_suspected":false,'
-    '"evidence":"matching rationale"},"functions":[]}]'
+    '"region_name":"left amygdala","source_db":"inferred","status":"proposed","functions":[]}]'
 )
 
 _CIRCUIT_STEPS_USER = (
     "Circuit: {name} (type: {type})\nDescription: {desc}\n\n"
-    "Steps to complete ({step_count} total):\n{steps_context}\n\n"
+    "Steps ({step_count} total):\n{steps_context}\n\n"
     "Output all {step_count} steps as a JSON array."
 )
 
@@ -484,7 +480,7 @@ async def _ensure_circuit_region(session, circuit_id, region_id, sort_order=0):
 
 
 async def _upsert_membership(session, circuit_id, step_id, projection_id, *,
-                             verification_status='confirmed', confidence=0.5, evidence_text=''):
+                             verification_status='circuit_supported', confidence=0.5, evidence_text=''):
     """Insert or update mirror_circuit_projection_membership via confidence competition."""
     from app.models.mirror_macro_clinical import MirrorCircuitProjectionMembership
     from sqlalchemy import select as sa_select
@@ -512,7 +508,7 @@ async def _upsert_membership(session, circuit_id, step_id, projection_id, *,
             confidence=confidence,
             evidence_text=evidence_text,
             role_in_circuit='unknown',
-            source_method='llm_bundle_completion',
+            source_method='circuit_to_projection',
             source_atlas='llm_bundle',
             granularity_level='macro',
             mirror_status='llm_suggested',
@@ -845,23 +841,31 @@ async def execute_circuit_bundle_fields(
                 if region_id:
                     match_step.region_candidate_id = region_id
 
-            # Connection mapping -> membership
-            conn = sdata.get('connection', {})
-            proj_id_str = conn.get('projection_id')
-            if proj_id_str:
-                try:
-                    proj_id = uuid.UUID(proj_id_str)
-                    conf = float(conn.get('match_confidence', 0.5) or 0.5)
-                    is_suspected = conn.get('is_suspected', conf < 0.5)
-                    membership_status = 'suspected' if is_suspected else 'confirmed'
-                    await _upsert_membership(
-                        session, cid, match_step.id, proj_id,
-                        verification_status=membership_status,
-                        confidence=conf,
-                        evidence_text=conn.get('evidence', ''),
+            # Connection mapping -> membership (backend-driven via region matching)
+            if match_step.region_candidate_id:
+                await session.flush()  # flush step update before query
+                from app.models.mirror_kg import MirrorRegionConnection
+                from sqlalchemy import select as _sa_select, desc as _sa_desc
+                proj_stmt = (
+                    _sa_select(MirrorRegionConnection)
+                    .where(
+                        (MirrorRegionConnection.source_region_candidate_id == match_step.region_candidate_id)
+                        | (MirrorRegionConnection.target_region_candidate_id == match_step.region_candidate_id)
                     )
-                except (ValueError, TypeError):
-                    pass
+                    .order_by(_sa_desc(MirrorRegionConnection.confidence))
+                    .limit(5)
+                )
+                proj_result = await session.execute(proj_stmt)
+                best_proj = proj_result.scalars().first()
+                if best_proj:
+                    conn_conf = float(getattr(best_proj, 'confidence', 0.5) or 0.5)
+                    is_suspected = conn_conf < 0.5
+                    await _upsert_membership(
+                        session, cid, match_step.id, best_proj.id,
+                        verification_status='unverified' if is_suspected else 'circuit_supported',
+                        confidence=conn_conf,
+                        evidence_text=f"Backend-matched via region={str(region_id)[:12]}",
+                    )
 
             # Functions
             for fdata in sdata.get('functions', []):
