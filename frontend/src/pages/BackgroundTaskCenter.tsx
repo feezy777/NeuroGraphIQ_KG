@@ -247,7 +247,7 @@ export function BackgroundTaskCenterPage() {
               <button className="btn btn-sm" style={{ marginLeft: 12 }} onClick={() => window.location.reload()}>重试</button>
             </div>
           )}
-          {loading && tasks.length === 0 ? (
+          {filtered.length === 0 && loading && tasks.length === 0 ? (
             <div className="tc-empty">加载中…</div>
           ) : filtered.length === 0 ? (
             <div className="tc-empty">
