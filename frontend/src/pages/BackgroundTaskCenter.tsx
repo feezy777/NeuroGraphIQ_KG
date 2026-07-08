@@ -58,7 +58,7 @@ function countTasks(tasks: BgTask[], filter: StatusFilter): number {
 // ── Component ───────────────────────────────────────────────────────────────
 
 export function BackgroundTaskCenterPage() {
-  const { tasks, loading, error, enablePolling, disablePolling } = useBackgroundTasks(8000)
+  const { tasks, loading, error, enablePolling, disablePolling } = useBackgroundTasks(5000)
   const { openTask } = useTaskDetailModal()
   useEffect(() => { enablePolling(); return () => disablePolling() }, [enablePolling, disablePolling])
 
