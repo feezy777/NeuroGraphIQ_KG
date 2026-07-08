@@ -219,39 +219,60 @@ function ForceGraph({ nodes: _nodes, edges: _edges, focusNode, onNodeClick }: { 
 }
 
 function drawGraph(el: HTMLDivElement, nodes: GNode[], edges: GEdge[], W: number, H: number, focusNode: string | null, onNodeClick?: (id: string) => void) {
+  d3.select(el).html('')
   const svg = d3.select(el).append('svg').attr('width', W).attr('height', H)
   const g = svg.append('g')
   svg.call(d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.05, 5]).on('zoom', (ev) => g.attr('transform', ev.transform)))
 
-  nodes.forEach((n: any) => { n.x = W / 2 + (Math.random() - 0.5) * W * 0.8; n.y = H / 2 + (Math.random() - 0.5) * H * 0.8 })
+  // Tooltip div
+  const tip = d3.select(el).append('div').style('position', 'absolute').style('pointer-events', 'none')
+    .style('background', '#1f2937').style('color', '#f9fafb').style('padding', '6px 10px')
+    .style('border-radius', '6px').style('font-size', '11px').style('opacity', '0')
+    .style('transition', 'opacity 0.15s').style('max-width', '300px').style('z-index', '100')
+
+  // Spread nodes across canvas with random positions
+  nodes.forEach((n: any) => { n.x = 50 + Math.random() * (W - 100); n.y = 50 + Math.random() * (H - 100) })
 
   const link = g.append('g').selectAll('line').data(edges).join('line')
     .attr('stroke', (d: any) => EDGE_COLOR[d.type] || '#d1d5db')
     .attr('stroke-width', (d: any) => Math.max(0.3, (d.confidence || 0.3) * 1.5))
-    .attr('stroke-opacity', (d: any) => Math.min(0.7, 0.15 + (d.confidence || 0.3)))
+    .attr('stroke-opacity', (d: any) => Math.min(0.5, 0.1 + (d.confidence || 0.3)))
     .attr('stroke-dasharray', (d: any) => EDGE_DASH[d.type] || '')
 
   const ng = g.append('g').selectAll('g').data(nodes).join('g')
     .attr('cursor', 'pointer')
     .on('click', (ev: any, d: any) => { ev.stopPropagation(); onNodeClick?.(d.id) })
-  ng.append('circle')
-    .attr('r', (d: any) => d.id === focusNode ? 10 : (NODE_R[d.type] || 4))
-    .attr('fill', (d: any) => d.id === focusNode ? '#ef4444' : (NODE_COLOR[d.type] || '#999'))
-    .attr('stroke', '#fff').attr('stroke-width', 1)
-  ng.append('text').text((d: any) => (d.label || '').slice(0, 10)).attr('dx', 9).attr('dy', 4).style('font-size', '7px').style('fill', '#555')
-  ng.append('title').text((d: any) => `${d.type}: ${d.label}`)
-  link.append('title').text((d: any) => `${d.type} | ${((d.confidence||0)*100).toFixed(0)}%\n${d.label}`)
+    .on('mouseenter', (ev: any, d: any) => {
+      tip.style('opacity', '1').html(`<strong>${d.type}</strong>: ${d.label}<br/>${d.name_en || ''} ${d.name_cn || ''}`.trim())
+    })
+    .on('mousemove', (ev: any) => { tip.style('left', (ev.offsetX + 12) + 'px').style('top', (ev.offsetY - 10) + 'px') })
+    .on('mouseleave', () => { tip.style('opacity', '0') })
 
+  ng.append('circle')
+    .attr('r', (d: any) => d.id === focusNode ? 12 : (NODE_R[d.type] || 4))
+    .attr('fill', (d: any) => d.id === focusNode ? '#ef4444' : (NODE_COLOR[d.type] || '#999'))
+    .attr('stroke', '#fff').attr('stroke-width', 1.5)
+
+  ng.append('text').text((d: any) => (d.label || '').slice(0, 10))
+    .attr('dx', 9).attr('dy', 4).style('font-size', '7px').style('fill', '#374151')
+
+  // Simulation with strong spreading force
   const sim = d3.forceSimulation(nodes as any)
-    .force('link', d3.forceLink(edges).id((d: any) => d.id).distance(30))
-    .force('charge', d3.forceManyBody().strength(-60))
+    .force('link', d3.forceLink(edges).id((d: any) => d.id).distance(80))
+    .force('charge', d3.forceManyBody().strength(-300))
     .force('center', d3.forceCenter(W / 2, H / 2))
-    .force('collision', d3.forceCollide(6))
+    .force('collision', d3.forceCollide(15))
     .on('tick', () => {
-      link.attr('x1', (d: any) => d.source.x).attr('y1', (d: any) => d.source.y).attr('x2', (d: any) => d.target.x).attr('y2', (d: any) => d.target.y)
+      link.attr('x1', (d: any) => d.source.x).attr('y1', (d: any) => d.source.y)
+          .attr('x2', (d: any) => d.target.x).attr('y2', (d: any) => d.target.y)
       ng.attr('transform', (d: any) => `translate(${d.x},${d.y})`)
     })
 
+  // Run simulation longer for better spread
+  sim.alpha(1).restart()
+  for (let i = 0; i < 120; i++) sim.tick()
+
+  // Drag
   ng.call(d3.drag<SVGGElement, any>()
     .on('start', (ev: any, d: any) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y })
     .on('drag', (ev: any, d: any) => { d.fx = ev.x; d.fy = ev.y })
