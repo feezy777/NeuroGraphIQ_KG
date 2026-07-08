@@ -698,19 +698,34 @@ async def execute_circuit_bundle_fields(
             continue
 
         # ── Apply circuit fields ─────────────────────────────────────────────
+        _circuit_entry = get_registry_entry(TargetType.circuit)
         circuit_data = parsed.get('circuit', {})
+
+        # Fix garbage names: propagate overlay name_en to circuit_name column
+        current_col_name = getattr(circuit, 'circuit_name', '') or ''
+        if 'unknown_region' in str(current_col_name).lower():
+            overlay_name = get_field_value(circuit, 'name_en')
+            if not is_empty_value(overlay_name) and 'unknown_region' not in str(overlay_name).lower():
+                circuit.circuit_name = str(overlay_name)
+
         for fname in ('name_en', 'name_cn', 'circuit_class', 'description', 'circuit_strength',
                       'source_db', 'status', 'canonical_id'):
             value = circuit_data.get(fname)
             if value is None or is_empty_value(value):
                 continue
+            # Force-overwrite garbage names
+            _effective_policy = request.overwrite_policy
+            if fname in ('name_en', 'name_cn') and not is_empty_value(value):
+                current_name = getattr(circuit, 'circuit_name', '') or ''
+                if 'unknown_region' in str(current_name).lower():
+                    _effective_policy = OverwritePolicy.overwrite_with_review
             try:
                 old_val = get_field_value(circuit, fname)
                 status = apply_field_update(
                     circuit, fname, value,
-                    overwrite_policy=request.overwrite_policy,
+                    overwrite_policy=_effective_policy,
                     create_mirror_updates=request.create_mirror_updates,
-                    run_id=run.id, resolved_model=resolved_model,
+                    entry=_circuit_entry, run_id=run.id, resolved_model=resolved_model,
                 )
                 _applied_flag = status and 'applied' in str(getattr(status, 'value', status))
                 if _applied_flag:
@@ -900,7 +915,7 @@ async def execute_circuit_bundle_fields(
                         provider_key, model=resolved_model,
                         system_prompt='Rate this brain circuit impact 0-1. Output ONLY a number.',
                         user_prompt=f'Circuit: {name}\nType: {_type}\nDesc: {desc}\nFunc: {func}',
-                        temperature=0.1, max_tokens=20, response_schema=None,
+                        temperature=0.5, max_tokens=20, response_schema=None,
                     )
                     model_call_count += 1
                     _raw = getattr(_sr, 'raw_text', '') or ''
@@ -919,10 +934,10 @@ async def execute_circuit_bundle_fields(
         try:
             from app.models.mirror_macro_clinical import MirrorCircuitProjectionMembership
             from app.models.mirror_kg import MirrorCircuitRegion
-            from sqlalchemy import func as _sa_func
-            _mq = select(_sa_func.count()).select_from(MirrorCircuitProjectionMembership).where(
+            from sqlalchemy import select as _sa_select, func as _sa_func
+            _mq = _sa_select(_sa_func.count()).select_from(MirrorCircuitProjectionMembership).where(
                 MirrorCircuitProjectionMembership.circuit_id == cid)
-            _rq = select(_sa_func.count()).select_from(MirrorCircuitRegion).where(
+            _rq = _sa_select(_sa_func.count()).select_from(MirrorCircuitRegion).where(
                 MirrorCircuitRegion.circuit_id == cid)
             _m_count = (await session.execute(_mq)).scalar_one()
             _r_count = (await session.execute(_rq)).scalar_one()
