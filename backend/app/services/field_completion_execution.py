@@ -377,6 +377,133 @@ _CIRCUIT_BUNDLE_USER = (
 )
 
 
+async def _build_step_connection_candidates(
+    session: AsyncSession,
+    steps: list,
+) -> dict:
+    """For each step, find up to 20 candidate connections from mirror_region_connections."""
+    from app.models.mirror_kg import MirrorRegionConnection
+    from sqlalchemy import select as sa_select
+
+    candidates: dict = {}
+    for step in steps:
+        rid = getattr(step, 'region_candidate_id', None)
+        if not rid:
+            candidates[step.id] = []
+            continue
+        stmt = (
+            sa_select(MirrorRegionConnection)
+            .where(
+                (MirrorRegionConnection.source_region_candidate_id == rid)
+                | (MirrorRegionConnection.target_region_candidate_id == rid)
+            )
+            .limit(20)
+        )
+        result = await session.execute(stmt)
+        conns = result.scalars().all()
+        candidates[step.id] = [
+            {
+                "id": str(c.id),
+                "source_name": getattr(c, 'source_region_name_en', '') or '?',
+                "target_name": getattr(c, 'target_region_name_en', '') or '?',
+                "type": getattr(c, 'connection_type', '') or 'unknown',
+                "confidence": float(getattr(c, 'confidence', 0) or 0),
+                "strength": float(getattr(c, 'strength', 0) or 0),
+            }
+            for c in conns
+        ]
+    return candidates
+
+
+def _format_steps_context(steps, candidates) -> str:
+    """Format steps + connection candidates for LLM prompt."""
+    lines = []
+    for s in sorted(steps, key=lambda s: getattr(s, 'step_order', 0) or 0):
+        rid = str(getattr(s, 'region_candidate_id', ''))[:12] if getattr(s, 'region_candidate_id', None) else 'none'
+        lines.append(f"Step {getattr(s, 'step_order', '?')}: {getattr(s, 'step_name', '')} (role:{getattr(s, 'role', 'unknown')}, region:{rid})")
+        desc = getattr(s, 'description', '') or ''
+        if desc:
+            lines.append(f"  desc: {desc}")
+        cands = candidates.get(s.id, [])
+        if cands:
+            lines.append(f"  Candidates ({len(cands)}):")
+            for c in cands:
+                lines.append(
+                    f"    [{c['id'][:12]}] {c['source_name']}->{c['target_name']}"
+                    f" type={c['type']} conf={c['confidence']} strength={c['strength']}"
+                )
+        else:
+            lines.append("  Candidates: none")
+    return '\n'.join(lines)
+
+
+def _find_step_by_order(steps, order):
+    return next((s for s in steps if getattr(s, 'step_order', None) == order), None)
+
+
+async def _ensure_circuit_region(session, circuit_id, region_id, sort_order=0):
+    """Idempotent: create mirror_circuit_region if not exists."""
+    from app.models.mirror_kg import MirrorCircuitRegion
+    from sqlalchemy import select as sa_select
+
+    existing = await session.execute(
+        sa_select(MirrorCircuitRegion).where(
+            MirrorCircuitRegion.circuit_id == circuit_id,
+            MirrorCircuitRegion.region_candidate_id == region_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        return
+    cr = MirrorCircuitRegion(
+        id=uuid.uuid4(),
+        circuit_id=circuit_id,
+        region_candidate_id=region_id,
+        sort_order=sort_order,
+    )
+    session.add(cr)
+
+
+async def _upsert_membership(session, circuit_id, step_id, projection_id, *,
+                             verification_status='confirmed', confidence=0.5, evidence_text=''):
+    """Insert or update mirror_circuit_projection_membership via confidence competition."""
+    from app.models.mirror_macro_clinical import MirrorCircuitProjectionMembership
+    from sqlalchemy import select as sa_select
+
+    existing = await session.execute(
+        sa_select(MirrorCircuitProjectionMembership).where(
+            MirrorCircuitProjectionMembership.circuit_id == circuit_id,
+            MirrorCircuitProjectionMembership.projection_id == projection_id,
+            MirrorCircuitProjectionMembership.source_step_id == step_id,
+        )
+    )
+    m = existing.scalar_one_or_none()
+    if m:
+        if confidence > (float(getattr(m, 'confidence', 0) or 0)):
+            m.confidence = confidence
+            m.verification_status = verification_status
+            m.evidence_text = evidence_text
+    else:
+        m = MirrorCircuitProjectionMembership(
+            id=uuid.uuid4(),
+            circuit_id=circuit_id,
+            projection_id=projection_id,
+            source_step_id=step_id,
+            verification_status=verification_status,
+            confidence=confidence,
+            evidence_text=evidence_text,
+            role_in_circuit='unknown',
+            source_method='llm_bundle_completion',
+            source_atlas='llm_bundle',
+            granularity_level='macro',
+            mirror_status='llm_suggested',
+            review_status='pending',
+            promotion_status='not_promoted',
+            raw_payload_json={},
+            normalized_payload_json={},
+        )
+        session.add(m)
+
+
 async def execute_circuit_bundle_fields(
     session: AsyncSession,
     run: LlmFieldCompletionRun,
@@ -398,6 +525,7 @@ async def execute_circuit_bundle_fields(
     from app.services.field_completion_registry import (
         get_field_value, get_registry_entry, is_empty_value, resolve_field_name,
     )
+    from app.services.llm_field_completion_service import _get_existing_overlay_dict
 
     model_call_count = 0
     llm_applied = 0
@@ -412,7 +540,7 @@ async def execute_circuit_bundle_fields(
 
         # ── Gather circuit context ──────────────────────────────────────────
         from app.models.mirror_macro_clinical import MirrorCircuitStep, MirrorCircuitFunction
-        from app.models.mirror_kg import MirrorRegionConnection
+        from app.services.llm_circuit_connection_extraction_service import match_region_name
         from sqlalchemy import select as sa_select
 
         steps_q = sa_select(MirrorCircuitStep).where(MirrorCircuitStep.circuit_id == cid).order_by(MirrorCircuitStep.step_order)
@@ -428,19 +556,6 @@ async def execute_circuit_bundle_fields(
         for f in funcs:
             step_funcs.setdefault(getattr(f, 'step_id', None) or cid, []).append(f)
 
-        # Get related projections (by step region)
-        proj_map: dict[str, Any] = {}
-        step_region_ids = [s.region_candidate_id for s in steps if s.region_candidate_id]
-        if step_region_ids:
-            proj_q = sa_select(MirrorRegionConnection).where(
-                MirrorRegionConnection.source_region_candidate_id.in_(step_region_ids)
-                | MirrorRegionConnection.target_region_candidate_id.in_(step_region_ids)
-            ).limit(50)
-            proj_result = await session.execute(proj_q)
-            for p in proj_result.scalars().all():
-                key = f"{p.source_region_candidate_id}→{p.target_region_candidate_id}"
-                proj_map[key] = {"id": str(p.id), "name": f"{p.source_region_name_en or '?'} → {p.target_region_name_en or '?'}", "type": p.connection_type, "confidence": p.confidence}
-
         # ── Build context ────────────────────────────────────────────────────
         name = getattr(circuit, 'circuit_name', '') or str(cid)
         _type = getattr(circuit, 'circuit_type', '') or 'unknown'
@@ -448,24 +563,12 @@ async def execute_circuit_bundle_fields(
         func = getattr(circuit, 'function_association', '') or ''
 
         # Existing overlay values
-        overlay_parts = []
-        for ofname in ('name_cn', 'attributes', 'source_db', 'status', 'circuit_strength'):
-            oval = get_field_value(circuit, ofname)
-            if not is_empty_value(oval):
-                overlay_parts.append(f"  {ofname}: {oval}")
-        overlay_str = '\n'.join(overlay_parts) if overlay_parts else '  (none)'
+        existing_overlay = _get_existing_overlay_dict(circuit)
+        overlay_str = _json.dumps(existing_overlay, ensure_ascii=False) if existing_overlay else '{}'
 
         # Steps context with connection candidates
-        steps_lines = []
-        for s in steps:
-            sname = getattr(s, 'step_name', '') or ''
-            srole = getattr(s, 'role', '') or ''
-            srid = str(getattr(s, 'region_candidate_id', '')) or ''
-            steps_lines.append(f"  Step{getattr(s, 'step_order', '?')}: {sname} ({srole}) region={srid[:12]}")
-            for proj_key, proj in proj_map.items():
-                if str(srid) in proj_key:
-                    steps_lines.append(f"    Projection: {proj['name']} ({proj['type']}, conf={proj['confidence']}) id={proj['id'][:12]}")
-        steps_context = '\n'.join(steps_lines)
+        candidates = await _build_step_connection_candidates(session, steps)
+        steps_context = _format_steps_context(steps, candidates)
 
         # Functions context
         func_lines = []
@@ -576,7 +679,8 @@ async def execute_circuit_bundle_fields(
 
         # ── Apply circuit fields ─────────────────────────────────────────────
         circuit_data = parsed.get('circuit', {})
-        for fname in ('name_en', 'name_cn', 'circuit_class', 'description', 'source_db', 'status', 'canonical_id'):
+        for fname in ('name_en', 'name_cn', 'circuit_class', 'description', 'circuit_strength',
+                      'source_db', 'status', 'canonical_id'):
             value = circuit_data.get(fname)
             if value is None or is_empty_value(value):
                 continue
@@ -597,13 +701,67 @@ async def execute_circuit_bundle_fields(
             except Exception as _e:
                 logger.warning("Circuit bundle: apply circuit field failed cid=%s field=%s: %s", str(cid)[:12], fname, _e)
 
+        # ── Match + backfill region IDs ──────────────────────────────────────
+        start_name = circuit_data.get('start_region_name', '')
+        end_name = circuit_data.get('end_region_name', '')
+        start_id = await match_region_name(session, start_name) if start_name else None
+        end_id = await match_region_name(session, end_name) if end_name else None
+
+        if start_id:
+            try:
+                old_val = get_field_value(circuit, 'canonical_start_region_id')
+                status = apply_field_update(
+                    circuit, 'canonical_start_region_id', str(start_id),
+                    overwrite_policy=request.overwrite_policy,
+                    create_mirror_updates=request.create_mirror_updates,
+                    run_id=run.id, resolved_model=resolved_model,
+                )
+                _applied_flag = status and 'applied' in str(getattr(status, 'value', status))
+                if _applied_flag:
+                    llm_applied += 1
+                item = make_item(run.id, request.target_type.value, cid, 'canonical_start_region_id',
+                                 old_value=old_val, status=status, suggested=str(start_id),
+                                 applied=str(start_id) if _applied_flag else None)
+                session.add(item)
+                items.append(item)
+            except Exception as _e:
+                logger.warning("Circuit bundle: start region failed cid=%s: %s", str(cid)[:12], _e)
+        if end_id:
+            try:
+                old_val = get_field_value(circuit, 'canonical_end_region_id')
+                status = apply_field_update(
+                    circuit, 'canonical_end_region_id', str(end_id),
+                    overwrite_policy=request.overwrite_policy,
+                    create_mirror_updates=request.create_mirror_updates,
+                    run_id=run.id, resolved_model=resolved_model,
+                )
+                _applied_flag = status and 'applied' in str(getattr(status, 'value', status))
+                if _applied_flag:
+                    llm_applied += 1
+                item = make_item(run.id, request.target_type.value, cid, 'canonical_end_region_id',
+                                 old_value=old_val, status=status, suggested=str(end_id),
+                                 applied=str(end_id) if _applied_flag else None)
+                session.add(item)
+                items.append(item)
+            except Exception as _e:
+                logger.warning("Circuit bundle: end region failed cid=%s: %s", str(cid)[:12], _e)
+
+        # Create circuit_regions
+        if start_id:
+            await _ensure_circuit_region(session, cid, start_id, sort_order=0)
+        if end_id:
+            await _ensure_circuit_region(session, cid, end_id, sort_order=1)
+
         # ── Apply step + function fields ─────────────────────────────────────
         for sdata in parsed.get('steps', []):
             step_no = sdata.get('step_no', 1)
-            match_step = next((s for s in steps if getattr(s, 'step_order', None) == step_no), None)
+            match_step = _find_step_by_order(steps, step_no)
             if not match_step:
                 continue
-            for fname in ('step_name_en', 'step_name_cn', 'role_in_circuit', 'description', 'source_db', 'status'):
+
+            # Step fields
+            for fname in ('step_name_en', 'step_name_cn', 'role_in_circuit', 'description',
+                          'source_db', 'status'):
                 value = sdata.get(fname)
                 if value is None or is_empty_value(value):
                     continue
@@ -619,6 +777,32 @@ async def execute_circuit_bundle_fields(
                 except Exception as _e:
                     logger.warning("Circuit bundle: step field failed field=%s: %s", fname, _e)
 
+            # Step region matching
+            region_name = sdata.get('region_name', '')
+            if region_name:
+                region_id = await match_region_name(session, region_name)
+                if region_id:
+                    match_step.region_candidate_id = region_id
+
+            # Connection mapping -> membership
+            conn = sdata.get('connection', {})
+            proj_id_str = conn.get('projection_id')
+            if proj_id_str:
+                try:
+                    proj_id = uuid.UUID(proj_id_str)
+                    conf = float(conn.get('match_confidence', 0.5) or 0.5)
+                    is_suspected = conn.get('is_suspected', conf < 0.5)
+                    membership_status = 'suspected' if is_suspected else 'confirmed'
+                    await _upsert_membership(
+                        session, cid, match_step.id, proj_id,
+                        verification_status=membership_status,
+                        confidence=conf,
+                        evidence_text=conn.get('evidence', ''),
+                    )
+                except (ValueError, TypeError):
+                    pass
+
+            # Functions
             for fdata in sdata.get('functions', []):
                 for fname in ('function_term_en', 'function_term_cn', 'function_domain', 'function_role', 'effect_type', 'confidence_score', 'evidence_level', 'description', 'source_db', 'status', 'projection_id', 'projection_name'):
                     value = fdata.get(fname)
