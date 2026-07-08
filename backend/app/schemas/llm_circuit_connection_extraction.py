@@ -18,7 +18,7 @@ class ExtractionMode:
 
 class CircuitConnectionExtractionRequest(BaseModel):
     mode: str = Field(default=ExtractionMode.MULTI, description="multi_connection | main_pair")
-    circuit_ids: list[uuid.UUID] = Field(..., min_length=1, max_length=500)
+    circuit_ids: list[uuid.UUID] = Field(..., min_length=1, max_length=5000)
     dry_run: bool = Field(default=False)
     provider: str = Field(default="deepseek")
     model_name: str | None = None
