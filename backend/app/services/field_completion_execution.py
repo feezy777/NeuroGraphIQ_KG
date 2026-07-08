@@ -838,6 +838,8 @@ async def execute_circuit_bundle_fields(
 
         # ── Apply step + function fields ─────────────────────────────────────
         for sdata in steps_data:
+            if not isinstance(sdata, dict):
+                continue
             step_no = sdata.get('step_no', 1)
             match_step = _find_step_by_order(steps, step_no)
             if not match_step:
