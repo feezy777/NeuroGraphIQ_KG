@@ -15,7 +15,12 @@ interface GraphData { nodes: GraphNode[]; edges: GraphEdge[]; stats: Record<stri
 
 const COLORS: Record<string, string> = {
   region: '#3b82f6', circuit: '#f59e0b', connection: '#10b981',
-  STARTS_AT: '#f59e0b', ENDS_AT: '#ef4444', INCLUDES: '#8b5cf6',
+  SOURCE_OF: '#93c5fd', TARGET_OF: '#fca5a5',
+  STARTS_AT: '#fcd34d', ENDS_AT: '#f87171', INCLUDES: '#c4b5fd',
+}
+
+const NODE_SIZES: Record<string, number> = {
+  region: 7, circuit: 5, connection: 3,
 }
 
 export function GraphExplorerPage() {
@@ -27,7 +32,7 @@ export function GraphExplorerPage() {
   const [minConf, setMinConf] = useState(0)
 
   useEffect(() => {
-    fetch('/api/kg/graph/data?limit_connections=200&include_circuits=true')
+    fetch('/api/kg/graph/data?limit_connections=500&include_circuits=true')
       .then(r => r.json()).then(d => { setData(d); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])
@@ -157,26 +162,17 @@ function ForceGraph({ nodes, edges, focusMode }: { nodes: GraphNode[]; edges: Gr
     const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.1, 4]).on('zoom', (ev) => g.attr('transform', ev.transform))
     svg.call(zoom)
 
-    // Add connection nodes from edge data so edges can link properly
-    const connNodes: GraphNode[] = []
-    const regionIds = new Set(nodes.filter(n => n.type === 'region').map(n => n.id))
-    for (const e of edges) {
-      if (e.type !== 'STARTS_AT' && e.type !== 'ENDS_AT' && e.type !== 'INCLUDES') {
-        // This edge IS a connection — make a node for it
-        const exists = nodes.find(n => n.id === e.id) || connNodes.find(n => n.id === e.id)
-        if (!exists) {
-          connNodes.push({
-            id: e.id, type: 'connection', label: `${(e as any).source_name || ''} → ${(e as any).target_name || ''}`,
-            group: 'connection',
-          })
-        }
-      }
-    }
-    const allNodes = [...nodes, ...connNodes]
-
-    // Filter edges to only those where both source and target are in allNodes
+    // Only keep region nodes + non-membership edges for clean visualization
+    const regionNodes = nodes.filter(n => n.type === 'region')
+    const circuitNodes = nodes.filter(n => n.type === 'circuit').slice(0, 20)  // limit circuits
+    const allNodes = [...regionNodes, ...circuitNodes]
     const nodeIds = new Set(allNodes.map(n => n.id))
-    const validEdges = edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
+
+    // Keep only edges where both ends are regions or circuits
+    const validEdges = edges.filter(e => {
+      if (e.type === 'INCLUDES') return false  // skip membership edges (need connection nodes)
+      return nodeIds.has(e.source) && nodeIds.has(e.target)
+    })
 
     // Initialize positions
     allNodes.forEach((n: any) => { n.x = w / 2 + (Math.random() - 0.5) * 100; n.y = h / 2 + (Math.random() - 0.5) * 100 })
@@ -188,7 +184,7 @@ function ForceGraph({ nodes, edges, focusMode }: { nodes: GraphNode[]; edges: Gr
 
     const nodeGroup = g.append('g').selectAll('g').data(allNodes).join('g')
     nodeGroup.append('circle')
-      .attr('r', (d: any) => d.type === 'region' ? 6 : d.type === 'circuit' ? 5 : 3)
+      .attr('r', (d: any) => NODE_SIZES[d.type] || 4)
       .attr('fill', (d: any) => COLORS[d.type] || '#999')
       .attr('stroke', '#fff').attr('stroke-width', 1)
     nodeGroup.append('text')
