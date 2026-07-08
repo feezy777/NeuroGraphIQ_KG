@@ -269,12 +269,13 @@ function ForceGraph({ nodes, edges, focusMode, focusNode, onNodeClick }: {
     }
 
     // Render with a small delay to avoid blocking UI
+    let sim: d3.Simulation<any, any> | null = null
     const timer = setTimeout(() => {
       d3.select(container).html('')
-      renderGraph(container, nodes, edges, W, H, focusNode, onNodeClick)
+      sim = renderGraph(container, nodes, edges, W, H, focusNode, onNodeClick)
     }, 50)
 
-    return () => clearTimeout(timer)
+    return () => { clearTimeout(timer); sim?.stop() }
   }, [nodes.length, edges.length, focusNode])
 
   return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
@@ -346,8 +347,8 @@ function renderGraph(
       .on('drag', (ev: any, d: any) => { d.fx = ev.x; d.fy = ev.y })
       .on('end', (ev: any, d: any) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null }) as any)
 
-    return () => { sim.stop() }
-  }, [nodes.length, edges.length, focusNode])
+    return sim
+  }
 
   return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 }
