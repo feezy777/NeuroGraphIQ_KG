@@ -560,7 +560,7 @@ async def execute_circuit_connection_extraction(
         circuit = await session.get(MirrorRegionCircuit, cid)
         if circuit is None:
             item = LlmCircuitConnectionExtractionItem(
-                id=uuid.uuid4(), run_id=run.id, circuit_id=cid,
+                id=uuid.uuid4(), run_id=run.id, circuit_id=None,
                 action="skipped", action_reason="Circuit not found",
             )
             session.add(item)

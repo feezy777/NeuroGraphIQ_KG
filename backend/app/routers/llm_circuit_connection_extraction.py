@@ -168,9 +168,14 @@ async def _execute_background(run_id: uuid.UUID, request_payload: dict) -> None:
                 "connections_updated": updated,
                 "items_count": len(items),
             }
-            if created > 0 and not (run.errors_json or []):
+            has_items = len(items) > 0
+            if (created > 0 or updated > 0) and not (run.errors_json or []):
                 run.status = "succeeded"
-            elif created > 0:
+            elif (created > 0 or updated > 0):
+                run.status = "partially_succeeded"
+            elif has_items and not (run.errors_json or []):
+                run.status = "succeeded"  # LLM worked, all skipped due to existing
+            elif has_items:
                 run.status = "partially_succeeded"
             else:
                 run.status = "failed"
