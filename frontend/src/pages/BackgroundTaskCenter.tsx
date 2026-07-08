@@ -58,7 +58,7 @@ function countTasks(tasks: BgTask[], filter: StatusFilter): number {
 // ── Component ───────────────────────────────────────────────────────────────
 
 export function BackgroundTaskCenterPage() {
-  const { tasks, loading, error, enablePolling, disablePolling } = useBackgroundTasks(3000)
+  const { tasks, loading, error, enablePolling, disablePolling } = useBackgroundTasks(8000)
   const { openTask } = useTaskDetailModal()
   useEffect(() => { enablePolling(); return () => disablePolling() }, [enablePolling, disablePolling])
 
@@ -150,12 +150,13 @@ export function BackgroundTaskCenterPage() {
                 }}>
                 {bulkCancelling ? '取消中…' : `取消选中 (${selectedIds.size})`}
               </button>
+              <button className="btn" onClick={() => setSelectedIds(new Set())}>清除选择</button>
             </>
           )}
           <button className="btn" onClick={() => {
-            const queued = filtered.filter(t => t.status === 'pending' || t.status === 'queued')
+            const queued = tasks.filter(t => t.status === 'pending' || t.status === 'queued')
             setSelectedIds(new Set(queued.map(t => t.id)))
-          }}>全选排队</button>
+          }}>全选排队 ({tasks.filter(t => t.status === 'pending' || t.status === 'queued').length})</button>
           <input className="tc-search" placeholder="搜索任务名 / ID / 类型…" value={search}
             onChange={e => setSearch(e.target.value)} />
           <button className="btn" onClick={() => window.location.reload()}>刷新</button>
