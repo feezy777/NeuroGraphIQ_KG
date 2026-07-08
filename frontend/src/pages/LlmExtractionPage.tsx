@@ -6214,6 +6214,7 @@ export function LlmExtractionPage() {
         <CircuitConnectionExtractionModal
           open={extractionModalOpen}
           mode={extractionMode}
+          preSelectedIds={selectedCandidateIds}
           onClose={() => setExtractionModalOpen(false)}
         />
       )}

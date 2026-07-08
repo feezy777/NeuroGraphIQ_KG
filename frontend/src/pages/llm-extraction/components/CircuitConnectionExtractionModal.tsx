@@ -26,10 +26,11 @@ const DS_MODELS = [
 interface Props {
   open: boolean
   mode: 'multi_connection' | 'main_pair'
+  preSelectedIds?: string[]
   onClose: () => void
 }
 
-export function CircuitConnectionExtractionModal({ open, mode, onClose }: Props) {
+export function CircuitConnectionExtractionModal({ open, mode, preSelectedIds = [], onClose }: Props) {
   const { t } = useI18n()
   const [step, setStep] = useState<Step>(0)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -66,7 +67,7 @@ export function CircuitConnectionExtractionModal({ open, mode, onClose }: Props)
   useEffect(() => {
     if (!open) return
     setStep(0)
-    setSelectedIds([])
+    setSelectedIds([...preSelectedIds])
     setProvider('deepseek')
     setModel('deepseek-chat')
     setTemperature(0.2)
