@@ -208,6 +208,7 @@ const BASE_MAPPINGS: FormalFieldMapping[] = [
       col('attributes', 'attributes（属性）', 'attributes', ['attributes', 'raw_payload_json'], { renderType: 'json' }),
       col('source_db', 'source_db（来源库）', 'source_db', ['source_atlas', 'source_db']),
       col('status', 'status（状态）', 'status', ['status'], { renderType: 'status' }),
+      col('circuit_strength', 'circuit_strength（回路强度）', 'circuit_strength', ['circuit_strength'], { enrichable: true }),
       col('data_source_id', 'data_source_id', 'data_source_id', ['data_source_id', 'resource_id'], { renderType: 'id' }),
       col('primary_evidence_id', 'primary_evidence_id', 'primary_evidence_id', ['llm_item_id', 'primary_evidence_id'], { renderType: 'id' }),
       col('external_code', 'external_code', 'external_code', ['external_code']),

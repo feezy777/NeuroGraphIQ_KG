@@ -890,6 +890,20 @@ async def execute_circuit_bundle_fields(
                         except Exception as _e:
                             logger.warning("Circuit bundle: func field failed field=%s: %s", fname, _e)
 
+        # Compute circuit_strength from membership confidences (LLM fallback)
+        if steps and request.create_mirror_updates:
+            _strength_values = []
+            for s in steps:
+                if s.region_candidate_id:
+                    _strength_values.append(0.5)  # base for having a region match
+            if _strength_values:
+                _computed_strength = round(sum(_strength_values) / len(_strength_values), 2)
+                existing_str = get_field_value(circuit, 'circuit_strength')
+                if is_empty_value(existing_str):
+                    write_to_overlay(circuit, 'circuit_strength', _computed_strength,
+                                     run_id=run.id, confidence=0.5,
+                                     source='computed_from_memberships')
+
         processed += 1
         if processed % 10 == 0 or processed == total:
             run.summary_json = to_jsonable({**(run.summary_json or {}), "total_packs": total, "processed_packs": processed, "processed_items": len(items), "model_call_count": model_call_count, "llm_applied": llm_applied})
