@@ -1,212 +1,92 @@
-"""Neo4j graph API routes — sync, query, perturbation."""
+"""Graph API routes — PostgreSQL-based graph data (Neo4j optional)."""
 
-import uuid
-from typing import Any
+from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services import neo4j_sync_service as n4s
+from app.database import get_db
 
 router = APIRouter()
 
-# ── Sync ─────────────────────────────────────────────────────────────────
 
-@router.post("/sync")
-async def trigger_sync():
-    try:
-        counts = await n4s.trigger_sync()
-        return {"status": "ok", "counts": counts}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/data")
+async def get_graph_data(
+    session: AsyncSession = Depends(get_db),
+    limit_connections: int = Query(default=200, ge=1, le=500),
+    include_circuits: bool = Query(default=True),
+):
+    """Return nodes + edges for graph visualization."""
+    # Regions (96 Macro96)
+    regions = await session.execute(text(
+        "SELECT id, en_name, cn_name, laterality FROM candidate_brain_regions "
+        "WHERE candidate_status = 'rule_passed' LIMIT 96"
+    ))
+    nodes = [
+        {"id": str(r[0]), "type": "region", "label": r[1] or r[2] or "?", "group": "region",
+         "name_en": r[1] or "", "name_cn": r[2] or "", "laterality": r[3] or ""}
+        for r in regions.fetchall()
+    ]
+    region_ids = {n["id"] for n in nodes}
 
+    # Connections (filtered to macro96 regions)
+    conns = await session.execute(text(
+        "SELECT id, source_region_candidate_id, target_region_candidate_id, "
+        "connection_type, confidence, strength, source_region_name_en, target_region_name_en "
+        "FROM mirror_region_connections WHERE source_region_name_en IS NOT NULL "
+        "LIMIT :lim"
+    ), {"lim": limit_connections})
+    edges = []
+    for row in conns.fetchall():
+        cid, src, tgt, ctype, conf, strength, sname, tname = row
+        if src and tgt and str(src) in region_ids and str(tgt) in region_ids:
+            edges.append({
+                "id": str(cid), "source": str(src), "target": str(tgt),
+                "type": ctype or "unknown", "confidence": float(conf or 0),
+                "strength": float(strength or 0),
+                "source_name": sname or "", "target_name": tname or "",
+            })
 
-@router.get("/sync/status")
-async def sync_status():
-    return n4s.get_sync_status()
+    # Circuits
+    circuits = []
+    if include_circuits:
+        circs = await session.execute(text(
+            "SELECT id, circuit_name, circuit_type, confidence, "
+            "normalized_payload_json->'formal_field_overlay'->>'canonical_start_region_id' as sid, "
+            "normalized_payload_json->'formal_field_overlay'->>'canonical_end_region_id' as eid "
+            "FROM mirror_region_circuits WHERE circuit_name IS NOT NULL LIMIT 200"
+        ))
+        for row in circs.fetchall():
+            cid, name, ctype, conf, sid, eid = row
+            cnode = {"id": str(cid), "type": "circuit", "label": name[:40] if name else "?",
+                     "group": "circuit", "circuit_class": ctype or ""}
+            nodes.append(cnode)
+            if sid and str(sid) in region_ids:
+                edges.append({"id": f"cstart_{cid}", "source": str(cid), "target": str(sid),
+                              "type": "STARTS_AT", "confidence": 1.0, "strength": 0})
+            if eid and str(eid) in region_ids:
+                edges.append({"id": f"cend_{cid}", "source": str(cid), "target": str(eid),
+                              "type": "ENDS_AT", "confidence": 1.0, "strength": 0})
 
-
-# ── Query ────────────────────────────────────────────────────────────────
-
-@router.get("/region/{region_id}/neighbors")
-async def region_neighbors(region_id: str, depth: int = Query(default=1, ge=1, le=3)):
-    """Expand region neighbors up to depth hops."""
-    try:
-        graph = n4s._get_graph()
-        query = """
-            MATCH (r:Region {id: $rid})
-            OPTIONAL MATCH path = (r)-[*1..%d]-(neighbor:Region)
-            RETURN r, collect(DISTINCT neighbor) as neighbors,
-                   collect(DISTINCT relationships(path)) as edges
-        """ % depth
-        result = graph.run(query, rid=region_id).data()
-        if not result:
-            raise HTTPException(status_code=404, detail="Region not found")
-        row = result[0]
-        r = row["r"]
-        return {
-            "node": dict(r),
-            "neighbors": [dict(n) for n in (row["neighbors"] or [])],
-            "edges": len(row.get("edges", []) or []),
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/circuit/{circuit_id}/path")
-async def circuit_path(circuit_id: str):
-    """Get full circuit path: regions + connections."""
-    try:
-        graph = n4s._get_graph()
-        query = """
-            MATCH (c:Circuit {id: $cid})
-            OPTIONAL MATCH (c)-[:STARTS_AT]->(s:Region)
-            OPTIONAL MATCH (c)-[:ENDS_AT]->(e:Region)
-            OPTIONAL MATCH (c)-[:INCLUDES]->(conn:Connection)
-            OPTIONAL MATCH (src:Region)-[:SOURCE_OF]->(conn)
-            OPTIONAL MATCH (conn)-[:TARGET_OF]->(tgt:Region)
-            RETURN c, collect(DISTINCT conn) as connections,
-                   collect(DISTINCT s) as starts,
-                   collect(DISTINCT e) as ends
-        """
-        result = graph.run(query, cid=circuit_id).data()
-        if not result:
-            raise HTTPException(status_code=404, detail="Circuit not found")
-        row = result[0]
-        return {
-            "circuit": dict(row["c"]),
-            "connections": [dict(c) for c in (row["connections"] or [])],
-            "start_regions": [dict(r) for r in (row["starts"] or [])],
-            "end_regions": [dict(r) for r in (row["ends"] or [])],
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/search")
-async def search(q: str = Query(..., min_length=1)):
-    """Search regions/circuits/connections by name."""
-    try:
-        graph = n4s._get_graph()
-        query = """
-            MATCH (n)
-            WHERE (n:Region OR n:Circuit OR n:Connection)
-              AND (toLower(n.name_en) CONTAINS toLower($q)
-                   OR toLower(n.name_cn) CONTAINS toLower($q)
-                   OR toLower(n.name) CONTAINS toLower($q))
-            RETURN n LIMIT 20
-        """
-        results = graph.run(query, q=q).data()
-        return {"items": [dict(r["n"]) for r in results], "total": len(results)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/global")
-async def global_summary():
-    """Return global graph stats."""
-    try:
-        graph = n4s._get_graph()
-        query = """
-            MATCH (r:Region)
-            WITH count(r) as regions
-            MATCH (c:Connection)
-            WITH regions, count(c) as connections
-            MATCH (ci:Circuit)
-            RETURN regions, connections, count(ci) as circuits
-        """
-        stats = graph.run(query).data()[0]
-        return dict(stats)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ── Perturbation ─────────────────────────────────────────────────────────
-
-_perturbation_runs: dict[str, dict[str, Any]] = {}
-
-
-@router.post("/perturb")
-async def run_perturbation(body: dict):
-    """Run perturbation: {mode, seed_region_id, signal_strength, max_hops}."""
-    try:
-        graph = n4s._get_graph()
-        mode = body.get("mode", "enhance")
-        seed_id = body["seed_region_id"]
-        signal = float(body.get("signal_strength", 1.0))
-        max_hops = int(body.get("max_hops", 3))
-
-        if mode == "enhance":
-            # BFS propagation along connections
-            results = _bfs_propagate(graph, seed_id, signal, max_hops)
-        elif mode == "remove":
-            results = _remove_analysis(graph, seed_id)
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown mode: {mode}")
-
-        run_id = str(uuid.uuid4())[:12]
-        _perturbation_runs[run_id] = results
-        results["run_id"] = run_id
-        return results
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-def _bfs_propagate(graph, seed_id: str, signal: float, max_hops: int) -> dict:
-    """BFS propagation from seed region."""
-    query = """
-        MATCH (r:Region {id: $seed})
-        OPTIONAL MATCH path = (r)-[*1..%d]-(neighbor:Region)
-        RETURN r, collect(DISTINCT neighbor) as affected,
-               collect(DISTINCT relationships(path)) as edges
-    """ % max_hops
-    data = graph.run(query, seed=seed_id).data()
-    if not data:
-        return {"error": "Region not found"}
-
-    affected = {}
-    total_impact = 0.0
-    for n in (data[0].get("affected") or []):
-        node = dict(n)
-        impact = signal * (0.5 ** (max_hops - 1))  # decay per hop
-        affected[node.get("id", "")] = {
-            "name": node.get("name_en", node.get("name", "")),
-            "impact": round(impact, 4),
-        }
-        total_impact += abs(impact)
+        # Membership edges
+        mems = await session.execute(text(
+            "SELECT circuit_id, projection_id, verification_status, confidence "
+            "FROM mirror_circuit_projection_memberships LIMIT 500"
+        ))
+        for row in mems.fetchall():
+            mcid, mpid, vstatus, mconf = row
+            edges.append({
+                "id": f"mem_{mcid}_{mpid}", "source": str(mcid), "target": str(mpid),
+                "type": "INCLUDES", "confidence": float(mconf or 0),
+                "verification": vstatus or "circuit_supported",
+            })
 
     return {
-        "mode": "enhance",
-        "seed": dict(data[0]["r"]),
-        "affected_regions": affected,
-        "affected_count": len(affected),
-        "total_impact": round(total_impact, 4),
-        "max_hops": max_hops,
-    }
-
-
-def _remove_analysis(graph, seed_id: str) -> dict:
-    """Analyze impact of removing a region."""
-    query = """
-        MATCH (r:Region {id: $seed})
-        OPTIONAL MATCH (r)-[rel]-(neighbor)
-        RETURN r, count(DISTINCT neighbor) as neighbor_count,
-               collect(DISTINCT type(rel)) as rel_types
-    """
-    data = graph.run(query, seed=seed_id).data()
-    if not data:
-        return {"error": "Region not found"}
-
-    row = data[0]
-    return {
-        "mode": "remove",
-        "seed": dict(row["r"]),
-        "direct_neighbors": row["neighbor_count"],
-        "relation_types": row.get("rel_types", []),
-        "impact": "removal would break these connections",
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {"regions": len([n for n in nodes if n["type"] == "region"]),
+                  "connections": len([e for e in edges if e["type"] not in ("STARTS_AT", "ENDS_AT", "INCLUDES")]),
+                  "circuits": len([n for n in nodes if n["type"] == "circuit"]),
+                  "memberships": len([e for e in edges if e["type"] == "INCLUDES"])},
     }
