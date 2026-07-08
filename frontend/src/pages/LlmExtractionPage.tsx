@@ -5793,6 +5793,63 @@ class LlmErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
   }
 }
 
+// ── CircuitCandidatesTab ──────────────────────────────────────────────────────
+
+function CircuitCandidatesTab({
+  selectedIds,
+  onSelectionChange,
+}: {
+  selectedIds: string[]
+  onSelectionChange: (ids: string[]) => void
+}) {
+  const [page, setPage] = useState(0)
+  const [limit] = useState(100)
+
+  const { data, loading } = useData(
+    () => listMirrorCircuits({ limit, offset: page * limit }),
+    [page, limit],
+  )
+  const circuits = (data as any)?.items ?? []
+  const total = (data as any)?.total ?? 0
+
+  const cols: Column<MirrorRegionCircuit>[] = useMemo(() => [
+    {
+      key: '_sel', header: '', width: 36,
+      render: (r) => (
+        <input type="checkbox" checked={selectedIds.includes(r.id)}
+          onChange={() => {
+            const next = selectedIds.includes(r.id)
+              ? selectedIds.filter(x => x !== r.id)
+              : [...selectedIds, r.id]
+            onSelectionChange(next)
+          }} />
+      ),
+    },
+    { key: 'circuit_name', header: '回路名称', width: 220 },
+    { key: 'circuit_type', header: '类型', width: 140 },
+    { key: 'function_association', header: '功能关联', render: (r) => r.function_association?.slice(0, 60) || '—' },
+    { key: 'mirror_status', header: '状态', width: 90, render: (r) => <StatusBadge status={r.mirror_status} /> },
+  ], [selectedIds])
+
+  const totalPages = Math.ceil(total / limit)
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <span style={{ fontSize: 12, color: '#666' }}>
+          共 {total} 条回路 · 已选 {selectedIds.length}
+        </span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button className="llm-btn llm-btn-sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>上一页</button>
+          <span style={{ fontSize: 12, color: '#666', alignSelf: 'center' }}>{page + 1} / {totalPages || 1}</span>
+          <button className="llm-btn llm-btn-sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>下一页</button>
+        </div>
+      </div>
+      <DataTable columns={cols} rows={circuits} loading={loading} getKey={r => r.id} emptyText="暂无回路数据" />
+    </div>
+  )
+}
+
 // ── LlmExtractionPage ─────────────────────────────────────────────────────────
 
 export function LlmExtractionPage() {
@@ -6065,24 +6122,28 @@ export function LlmExtractionPage() {
 
       {/* Circuit mode: show circuit connection extraction quick cards */}
       {activeDataTab === 'candidates' && candidateSource === 'circuit' && (
-        <div className="llm-quick-cards">
-          <div className="llm-quick-card" onClick={() => { setExtractionMode('multi_connection'); setExtractionModalOpen(true) }}>
-            <div className="llm-quick-card-icon">🔗</div>
-            <div className="llm-quick-card-title">多连接提取</div>
-            <div className="llm-quick-card-desc">从回路全量数据中推断所有可能遗漏的脑区连接</div>
-            <ul className="llm-quick-card-features">
-              <li>每条回路可产出N条连接</li>
-              <li>基于步骤+功能上下文推断</li>
-            </ul>
+        <div className="llm-quick-extract-row">
+          <div className="llm-quick-card llm-quick-card-conn" onClick={() => { setExtractionMode('multi_connection'); setExtractionModalOpen(true) }}>
+            <div className="llm-quick-card-header">
+              <span className="llm-quick-icon">🔗</span>
+              <span className="llm-quick-label">多连接提取</span>
+              <span className="llm-quick-count">N条/回路</span>
+            </div>
+            <div className="llm-quick-card-body">
+              <p className="llm-quick-desc">从回路全量数据中推断所有可能遗漏的脑区连接（基于步骤+功能上下文）</p>
+              <button className="llm-quick-action-btn" onClick={() => { setExtractionMode('multi_connection'); setExtractionModalOpen(true) }}>开始提取</button>
+            </div>
           </div>
-          <div className="llm-quick-card" onClick={() => { setExtractionMode('main_pair'); setExtractionModalOpen(true) }}>
-            <div className="llm-quick-card-icon">🎯</div>
-            <div className="llm-quick-card-title">主连接对提取</div>
-            <div className="llm-quick-card-desc">推断回路主入口→主出口区域对，回填回路脑区字段</div>
-            <ul className="llm-quick-card-features">
-              <li>每条回路1对区域</li>
-              <li>同步回填start/end region ID</li>
-            </ul>
+          <div className="llm-quick-card llm-quick-card-circuit" onClick={() => { setExtractionMode('main_pair'); setExtractionModalOpen(true) }}>
+            <div className="llm-quick-card-header">
+              <span className="llm-quick-icon">🎯</span>
+              <span className="llm-quick-label">主连接对提取</span>
+              <span className="llm-quick-count">1对/回路</span>
+            </div>
+            <div className="llm-quick-card-body">
+              <p className="llm-quick-desc">推断回路主入口→主出口区域对，同步回填start/end region ID</p>
+              <button className="llm-quick-action-btn" onClick={() => { setExtractionMode('main_pair'); setExtractionModalOpen(true) }}>开始提取</button>
+            </div>
           </div>
         </div>
       )}
@@ -6337,6 +6398,15 @@ export function LlmExtractionPage() {
                 const newIds = ids.filter(id => !connPooledIds.has(id))
                 if (newIds.length > 0) addConnections(newIds)
               }
+            }}
+          />
+        )}
+        {!legacyFinalTab && activeDataTab === 'candidates' && candidateSource === 'circuit' && (
+          <CircuitCandidatesTab
+            selectedIds={selectedCandidateIds}
+            onSelectionChange={ids => {
+              setSelectedCount(ids.length)
+              handleSelectionIdsChange(ids)
             }}
           />
         )}
