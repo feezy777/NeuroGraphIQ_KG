@@ -5861,11 +5861,18 @@ function CircuitCandidatesTab({
   ], [selectedIds])
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ fontSize: 12, color: '#666' }}>
-          共 {total} 条回路 · 已选 {selectedIds.length}
+    <div className="llm-candidate-tab">
+      <div className="llm-candidate-filter-bar llm-data-filter-bar card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 13 }}>
+          共 <strong>{total}</strong> 条回路 · 已选 <strong>{selectedIds.length}</strong> 条
         </span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {selectedIds.length > 0 && (
+            <button type="button" className="llm-btn llm-btn-ghost" onClick={() => onSelectionChange([])}>
+              清除选择
+            </button>
+          )}
+        </div>
       </div>
       <DataTable columns={cols} rows={pageItems} loading={loading} getKey={r => r.id} emptyText="暂无回路数据" />
       <div className="llm-candidate-pagination llm-table-pagination">
