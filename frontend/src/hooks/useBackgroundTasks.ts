@@ -32,7 +32,7 @@ export function useBackgroundTasks(pollMs = 3000) {
   const [error, setError] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const isActiveRef = useRef(true)
-  const needsPollRef = useRef(false)
+  const needsPollRef = useRef(true)  // poll by default, disable when dropdown closes
 
   const enablePolling = useCallback(() => { needsPollRef.current = true }, [])
   const disablePolling = useCallback(() => { needsPollRef.current = false }, [])
