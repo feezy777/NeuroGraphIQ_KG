@@ -8,7 +8,7 @@ import { CancelConfirmDialog } from '../components/CancelConfirmDialog'
 // ── Types ───────────────────────────────────────────────────────────────────
 
 type StatusFilter = 'all' | 'running' | 'pending' | 'paused' | 'succeeded' | 'partial' | 'failed' | 'cancelled'
-type TypeFilter = 'all' | 'composite_workflow' | 'field_completion' | 'circuit_extraction'
+type TypeFilter = 'all' | 'composite_workflow' | 'field_completion' | 'circuit_extraction' | 'circuit_connection_extraction'
 type TimeFilter = 'all' | '1h' | 'today' | '7d'
 type SortOrder = 'newest' | 'updated' | 'longest' | 'errors'
 
@@ -57,9 +57,9 @@ function countTasks(tasks: BgTask[], filter: StatusFilter): number {
 // ── Component ───────────────────────────────────────────────────────────────
 
 export function BackgroundTaskCenterPage() {
-  const { tasks, loading, error, enablePolling } = useBackgroundTasks(3000)
+  const { tasks, loading, error, enablePolling, disablePolling } = useBackgroundTasks(3000)
   const { openTask } = useTaskDetailModal()
-  useEffect(() => { enablePolling() }, [enablePolling])
+  useEffect(() => { enablePolling(); return () => disablePolling() }, [enablePolling, disablePolling])
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
@@ -166,6 +166,7 @@ export function BackgroundTaskCenterPage() {
               { key: 'composite_workflow' as TypeFilter, label: 'LLM 提取' },
               { key: 'field_completion' as TypeFilter, label: '字段补全' },
               { key: 'circuit_extraction' as TypeFilter, label: '回路提取' },
+              { key: 'circuit_connection_extraction' as TypeFilter, label: '回路→连接提取' },
             ]).map(f => (
               <button key={f.key}
                 className={`tc-filter-item${typeFilter === f.key ? ' active' : ''}`}
@@ -318,7 +319,7 @@ function TaskCard({ task, onClick, onViewDrawer, onCancel }: {
             </span>
           )}
           <span className="tc-card-stat">
-            <strong>{task.type === 'field_completion' ? '字段补全' : task.type === 'circuit_extraction' ? '回路提取' : 'LLM 提取'}</strong>
+            <strong>{task.type === 'field_completion' ? '字段补全' : task.type === 'circuit_connection_extraction' ? '回路→连接提取' : task.type === 'circuit_extraction' ? '回路提取' : 'LLM 提取'}</strong>
           </span>
         </div>
       </div>

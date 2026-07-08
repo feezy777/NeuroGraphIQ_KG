@@ -1,4 +1,4 @@
-import { cancelFieldCompletionRun, cancelCompositeWorkflow, cancelCircuitExtractionRun } from '../api/endpoints'
+import { cancelFieldCompletionRun, cancelCompositeWorkflow, cancelCircuitExtractionRun, cancelCircuitConnectionExtractionRun } from '../api/endpoints'
 import type { BgTask } from '../hooks/useBackgroundTasks'
 
 interface Props { task: BgTask; onClose: () => void }
@@ -7,7 +7,7 @@ export function CancelConfirmDialog({ task, onClose }: Props) {
   const handleConfirm = async () => {
     try {
       if (task.type === 'field_completion') await cancelFieldCompletionRun(task.id)
-      else if (task.type === 'circuit_extraction') await cancelCircuitExtractionRun(task.id)
+      else if (task.type === 'circuit_connection_extraction') await cancelCircuitConnectionExtractionRun(task.id)
       else await cancelCompositeWorkflow(task.id)
     } catch { /* ignore */ }
     onClose()

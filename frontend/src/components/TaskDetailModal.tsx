@@ -5,7 +5,7 @@ import { fetchTaskDetail } from '../hooks/useBackgroundTasks'
 import { FieldCompletionStatsCards } from '../pages/data-center/FieldCompletionStatsCards'
 import { ExtractionProgressPanel } from '../pages/llm-extraction/components/ExtractionProgressPanel'
 import type { ProgressData } from '../pages/llm-extraction/types'
-import { cancelFieldCompletionRun, cancelCompositeWorkflow, cancelCircuitExtractionRun, pauseCompositeWorkflow } from '../api/endpoints'
+import { cancelFieldCompletionRun, cancelCompositeWorkflow, cancelCircuitConnectionExtractionRun, pauseCompositeWorkflow } from '../api/endpoints'
 import { StatusBadge } from './StatusBadge'
 import { ModelBadge } from './ModelBadge'
 
@@ -93,7 +93,7 @@ export function TaskDetailModalProvider({ children }: { children: ReactNode }) {
     if (!task) return
     try {
       if (task.type === 'field_completion') await cancelFieldCompletionRun(task.id)
-      else if (task.type === 'circuit_extraction') await cancelCircuitExtractionRun(task.id)
+      else if (task.type === 'circuit_connection_extraction') await cancelCircuitConnectionExtractionRun(task.id)
       else await cancelCompositeWorkflow(task.id)
       // Re-fetch to show updated status
       const updated = await fetchTaskDetail(task)
