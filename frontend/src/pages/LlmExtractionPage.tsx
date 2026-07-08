@@ -6326,7 +6326,7 @@ export function LlmExtractionPage() {
             </div>
             {mirrorViewMode === 'table' ? (
               <ItemsTab filterRunId={itemsRunFilter} />
-            ) : mirrorSubTab === 'circuit' && circuitSubTab === 'connection-extraction' ? null : (
+            ) : (
               <ExtractionResultPanel
                 key={mirrorSubTab}
                 config={EXTRACTION_TYPE_CONFIGS.find(c => c.targetType === mirrorSubTab) ?? EXTRACTION_TYPE_CONFIGS[0]}
@@ -6334,46 +6334,56 @@ export function LlmExtractionPage() {
             )}
           </div>
         )}
-        {!legacyFinalTab && activeDataTab === 'mirror' && mirrorSubTab === 'circuit' && (
-          <div className="llm-data-tabs" style={{ marginBottom: 8 }}>
-            <button type="button"
-              className={`llm-data-tab${circuitSubTab === 'browse' ? ' llm-data-tab-active' : ''}`}
-              onClick={() => setCircuitSubTab('browse')}
-            >回路数据浏览</button>
-            <button type="button"
-              className={`llm-data-tab${circuitSubTab === 'connection-extraction' ? ' llm-data-tab-active' : ''}`}
-              onClick={() => setCircuitSubTab('connection-extraction')}
-            >回路→连接提取</button>
-          </div>
-        )}
-        {!legacyFinalTab && activeDataTab === 'mirror' && mirrorSubTab === 'circuit' && circuitSubTab === 'connection-extraction' && (
+        {!legacyFinalTab && activeDataTab === 'mirror' && (
           <>
-            <div className="llm-quick-cards">
-              <div className="llm-quick-card" onClick={() => { setExtractionMode('multi_connection'); setExtractionModalOpen(true) }}>
-                <div className="llm-quick-card-icon">🔗</div>
-                <div className="llm-quick-card-title">多连接提取</div>
-                <div className="llm-quick-card-desc">从回路全量数据中推断所有可能遗漏的脑区连接</div>
-                <ul className="llm-quick-card-features">
-                  <li>每条回路可产出N条连接</li>
-                  <li>基于步骤+功能上下文推断</li>
-                </ul>
-              </div>
-              <div className="llm-quick-card" onClick={() => { setExtractionMode('main_pair'); setExtractionModalOpen(true) }}>
-                <div className="llm-quick-card-icon">🎯</div>
-                <div className="llm-quick-card-title">主连接对提取</div>
-                <div className="llm-quick-card-desc">推断回路主入口→主出口区域对，回填回路脑区字段</div>
-                <ul className="llm-quick-card-features">
-                  <li>每条回路1对区域</li>
-                  <li>同步回填start/end region ID</li>
-                </ul>
-              </div>
+            <div className="llm-data-tabs" style={{ marginBottom: 8 }}>
+              <button
+                type="button"
+                className={`llm-data-tab${circuitSubTab === 'browse' ? ' llm-data-tab-active' : ''}`}
+                onClick={() => setCircuitSubTab('browse')}
+              >
+                回路数据浏览
+              </button>
+              <button
+                type="button"
+                className={`llm-data-tab${circuitSubTab === 'connection-extraction' ? ' llm-data-tab-active' : ''}`}
+                onClick={() => setCircuitSubTab('connection-extraction')}
+              >
+                回路→连接提取
+              </button>
             </div>
-            {extractionModalOpen && (
-              <CircuitConnectionExtractionModal
-                open={extractionModalOpen}
-                mode={extractionMode}
-                onClose={() => setExtractionModalOpen(false)}
-              />
+            {circuitSubTab === 'browse' ? (
+              <MirrorExtractionPanel initialSubTab={mirrorSubTab} />
+            ) : (
+              <>
+                <div className="llm-quick-cards">
+                  <div className="llm-quick-card" onClick={() => { setExtractionMode('multi_connection'); setExtractionModalOpen(true) }}>
+                    <div className="llm-quick-card-icon">🔗</div>
+                    <div className="llm-quick-card-title">多连接提取</div>
+                    <div className="llm-quick-card-desc">从回路全量数据中推断所有可能遗漏的脑区连接</div>
+                    <ul className="llm-quick-card-features">
+                      <li>每条回路可产出N条连接</li>
+                      <li>基于步骤+功能上下文推断</li>
+                    </ul>
+                  </div>
+                  <div className="llm-quick-card" onClick={() => { setExtractionMode('main_pair'); setExtractionModalOpen(true) }}>
+                    <div className="llm-quick-card-icon">🎯</div>
+                    <div className="llm-quick-card-title">主连接对提取</div>
+                    <div className="llm-quick-card-desc">推断回路主入口→主出口区域对，回填回路脑区字段</div>
+                    <ul className="llm-quick-card-features">
+                      <li>每条回路1对区域</li>
+                      <li>同步回填start/end region ID</li>
+                    </ul>
+                  </div>
+                </div>
+                {extractionModalOpen && (
+                  <CircuitConnectionExtractionModal
+                    open={extractionModalOpen}
+                    mode={extractionMode}
+                    onClose={() => setExtractionModalOpen(false)}
+                  />
+                )}
+              </>
             )}
           </>
         )}
