@@ -37,6 +37,7 @@ import { QuickExtractionCards } from './llm-extraction/components/QuickExtractio
 import { PoolExtractionModal } from './llm-extraction/components/PoolExtractionModal'
 import { useCandidatePool, type PoolScope, PoolSetupError } from './llm-extraction/hooks/useCandidatePool'
 import { useConnectionPool } from './llm-extraction/hooks/useConnectionPool'
+import { useBulkSelection } from './llm-extraction/hooks/useBulkSelection'
 import { TASK_PRESETS, QUICK_CARD_PRESET_MAP, buildPresetLogPayload, type TaskPreset } from './llm-extraction/taskPresets'
 import {
   type LlmDataTabId,
@@ -5798,26 +5799,23 @@ class LlmErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
 const DEFAULT_CIRCUIT_PAGE_SIZE = 50
 
 function CircuitCandidatesTab({
-  selectedIds,
   onSelectionChange,
+  onSelectionIdsChange,
 }: {
-  selectedIds: string[]
-  onSelectionChange: (ids: string[]) => void
+  onSelectionChange: (count: number) => void
+  onSelectionIdsChange: (ids: string[]) => void
 }) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_CIRCUIT_PAGE_SIZE)
 
-  // Fetch ALL circuits once, client-side paginate (same pattern as DataFirstCandidatesTab)
   const { data, loading } = useData(
-    () => listMirrorCircuits({ limit: 500, offset: 0 }),
+    () => listMirrorCircuits({ limit: 9999, offset: 0 }),
     [],
   )
   const allCircuits: MirrorRegionCircuit[] = (data as any)?.items ?? []
   const total = allCircuits.length
-
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
-  // Clamp page when it exceeds totalPages (e.g. after pageSize increase)
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
   }, [page, totalPages])
@@ -5827,17 +5825,24 @@ function CircuitCandidatesTab({
     [allCircuits, page, pageSize],
   )
 
+  const selection = useBulkSelection({
+    getId: (r: MirrorRegionCircuit) => r.id,
+    filteredItems: allCircuits,
+    pageItems,
+  })
+
+  // Sync selection to parent
+  useEffect(() => {
+    onSelectionChange(selection.selectedCount)
+    onSelectionIdsChange([...selection.selectedIds])
+  }, [selection.selectedCount, selection.selectedIds, onSelectionChange, onSelectionIdsChange])
+
   const cols: Column<MirrorRegionCircuit>[] = useMemo(() => [
     {
       key: '_sel', header: '', width: 36,
       render: (r) => (
-        <input type="checkbox" checked={selectedIds.includes(r.id)}
-          onChange={() => {
-            const next = selectedIds.includes(r.id)
-              ? selectedIds.filter(x => x !== r.id)
-              : [...selectedIds, r.id]
-            onSelectionChange(next)
-          }} />
+        <input type="checkbox" checked={selection.isSelected(r.id)}
+          onChange={() => selection.toggleOne(r.id)} />
       ),
     },
     {
@@ -5858,22 +5863,34 @@ function CircuitCandidatesTab({
     { key: 'source_atlas', header: 'Atlas', width: 100, render: (r) => r.source_atlas || '—' },
     { key: 'mirror_status', header: '状态', width: 90, render: (r) => <StatusBadge status={r.mirror_status} /> },
     { key: 'id', header: 'ID', width: 110, render: (r) => <code style={{ fontSize: 11 }}>{r.id.slice(0, 12)}…</code> },
-  ], [selectedIds])
+  ], [selection.isSelected, selection.toggleOne])
 
   return (
     <div className="llm-candidate-tab">
       <div className="llm-candidate-filter-bar llm-data-filter-bar card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 13 }}>
-          共 <strong>{total}</strong> 条回路 · 已选 <strong>{selectedIds.length}</strong> 条
+          共 <strong>{total}</strong> 条回路 · 已选 <strong>{selection.selectedCount}</strong> 条
         </span>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {selectedIds.length > 0 && (
-            <button type="button" className="llm-btn llm-btn-ghost" onClick={() => onSelectionChange([])}>
-              清除选择
-            </button>
-          )}
+      </div>
+
+      <div className="llm-candidate-selection-bar llm-bulk-action-bar">
+        <div className="llm-bulk-selection-summary">
+          <span className="llm-selection-chip">已选 {selection.selectedCount} 项</span>
+          <span className="llm-selection-chip">当前页 {selection.pageSelectedCount}</span>
+        </div>
+        <div className="llm-bulk-action-buttons">
+          <button type="button" className="llm-btn" onClick={selection.togglePage}>
+            {selection.allPageSelected ? '− ' : '+ '}{selection.allPageSelected ? '取消本页' : '选取本页'}
+          </button>
+          <button type="button" className="llm-btn" onClick={selection.selectAllFiltered}>
+            选取全部 ({total})
+          </button>
+          <button type="button" className="llm-btn llm-btn-ghost" onClick={selection.clearSelection}>
+            清除选择
+          </button>
         </div>
       </div>
+
       <DataTable columns={cols} rows={pageItems} loading={loading} getKey={r => r.id} emptyText="暂无回路数据" />
       <div className="llm-candidate-pagination llm-table-pagination">
         <label className="llm-pagination-pagesize">
@@ -6449,11 +6466,8 @@ export function LlmExtractionPage() {
         )}
         {!legacyFinalTab && activeDataTab === 'candidates' && candidateSource === 'circuit' && (
           <CircuitCandidatesTab
-            selectedIds={selectedCandidateIds}
-            onSelectionChange={ids => {
-              setSelectedCount(ids.length)
-              handleSelectionIdsChange(ids)
-            }}
+            onSelectionChange={setSelectedCount}
+            onSelectionIdsChange={handleSelectionIdsChange}
           />
         )}
         {!legacyFinalTab && activeDataTab === 'runs' && (
