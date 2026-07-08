@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   listFieldCompletionRuns, getFieldCompletionRun,
   listCompositeWorkflowRuns, getCompositeWorkflowRun,
+  getCircuitExtractionRun,
   listCircuitConnectionExtractionRuns, getCircuitConnectionExtractionRun,
 } from '../api/endpoints'
 import type { FieldCompletionRun, FieldCompletionRunDetail } from '../api/endpoints'
@@ -47,10 +48,15 @@ export function useBackgroundTasks(pollMs = 3000) {
     const fetchAll = async () => {
       if (!needsPollRef.current || !isActiveRef.current) return
       try {
+        const listCircuitRuns = async () => {
+          const resp = await fetch('/api/llm-extraction/circuit-extraction/runs?limit=200')
+          if (!resp.ok) return { items: [] }
+          return resp.json()
+        }
         const [fcRes, cwRes, ceRes, cceRes] = await Promise.allSettled([
           listFieldCompletionRuns({ limit: 200 }),
           listCompositeWorkflowRuns({ limit: 200 }),
-          listFieldCompletionRuns({ limit: 200, target_type: 'circuit' as any }), // circuit extraction runs
+          listCircuitRuns(),
           listCircuitConnectionExtractionRuns({ limit: 200 }),
         ])
 
@@ -117,6 +123,7 @@ export function useBackgroundTasks(pollMs = 3000) {
 
 export async function fetchTaskDetail(task: BgTask): Promise<any> {
   if (task.type === 'field_completion') return getFieldCompletionRun(task.id)
+  if (task.type === 'circuit_extraction') return getCircuitExtractionRun(task.id)
   if (task.type === 'circuit_connection_extraction') return getCircuitConnectionExtractionRun(task.id)
   return getCompositeWorkflowRun(task.id)
 }
