@@ -471,6 +471,7 @@ export function MultiTargetFieldCompletionModal({
       }
     }
 
+    if (exec.pollTimer) { clearInterval(exec.pollTimer); exec.pollTimer = null }
     setBundleWarnings(exec.warnings)
     setRunning(false)
     setCancelling(false)
