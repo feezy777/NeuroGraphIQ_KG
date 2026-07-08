@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import * as d3 from 'd3'
 
 interface GraphNode {
@@ -90,8 +90,14 @@ export function GraphExplorerPage() {
           </div>
         ) : tab === 'data' ? (
           <DataView data={data} />
+        ) : filtered && filtered.nodes.length > 0 ? (
+          <GraphErrorBoundary>
+            <ForceGraph nodes={filtered.nodes} edges={filtered.edges} focusMode={tab === 'focus'} />
+          </GraphErrorBoundary>
         ) : (
-          <ForceGraph nodes={filtered?.nodes || []} edges={filtered?.edges || []} focusMode={tab === 'focus'} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888' }}>
+            暂无数据 — 请检查后端 /api/kg/graph/data 是否可用
+          </div>
         )}
       </div>
     </div>
@@ -121,6 +127,15 @@ function DataView({ data }: { data: GraphData | null }) {
       </table>
     </div>
   )
+}
+
+class GraphErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null }
+  static getDerivedStateFromError(e: Error) { return { error: e } }
+  render() {
+    if (this.state.error) return <div style={{ padding: 40, color: '#dc2626' }}>图谱渲染错误: {this.state.error.message}</div>
+    return this.props.children
+  }
 }
 
 function ForceGraph({ nodes, edges, focusMode }: { nodes: GraphNode[]; edges: GraphEdge[]; focusMode: boolean }) {
