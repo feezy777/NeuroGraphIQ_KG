@@ -157,10 +157,14 @@ function ForceGraph({ nodes, edges, focusMode }: { nodes: GraphNode[]; edges: Gr
     const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.1, 4]).on('zoom', (ev) => g.attr('transform', ev.transform))
     svg.call(zoom)
 
+    // Filter edges to only those where both source and target are in nodes
+    const nodeIds = new Set(nodes.map(n => n.id))
+    const validEdges = edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
+
     // Initialize positions
     nodes.forEach((n: any) => { n.x = w / 2 + (Math.random() - 0.5) * 100; n.y = h / 2 + (Math.random() - 0.5) * 100 })
 
-    const link = g.append('g').selectAll('line').data(edges).join('line')
+    const link = g.append('g').selectAll('line').data(validEdges).join('line')
       .attr('stroke', (d: any) => COLORS[d.type] || '#999')
       .attr('stroke-opacity', (d: any) => Math.min(1, (d.confidence || 0.3) + 0.3))
       .attr('stroke-width', (d: any) => Math.max(0.5, (d.confidence || 0.3) * 2))
@@ -171,7 +175,7 @@ function ForceGraph({ nodes, edges, focusMode }: { nodes: GraphNode[]; edges: Gr
       .attr('stroke', '#fff').attr('stroke-width', 1)
 
     const sim = d3.forceSimulation(nodes as any)
-      .force('link', d3.forceLink(edges).id((d: any) => d.id).distance(60))
+      .force('link', d3.forceLink(validEdges).id((d: any) => d.id).distance(60))
       .force('charge', d3.forceManyBody().strength(focusMode ? -200 : -80))
       .force('center', d3.forceCenter(w / 2, h / 2))
       .force('collision', d3.forceCollide(10))
