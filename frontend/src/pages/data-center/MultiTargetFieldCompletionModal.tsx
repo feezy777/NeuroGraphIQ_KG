@@ -3,7 +3,6 @@ import { useI18n } from '../../i18n-context'
 import { StatusBadge } from '../../components/StatusBadge'
 import { ModelBadge } from '../../components/ModelBadge'
 import {
-  getFieldCompletionRelatedTargets,
   getFieldCompletionRun,
   runUniversalFieldCompletion,
   type FieldCompletionItem,
