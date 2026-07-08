@@ -310,8 +310,16 @@ export function MultiTargetFieldCompletionModal({
         execRef.current = null
         return
       }
-      setExecElapsed(Math.round((Date.now() - e.execStart) / 1000))
-      if (!e.runId) return
+      const elapsed = Math.round((Date.now() - e.execStart) / 1000)
+      setExecElapsed(elapsed)
+      if (!e.runId) {
+        if (elapsed > 60) {
+          setRunning(false); setExecDone(true)
+          if (e.pollTimer) { clearInterval(e.pollTimer); e.pollTimer = null }
+          execRef.current = null
+        }
+        return
+      }
 
       try {
         const detail = await getFieldCompletionRun(e.runId)
