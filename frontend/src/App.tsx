@@ -16,6 +16,7 @@ import { PromotionsPage } from './pages/PromotionsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { MirrorKgPage } from './pages/MirrorKgPage'
 import { BackgroundTaskCenterPage } from './pages/BackgroundTaskCenter'
+import { GraphExplorerPage } from './pages/GraphExplorerPage'
 import { TaskDetailModalProvider } from './components/TaskDetailModal'
 
 const ROUTES: Record<string, ComponentType> = {
@@ -28,6 +29,7 @@ const ROUTES: Record<string, ComponentType> = {
   '/llm-extraction': LlmExtractionPage,
   '/mirror-kg': MirrorKgPage,
   '/task-center': BackgroundTaskCenterPage,
+  '/graph-explorer': GraphExplorerPage,
   '/rule-validation': RuleValidationPage,
   '/human-review': HumanReviewPage,
   '/promotions': PromotionsPage,

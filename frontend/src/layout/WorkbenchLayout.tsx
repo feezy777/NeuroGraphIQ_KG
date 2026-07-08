@@ -11,6 +11,7 @@ import {
   Sparkles,
   Settings,
   MonitorPlay,
+  Share2,
 } from 'lucide-react'
 import { useI18n } from '../i18n-context'
 import { useWorkbenchLog } from '../logging/useWorkbenchLog'
@@ -31,6 +32,7 @@ const NAV_ITEMS = [
   { path: '/human-review', labelKey: 'nav.humanReview', icon: Eye },
   { path: '/promotions', labelKey: 'nav.promotions', icon: ArrowUpToLine },
   { path: '/task-center', labelKey: 'nav.taskCenter', icon: MonitorPlay },
+  { path: '/graph-explorer', labelKey: 'nav.graphExplorer', icon: Share2 },
   { path: '/settings', labelKey: 'nav.settings', icon: Settings },
 ]
 
