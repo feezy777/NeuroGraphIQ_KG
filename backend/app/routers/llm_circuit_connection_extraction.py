@@ -183,6 +183,9 @@ async def _execute_background(run_id: uuid.UUID, request_payload: dict) -> None:
             run.status = "failed"
             run.errors_json = list(run.errors_json or []) + [str(exc)]
         finally:
+            if run.status not in ("succeeded", "partially_succeeded", "failed", "cancelled", "dry_run"):
+                run.status = "failed"
+                run.errors_json = list(run.errors_json or []) + ["Background task terminated unexpectedly"]
             run.completed_at = __import__("datetime").datetime.now(
                 __import__("datetime").timezone.utc
             )

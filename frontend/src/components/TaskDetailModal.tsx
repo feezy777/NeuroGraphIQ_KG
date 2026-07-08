@@ -126,7 +126,7 @@ export function TaskDetailModalProvider({ children }: { children: ReactNode }) {
           <div className="task-center-modal-backdrop" onClick={closeTask} />
           <div className="task-center-modal-panel">
             <div className="task-center-modal-header">
-              <h3>{task.type === 'field_completion' ? '🔧 字段补全' : '🔗 LLM 提取'}</h3>
+              <h3>{task.type === 'field_completion' ? '🔧 字段补全' : task.type === 'circuit_connection_extraction' ? '🔄 回路→连接提取' : '🔗 LLM 提取'}</h3>
               <span style={{ fontSize: 12, color: '#888' }}>{task.label}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <ModelBadge provider={task.provider} modelName={task.modelName} />
@@ -141,10 +141,10 @@ export function TaskDetailModalProvider({ children }: { children: ReactNode }) {
                   <p style={{ marginTop: 12 }}>加载任务详情…</p>
                 </div>
               ) : detail ? (
-                task.type === 'field_completion' ? (
+                (task.type === 'field_completion' || task.type === 'circuit_connection_extraction') ? (
                   <FieldCompletionStatsCards
                     detail={detail}
-                    status={detail.status}
+                    status={detail.status || task.status}
                     targetCount={task.targetCount ?? 0}
                     elapsedSec={elapsed}
                     onCancel={isRunning && !isCancelling ? handleCancel : undefined}
