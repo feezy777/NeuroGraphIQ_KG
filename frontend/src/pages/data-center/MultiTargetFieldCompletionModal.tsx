@@ -488,8 +488,8 @@ export function MultiTargetFieldCompletionModal({
   const handleCancel = useCallback(async () => {
     const exec = execRef.current
     if (!exec || cancelling) return
+    setCancelling(true)
     if (exec.runId) {
-      setCancelling(true)
       try {
         const { cancelFieldCompletionRun } = await import('../../api/endpoints')
         await cancelFieldCompletionRun(exec.runId)
@@ -497,8 +497,9 @@ export function MultiTargetFieldCompletionModal({
         setCancelling(false)
       }
     } else {
-      // No runId yet (initial API call in flight) — mark cancelled, poller will clean up
-      exec.cancelled = true
+      // No runId yet — stop poller immediately
+      if (exec.pollTimer) { clearInterval(exec.pollTimer); exec.pollTimer = null }
+      execRef.current = null
       setRunning(false)
       setExecDone(true)
     }
@@ -576,7 +577,11 @@ export function MultiTargetFieldCompletionModal({
     }
     execRef.current = exec
     setExecTick(t => t + 1)
-    void executeNextGroup(exec)
+    // Fire-and-forget but catch sync errors
+    executeNextGroup(exec).catch(() => {
+      setRunning(false)
+      setExecDone(true)
+    })
   }, [bundle, groupStates, options, selProvider, effectiveModel, t])
 
   // ── Recent runs ───────────────────────────────────────────────────────────
