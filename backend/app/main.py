@@ -30,6 +30,7 @@ from app.routers import (
     llm_circuit_connection_extraction,
     llm_circuit_extraction,
     llm_composite_workflow,
+    kg_graph,
     final_kg,
     final_macro_clinical_browser,
     final_macro_clinical_promotion,
@@ -233,6 +234,9 @@ app.include_router(
 )
 app.include_router(
     llm_composite_workflow.router, prefix="/api/llm-extraction", tags=["LLM Composite Workflow"]
+)
+app.include_router(
+    kg_graph.router, prefix="/api/kg/graph", tags=["Knowledge Graph"]
 )
 app.include_router(
     llm_extraction.candidate_router, prefix="/api/candidates", tags=["Candidate LLM Extraction"]
