@@ -265,6 +265,7 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
             "canonical_id",      # direct — auto-generated from circuit_name
             "circuit_class",     # formal; mirror col: circuit_type
             "description",       # direct (same name)
+            "circuit_strength",  # overlay
             "attributes",        # overlay
             "source_db",         # overlay
             "status",            # overlay
@@ -282,6 +283,7 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
             "name_cn", "attributes", "source_db", "status",
             "canonical_start_region_id", "canonical_end_region_id",
             "species_id", "data_source_id", "primary_evidence_id", "external_code",
+            "circuit_strength",
         ),
         field_aliases=_aliases(
             ("circuit_name", "name_en"),    # legacy mirror field accepted
@@ -412,6 +414,7 @@ REGISTRY: dict[TargetType, TargetTypeRegistryEntry] = {
             "confidence_score", "evidence_level",
             "description",
             "source_db", "status",
+            "projection_id", "projection_name",
         ),
         required_fields=("function_term_en", "function_term_cn", "status"),
         readonly_fields=("id", "circuit_id", "created_at", "updated_at"),

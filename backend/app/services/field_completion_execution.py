@@ -343,6 +343,311 @@ _PER_CONN_USER_TEMPLATE = (
 )
 
 
+_CIRCUIT_BUNDLE_SYSTEM = (
+    "You are a neuroscientist analyzing brain circuits.\n"
+    "For the circuit and its steps described below, complete ALL fields.\n"
+    "For each step, select the best matching projection from the candidates,\n"
+    "or indicate no match with projection_id: null.\n"
+    "If match confidence is below 0.5, set is_suspected: true.\n\n"
+    "Output ONLY valid JSON. Do NOT wrap in markdown.\n\n"
+    "SCHEMA:\n"
+    '{"circuit":{"name_en":"str","name_cn":"str","circuit_class":"str",'
+    '"description":"str","start_region_name":"str","end_region_name":"str",'
+    '"circuit_strength":0.0,"source_db":"str","status":"proposed|validated|uncertain"},'
+    '"steps":[{"step_name_en":"str","step_name_cn":"str","step_no":1,'
+    '"role_in_circuit":"source|relay|output|unknown","description":"str",'
+    '"region_name":"str","source_db":"str","status":"proposed",'
+    '"connection":{"projection_id":"uuid-or-null","match_confidence":0.0,'
+    '"is_suspected":false,"evidence":"str"},'
+    '"functions":[{"function_term_en":"str","function_term_cn":"str",'
+    '"function_domain":"str","function_role":"str","effect_type":"str",'
+    '"confidence_score":0.0,"evidence_level":"str","description":"str",'
+    '"source_db":"str","status":"str"}]}]}'
+)
+
+_CIRCUIT_BUNDLE_USER = (
+    "Circuit: {name}\n"
+    "Type: {type}\n"
+    "Description: {desc}\n"
+    "Function: {func}\n"
+    "Existing overlay values: {overlay}\n\n"
+    "Steps with connection candidates:\n{steps_context}\n\n"
+    "Functions:\n{functions_context}\n\n"
+    "Complete all fields in the JSON schema above."
+)
+
+
+async def execute_circuit_bundle_fields(
+    session: AsyncSession,
+    run: LlmFieldCompletionRun,
+    request: UniversalFieldCompletionRequest,
+    targets: dict[uuid.UUID, Any],
+    items: list[LlmFieldCompletionItem],
+    warnings: list[str],
+    errors: list[str],
+    *,
+    provider_key: str,
+    resolved_model: str,
+    make_item,
+    apply_field_update,
+    call_provider,
+    check_cancelled=None,
+) -> tuple[int, int]:
+    """One LLM call per circuit — all circuit+step+function fields at once. Returns (model_call_count, llm_applied)."""
+    import json as _json
+    from app.services.field_completion_registry import (
+        get_field_value, get_registry_entry, is_empty_value, resolve_field_name,
+    )
+
+    model_call_count = 0
+    llm_applied = 0
+    processed = 0
+    total = len(targets)
+
+    logger.info("Circuit bundle: executing for %d circuits, provider=%s, model=%s", total, provider_key, resolved_model)
+    for cid, circuit in targets.items():
+        if check_cancelled and await check_cancelled(session, run.id):
+            warnings.append(f"Cancelled after {processed}/{total} circuits")
+            break
+
+        # ── Gather circuit context ──────────────────────────────────────────
+        from app.models.mirror_macro_clinical import MirrorCircuitStep, MirrorCircuitFunction
+        from app.models.mirror_kg import MirrorRegionConnection
+        from sqlalchemy import select as sa_select
+
+        steps_q = sa_select(MirrorCircuitStep).where(MirrorCircuitStep.circuit_id == cid).order_by(MirrorCircuitStep.step_order)
+        steps_result = await session.execute(steps_q)
+        steps = list(steps_result.scalars().all())
+
+        funcs_q = sa_select(MirrorCircuitFunction).where(MirrorCircuitFunction.circuit_id == cid)
+        funcs_result = await session.execute(funcs_q)
+        funcs = list(funcs_result.scalars().all())
+
+        # Map functions to steps
+        step_funcs: dict[uuid.UUID, list] = {}
+        for f in funcs:
+            step_funcs.setdefault(getattr(f, 'step_id', None) or cid, []).append(f)
+
+        # Get related projections (by step region)
+        proj_map: dict[str, Any] = {}
+        step_region_ids = [s.region_candidate_id for s in steps if s.region_candidate_id]
+        if step_region_ids:
+            proj_q = sa_select(MirrorRegionConnection).where(
+                MirrorRegionConnection.source_region_candidate_id.in_(step_region_ids)
+                | MirrorRegionConnection.target_region_candidate_id.in_(step_region_ids)
+            ).limit(50)
+            proj_result = await session.execute(proj_q)
+            for p in proj_result.scalars().all():
+                key = f"{p.source_region_candidate_id}→{p.target_region_candidate_id}"
+                proj_map[key] = {"id": str(p.id), "name": f"{p.source_region_name_en or '?'} → {p.target_region_name_en or '?'}", "type": p.connection_type, "confidence": p.confidence}
+
+        # ── Build context ────────────────────────────────────────────────────
+        name = getattr(circuit, 'circuit_name', '') or str(cid)
+        _type = getattr(circuit, 'circuit_type', '') or 'unknown'
+        desc = getattr(circuit, 'description', '') or ''
+        func = getattr(circuit, 'function_association', '') or ''
+
+        # Existing overlay values
+        overlay_parts = []
+        for ofname in ('name_cn', 'attributes', 'source_db', 'status', 'circuit_strength'):
+            oval = get_field_value(circuit, ofname)
+            if not is_empty_value(oval):
+                overlay_parts.append(f"  {ofname}: {oval}")
+        overlay_str = '\n'.join(overlay_parts) if overlay_parts else '  (none)'
+
+        # Steps context with connection candidates
+        steps_lines = []
+        for s in steps:
+            sname = getattr(s, 'step_name', '') or ''
+            srole = getattr(s, 'role', '') or ''
+            srid = str(getattr(s, 'region_candidate_id', '')) or ''
+            steps_lines.append(f"  Step{getattr(s, 'step_order', '?')}: {sname} ({srole}) region={srid[:12]}")
+            for proj_key, proj in proj_map.items():
+                if str(srid) in proj_key:
+                    steps_lines.append(f"    Projection: {proj['name']} ({proj['type']}, conf={proj['confidence']}) id={proj['id'][:12]}")
+        steps_context = '\n'.join(steps_lines)
+
+        # Functions context
+        func_lines = []
+        for f in funcs:
+            ft = getattr(f, 'function_term_en', '') or ''
+            func_lines.append(f"  Function: {ft} domain={getattr(f, 'function_domain', '')} role={getattr(f, 'function_role', '')}")
+        functions_context = '\n'.join(func_lines)
+
+        # ── LLM call ─────────────────────────────────────────────────────────
+        parsed: dict[str, Any] = {}
+        try:
+            response = await call_provider(
+                provider_key,
+                model=resolved_model,
+                system_prompt=_CIRCUIT_BUNDLE_SYSTEM,
+                user_prompt=_CIRCUIT_BUNDLE_USER.format(
+                    name=name,
+                    type=_type,
+                    desc=desc,
+                    func=func,
+                    overlay=overlay_str,
+                    steps_context=steps_context,
+                    functions_context=functions_context,
+                ),
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                response_schema=None,
+            )
+            model_call_count += 1
+            raw_text = getattr(response, 'raw_text', '') or ''
+            raw_parsed = getattr(response, 'parsed_json', None)
+            if isinstance(raw_parsed, dict):
+                parsed = raw_parsed
+            elif raw_text:
+                cleaned = raw_text.strip()
+                # Strip markdown code fences
+                if cleaned.startswith('```'):
+                    lines = cleaned.split('\n')
+                    lines = [l for l in lines if not l.startswith('```')]
+                    cleaned = '\n'.join(lines).strip()
+                try:
+                    parsed = _json.loads(cleaned)
+                except (_json.JSONDecodeError, TypeError):
+                    # Try to extract JSON from mixed text (common DeepSeek output pattern)
+                    _re = __import__('re')
+                    _match = _re.search(r'\{.*\}', cleaned, _re.DOTALL)
+                    if _match:
+                        try:
+                            parsed = _json.loads(_match.group(0))
+                        except (_json.JSONDecodeError, TypeError):
+                            pass
+            if not isinstance(parsed, dict):
+                logger.warning("Circuit %s: failed to parse LLM response, raw len=%d raw=%s",
+                               str(cid)[:12], len(raw_text), raw_text[:500])
+                parsed = {}
+        except Exception as exc:
+            errors.append(f"Circuit {str(cid)[:12]}: LLM failed - {exc}")
+            logger.warning("Circuit %s: LLM exception: %s", str(cid)[:12], exc)
+            processed += 1
+            continue
+
+        # ── Fallback: LLM returned flat fields instead of bundle → wrap as circuit ──
+        _circuit_field_names = {'name_en', 'name_cn', 'circuit_class', 'description', 'source_db', 'status', 'canonical_id'}
+        if 'circuit' not in parsed and 'steps' not in parsed and 'field_updates' not in parsed:
+            if any(k in parsed for k in _circuit_field_names):
+                parsed = {'circuit': {k: v for k, v in parsed.items() if k in _circuit_field_names}, 'steps': []}
+
+        # ── Backward compat: field_updates format (legacy per-field tests) ──
+        if 'field_updates' in parsed and 'circuit' not in parsed and 'steps' not in parsed:
+            _circuit_entry = get_registry_entry(TargetType.circuit)
+            raw_updates = parsed.get('field_updates', [])
+            for u in raw_updates:
+                if not isinstance(u, dict):
+                    continue
+                fname = u.get('field_name', '')
+                value = u.get('value')
+                if not fname or value is None or is_empty_value(value):
+                    continue
+                # Validate field name through registry
+                resolved = resolve_field_name(_circuit_entry, fname)
+                if resolved is None:
+                    item = make_item(run.id, request.target_type.value, cid, fname,
+                                     old_value=get_field_value(circuit, fname),
+                                     status=ItemStatus.skipped_invalid_field,
+                                     suggested=value,
+                                     error_message=f"invalid field_name: {fname}")
+                    session.add(item)
+                    items.append(item)
+                    continue
+                try:
+                    old_val = get_field_value(circuit, resolved)
+                    status = apply_field_update(
+                        circuit, resolved, value,
+                        overwrite_policy=request.overwrite_policy,
+                        create_mirror_updates=request.create_mirror_updates,
+                        entry=_circuit_entry, run_id=run.id, resolved_model=resolved_model,
+                    )
+                    _applied_flag = status and 'applied' in str(getattr(status, 'value', status))
+                    if _applied_flag:
+                        llm_applied += 1
+                    item = make_item(run.id, request.target_type.value, cid, resolved, old_value=old_val, status=status, suggested=value, applied=value if _applied_flag else None)
+                    session.add(item)
+                    items.append(item)
+                except Exception as _ex:
+                    logger.warning("Circuit %s: backward compat apply failed field=%s: %s", str(cid)[:12], fname, _ex)
+            processed += 1
+            continue
+
+        # ── Apply circuit fields ─────────────────────────────────────────────
+        circuit_data = parsed.get('circuit', {})
+        for fname in ('name_en', 'name_cn', 'circuit_class', 'description', 'source_db', 'status', 'canonical_id'):
+            value = circuit_data.get(fname)
+            if value is None or is_empty_value(value):
+                continue
+            try:
+                old_val = get_field_value(circuit, fname)
+                status = apply_field_update(
+                    circuit, fname, value,
+                    overwrite_policy=request.overwrite_policy,
+                    create_mirror_updates=request.create_mirror_updates,
+                    run_id=run.id, resolved_model=resolved_model,
+                )
+                _applied_flag = status and 'applied' in str(getattr(status, 'value', status))
+                if _applied_flag:
+                    llm_applied += 1
+                item = make_item(run.id, request.target_type.value, cid, fname, old_value=old_val, status=status, suggested=value, applied=value if _applied_flag else None)
+                session.add(item)
+                items.append(item)
+            except Exception as _e:
+                logger.warning("Circuit bundle: apply circuit field failed cid=%s field=%s: %s", str(cid)[:12], fname, _e)
+
+        # ── Apply step + function fields ─────────────────────────────────────
+        for sdata in parsed.get('steps', []):
+            step_no = sdata.get('step_no', 1)
+            match_step = next((s for s in steps if getattr(s, 'step_order', None) == step_no), None)
+            if not match_step:
+                continue
+            for fname in ('step_name_en', 'step_name_cn', 'role_in_circuit', 'description', 'source_db', 'status'):
+                value = sdata.get(fname)
+                if value is None or is_empty_value(value):
+                    continue
+                try:
+                    old_val = get_field_value(match_step, fname)
+                    status = apply_field_update(match_step, fname, value, overwrite_policy=request.overwrite_policy, create_mirror_updates=request.create_mirror_updates, run_id=run.id, resolved_model=resolved_model)
+                    _applied_flag = status and 'applied' in str(getattr(status, 'value', status))
+                    if _applied_flag:
+                        llm_applied += 1
+                    item = make_item(run.id, 'circuit_step', match_step.id, fname, old_value=old_val, status=status, suggested=value, applied=value if _applied_flag else None)
+                    session.add(item)
+                    items.append(item)
+                except Exception as _e:
+                    logger.warning("Circuit bundle: step field failed field=%s: %s", fname, _e)
+
+            for fdata in sdata.get('functions', []):
+                for fname in ('function_term_en', 'function_term_cn', 'function_domain', 'function_role', 'effect_type', 'confidence_score', 'evidence_level', 'description', 'source_db', 'status', 'projection_id', 'projection_name'):
+                    value = fdata.get(fname)
+                    if value is None or is_empty_value(value):
+                        continue
+                    # Find matching existing function or create new placeholder
+                    target_func = next((f for f in funcs if getattr(f, 'function_term_en', '') == fdata.get('function_term_en', '')), None)
+                    if target_func:
+                        try:
+                            old_val = get_field_value(target_func, fname)
+                            status = apply_field_update(target_func, fname, value, overwrite_policy=request.overwrite_policy, create_mirror_updates=request.create_mirror_updates, run_id=run.id, resolved_model=resolved_model)
+                            _applied_flag = status and 'applied' in str(getattr(status, 'value', status))
+                            if _applied_flag:
+                                llm_applied += 1
+                            item = make_item(run.id, 'circuit_function', target_func.id, fname, old_value=old_val, status=status, suggested=value, applied=value if _applied_flag else None)
+                            session.add(item)
+                            items.append(item)
+                        except Exception as _e:
+                            logger.warning("Circuit bundle: func field failed field=%s: %s", fname, _e)
+
+        processed += 1
+        if processed % 10 == 0 or processed == total:
+            run.summary_json = to_jsonable({**(run.summary_json or {}), "total_packs": total, "processed_packs": processed, "processed_items": len(items), "model_call_count": model_call_count, "llm_applied": llm_applied})
+            flag_modified(run, "summary_json")
+            await session.commit()
+
+    return model_call_count, llm_applied
+
+
 async def execute_per_connection_fields(
     session: AsyncSession,
     run: LlmFieldCompletionRun,
