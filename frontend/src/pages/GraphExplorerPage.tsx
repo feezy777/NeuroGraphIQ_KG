@@ -183,15 +183,21 @@ function ForceGraph({ nodes: _nodes, edges: _edges, focusNode, onNodeClick }: { 
     for (const n of _nodes) nm.set(n.id, n)
     // Add missing endpoint nodes from connection edges
     for (const e of _edges) {
-      if (!nm.has(e.source) && e.type !== 'STARTS_AT' && e.type !== 'ENDS_AT' && e.type !== 'INCLUDES') {
-        nm.set(e.source, { id: e.source, type: 'connection', group: 'connection', label: e.source.slice(0, 12), name_en: '', name_cn: '', atlas: '' })
+      const srcId = String(typeof e.source === 'object' ? (e.source as any).id || (e.source as any).name || '' : e.source)
+      const tgtId = String(typeof e.target === 'object' ? (e.target as any).id || (e.target as any).name || '' : e.target)
+      if (!nm.has(srcId) && srcId && e.type !== 'STARTS_AT' && e.type !== 'ENDS_AT' && e.type !== 'INCLUDES') {
+        nm.set(srcId, { id: srcId, type: 'connection', group: 'connection', label: srcId.slice(0, 12), name_en: '', name_cn: '', atlas: '' })
       }
-      if (!nm.has(e.target) && e.type !== 'STARTS_AT' && e.type !== 'ENDS_AT' && e.type !== 'INCLUDES') {
-        nm.set(e.target, { id: e.target, type: 'connection', group: 'connection', label: e.target.slice(0, 12), name_en: '', name_cn: '', atlas: '' })
+      if (!nm.has(tgtId) && tgtId && e.type !== 'STARTS_AT' && e.type !== 'ENDS_AT' && e.type !== 'INCLUDES') {
+        nm.set(tgtId, { id: tgtId, type: 'connection', group: 'connection', label: tgtId.slice(0, 12), name_en: '', name_cn: '', atlas: '' })
       }
     }
     // Filter edges: only keep those where both ends are in the node map
-    const validEdges = _edges.filter(e => nm.has(e.source) && nm.has(e.target))
+    const validEdges = _edges.filter(e => {
+      const s = String(typeof e.source === 'object' ? (e.source as any).id || (e.source as any).name : e.source)
+      const t = String(typeof e.target === 'object' ? (e.target as any).id || (e.target as any).name : e.target)
+      return nm.has(s) && nm.has(t)
+    })
     return { nodes: [...nm.values()], edges: validEdges }
   }, [_nodes, _edges])
 
