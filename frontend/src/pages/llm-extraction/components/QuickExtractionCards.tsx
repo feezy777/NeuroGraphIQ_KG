@@ -50,11 +50,11 @@ export function QuickExtractionCards({
     {
       key: 'conn',
       icon: '🔗',
-      label: '连接提取',
+      label: connectionMode ? '连接功能补全' : '连接提取',
       desc: connectionMode
         ? selectedCount >= 1
-          ? `${selectedCount} 条连接的字段补全与功能提取`
-          : '选择连接后进入连接池'
+          ? `为选中的 ${selectedCount} 条连接补全功能信息`
+          : '选择连接后补全功能'
         : selectedCount >= 2
           ? `${selectedCount} 个脑区 all_pairs 连接提取`
           : '选择 ≥2 个脑区后提取连接',

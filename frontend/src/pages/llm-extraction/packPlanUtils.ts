@@ -72,7 +72,7 @@ export function buildPackPlanPreview(input: PackPlanInput): PackPlanPreview {
 
   // ── Connection pool: graph-aware connection pack for circuit ──────────────
   if (preset?.input_pool_type === 'connection_pool') {
-    const ppk = Math.max(5, candidatesPerPack || 25)
+    const ppk = Math.max(5, candidatesPerPack || 5)
     const packCount = Math.max(1, Math.ceil(candidateCount / ppk))
     const sizes: number[] = []
     for (let i = 0; i < packCount; i++) {

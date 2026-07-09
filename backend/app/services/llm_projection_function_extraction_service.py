@@ -376,12 +376,20 @@ def normalize_projection_function_candidates(
                 f"({max_functions_per_projection}); still saving"
             )
 
-        category = str(fn.get("function_category") or FunctionCategory.unknown)
+        category = str(
+            fn.get("function_category")
+            or fn.get("function_domain")  # LLM prompt field name
+            or FunctionCategory.unknown
+        )
         if category not in categories:
             category = FunctionCategory.unknown
             warnings.append(f"projection_function[{idx}] function_category coerced to unknown")
 
-        relation = str(fn.get("relation_type") or FunctionRelationType.unknown)
+        relation = str(
+            fn.get("relation_type")
+            or fn.get("function_role")  # LLM prompt field name
+            or FunctionRelationType.unknown
+        )
         if relation not in relations:
             relation = FunctionRelationType.unknown
             warnings.append(f"projection_function[{idx}] relation_type coerced to unknown")
@@ -404,7 +412,7 @@ def normalize_projection_function_candidates(
             "function_term_key": term_key,
             "function_category": category,
             "relation_type": relation,
-            "confidence": _clamp_confidence(fn.get("confidence")),
+            "confidence": _clamp_confidence(fn.get("confidence") or fn.get("confidence_score")),
             "evidence_text": evidence_text,
             "uncertainty_reason": fn.get("uncertainty_reason"),
             "raw": fn,

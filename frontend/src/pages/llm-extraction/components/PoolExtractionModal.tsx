@@ -4,6 +4,7 @@ import {
   getCompositeWorkflowRun,
   startCompositeWorkflow,
   runSameGranularityFunctionExtraction,
+  runProjectionToFunctionsExtraction,
   runCircuitExtraction,
   getCircuitExtractionRun,
   cancelCircuitExtractionRun,
@@ -262,7 +263,7 @@ export function PoolExtractionModal({
   // ── Prompt engineering ──────────────────────────────────────────────────────
   const [temperature, setTemperature] = useState(0.7)
   const [maxTokens, setMaxTokens] = useState(16384)
-  const [candidatesPerPack, setCandidatesPerPack] = useState(25)
+  const [candidatesPerPack, setCandidatesPerPack] = useState(5)
   const [shuffleRounds, setShuffleRounds] = useState(3)
   const [packConfig, setPackConfig] = useState<PackConfigPayload | null>(null)
   const [showPromptPreview, setShowPromptPreview] = useState(false)
@@ -580,11 +581,13 @@ export function PoolExtractionModal({
   // ── Start extraction ─────────────────────────────────────────────────────
   const handleStartExtraction = useCallback(async () => {
     const candidateIds = selectedExtractionIds
-    if (candidateIds.length < 2) {
+    const minCount = preset?.preset_id === 'connection_to_function' ? 1 : 2
+    const errorLabel = preset?.preset_id === 'connection_to_function' ? '连接' : '脑区'
+    if (candidateIds.length < minCount) {
       setProgress(prev => ({
         ...prev,
         workflowStatus: 'failed',
-        errors: ['请至少勾选 2 个脑区后再开始提取'],
+        errors: [`请至少勾选 ${minCount} 个${errorLabel}后再开始提取`],
       }))
       setModalState('result')
       return
@@ -706,6 +709,74 @@ export function PoolExtractionModal({
           progressPercent: 0,
           totalPacks: circuitResponse.estimated_packs,
         }))
+        return
+      }
+
+      // connection_to_function: direct projection function extraction (split into packs)
+      if (preset?.preset_id === 'connection_to_function') {
+        const ppk = Math.min(candidatesPerPack || 5, 20)
+        const packs: string[][] = []
+        for (let i = 0; i < candidateIds.length; i += ppk) {
+          packs.push(candidateIds.slice(i, i + ppk))
+        }
+        setModalState('progress')
+        const startTime = Date.now()
+        let totalCreated = 0
+        let totalFunctions = 0
+        let failedPacks = 0
+        const allWarnings: string[] = []
+        cancelledRef.current = false
+        for (let pi = 0; pi < packs.length; pi++) {
+          if (cancelledRef.current) {
+            allWarnings.push(`用户取消 — 已完成 ${pi}/${packs.length} 包`)
+            failedPacks = packs.length - pi
+            break
+          }
+          setProgress(prev => ({
+            ...prev,
+            workflowRunId: '',
+            workflowStatus: 'running',
+            processedPacks: pi + 1,
+            totalPacks: packs.length,
+            successPacks: pi,
+            failedPacks,
+            progressPercent: Math.round(((pi + 1) / packs.length) * 100),
+            elapsedSec: Math.round((Date.now() - startTime) / 1000),
+            modelCalls: pi + 1,
+            createdCount: totalCreated,
+          }))
+          try {
+            const fnResp = await runProjectionToFunctionsExtraction({
+              provider,
+              model_name: modelName || undefined,
+              projection_ids: packs[pi],
+              dry_run: dryRun,
+              create_mirror_records: !dryRun,
+              temperature: temperature !== 0.7 ? temperature : undefined,
+              max_tokens: maxTokens !== 16384 ? maxTokens : undefined,
+              prompt_template_key: primaryTemplateKey || undefined,
+            })
+            totalCreated += fnResp.mirror_projection_function_created_count ?? 0
+            totalFunctions += fnResp.function_count ?? 0
+            if (fnResp.warnings?.length) allWarnings.push(...fnResp.warnings)
+          } catch (e: any) {
+            failedPacks++
+            allWarnings.push(`Pack ${pi + 1}/${packs.length}: ${e?.message ?? String(e)}`)
+          }
+        }
+        const wasCancelled = cancelledRef.current
+        setProgress(prev => ({
+          ...prev,
+          workflowStatus: wasCancelled ? 'cancelled' : 'succeeded',
+          progressPercent: 100,
+          successPacks: packs.length - failedPacks,
+          failedPacks,
+          createdCount: totalCreated,
+          functionCount: totalFunctions,
+          errors: allWarnings,
+          elapsedSec: Math.round((Date.now() - startTime) / 1000),
+        }))
+        setModalState('result')
         return
       }
 
@@ -859,6 +930,14 @@ export function PoolExtractionModal({
       workflowRunId: progress.workflowRunId,
       status: progress.workflowStatus,
     })
+    // connection_to_function: simple flag-based cancel (pack loop checks cancelledRef)
+    if (preset?.preset_id === 'connection_to_function') {
+      cancelledRef.current = true
+      setCancelling(true)
+      setProgress(prev => ({ ...prev, workflowStatus: 'cancelling' }))
+      // The pack loop will detect cancelledRef and update progress to 'cancelled'
+      return
+    }
     const wfId = progress.workflowRunId
     if (!wfId) {
       setProgress(prev => ({ ...prev, errors: [...prev.errors, '缺少 workflow_run_id，无法取消'] }))
@@ -2253,15 +2332,17 @@ export function PoolExtractionModal({
           )}
           {(() => {
             const isConnPool = preset?.input_pool_type === 'connection_pool'
+            const isConnToFunc = preset?.preset_id === 'connection_to_function'
+            const minCount = isConnToFunc ? 1 : 2
             // Connection mode: skip Dry Run entirely (backend graph packing differs from frontend estimate)
-            const needsDryRun = preset?.endpoint_type === 'circuit_extraction'
+            const needsDryRun = preset?.endpoint_type === 'circuit_extraction' && !isConnToFunc
             const canStart = isConnPool
-              ? (cfg.candidate_ids.length >= 2 && llmProvider && llmModel && cfg.candidates_per_pack >= 5)
+              ? (cfg.candidate_ids.length >= minCount && llmProvider && llmModel && cfg.candidates_per_pack >= 5)
               : needsDryRun
-                ? (result && packMatch && cfg.candidate_ids.length >= 2 && llmProvider && llmModel && cfg.candidates_per_pack >= 5 && cfg.shuffle_rounds >= 1)
-                : (cfg.candidate_ids.length >= 2 && llmProvider && llmModel)
+                ? (result && packMatch && cfg.candidate_ids.length >= minCount && llmProvider && llmModel && cfg.candidates_per_pack >= 5 && cfg.shuffle_rounds >= 1)
+                : (cfg.candidate_ids.length >= minCount && llmProvider && llmModel)
             const disabledReasons: string[] = []
-            if (cfg.candidate_ids.length < 2) disabledReasons.push(isConnPool ? '连接数不足' : '脑区数不足')
+            if (cfg.candidate_ids.length < minCount) disabledReasons.push(isConnPool ? '连接数不足' : '脑区数不足')
             if (!llmProvider || !llmModel) disabledReasons.push('请配置模型')
             if (needsDryRun && !isConnPool) {
               if (!result) disabledReasons.push('请先执行 Dry Run')
@@ -2312,6 +2393,75 @@ export function PoolExtractionModal({
                 run_instruction_overlay_length: runInstructionOverlay.length,
               })
               try {
+                // connection_to_function: direct projection function extraction (split into packs)
+                if (preset?.preset_id === 'connection_to_function') {
+                  const { runProjectionToFunctionsExtraction } = await import('../../../api/endpoints')
+                  const allIds: string[] = isConnPool ? (body.connection_ids ?? body.candidate_ids) : body.candidate_ids
+                  const ppk = Math.min(cfg.candidates_per_pack || 5, 20)
+                  const packs: string[][] = []
+                  for (let i = 0; i < allIds.length; i += ppk) {
+                    packs.push(allIds.slice(i, i + ppk))
+                  }
+                  setModalState('progress')
+                  const startTime = Date.now()
+                  let totalCreated = 0
+                  let totalFunctions = 0
+                  let failedPacks = 0
+                  const allWarnings: string[] = []
+                  cancelledRef.current = false
+                  for (let pi = 0; pi < packs.length; pi++) {
+                    if (cancelledRef.current) {
+                      allWarnings.push(`用户取消 — 已完成 ${pi}/${packs.length} 包`)
+                      failedPacks = packs.length - pi
+                      break
+                    }
+                    setProgress(prev => ({
+                      ...prev,
+                      workflowRunId: '',
+                      workflowStatus: 'running',
+                      processedPacks: pi + 1,
+                      totalPacks: packs.length,
+                      successPacks: pi,
+                      failedPacks,
+                      progressPercent: Math.round(((pi + 1) / packs.length) * 100),
+                      elapsedSec: Math.round((Date.now() - startTime) / 1000),
+                      modelCalls: pi + 1,
+                      createdCount: totalCreated,
+                    }))
+                    try {
+                      const fnResp = await runProjectionToFunctionsExtraction({
+                        provider: body.provider || 'deepseek',
+                        model_name: body.model_name,
+                        projection_ids: packs[pi],
+                        dry_run: false,
+                        create_mirror_records: true,
+                        temperature: body.temperature !== 0.7 ? body.temperature : undefined,
+                        max_tokens: body.max_tokens !== 16384 ? body.max_tokens : undefined,
+                        prompt_template_key: preset?.prompt_template_key || undefined,
+                      })
+                      totalCreated += fnResp.mirror_projection_function_created_count ?? 0
+                      totalFunctions += fnResp.function_count ?? 0
+                      if (fnResp.warnings?.length) allWarnings.push(...fnResp.warnings)
+                    } catch (e: any) {
+                      failedPacks++
+                      allWarnings.push(`Pack ${pi + 1}/${packs.length}: ${e?.message ?? String(e)}`)
+                    }
+                  }
+                  const wasCancelled = cancelledRef.current
+                  setProgress(prev => ({
+                    ...prev,
+                    workflowStatus: wasCancelled ? 'cancelled' : 'succeeded',
+                    progressPercent: 100,
+                    successPacks: packs.length - failedPacks,
+                    failedPacks,
+                    createdCount: totalCreated,
+                    functionCount: totalFunctions,
+                    errors: allWarnings,
+                    elapsedSec: Math.round((Date.now() - startTime) / 1000),
+                  }))
+                  setModalState('result')
+                  return
+                }
                 // Route to correct API based on endpoint type
                 if (preset?.endpoint_type === 'composite_workflow' || preset?.endpoint_type === 'field_or_composite') {
                   const { startCompositeWorkflow } = await import('../../../api/endpoints')
@@ -2490,6 +2640,23 @@ export function PoolExtractionModal({
             </div>
           </div>
         </div>
+
+        {/* connection_to_function stats */}
+        {preset?.preset_id === 'connection_to_function' && (
+          <div className="modal-section">
+            <p className="modal-section-title">连接功能补全统计</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div style={{ background: '#eff6ff', borderRadius: 6, padding: '10px 12px', textAlign: 'center' }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: progress.createdCount > 0 ? '#2563eb' : '#bbb' }}>{progress.createdCount}</div>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>新增功能</div>
+              </div>
+              <div style={{ background: progress.functionCount > 0 ? '#f0fdf4' : '#fafafa', borderRadius: 6, padding: '10px 12px', textAlign: 'center' }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: progress.functionCount > 0 ? '#16a34a' : '#bbb' }}>{progress.functionCount}</div>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>提取功能数</div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Circuit extraction stats — always show when in circuit mode */}
         {isCircuitPackWorkflow(workflowType, preset) && (

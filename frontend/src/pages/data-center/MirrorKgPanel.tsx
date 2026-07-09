@@ -7,6 +7,8 @@ import {
   listMirrorCircuits,
   listMirrorTriples,
   listMirrorEvidence,
+  listMirrorProjectionFunctions,
+  listMirrorCircuitSteps,
   updateMirrorConnection,
   deleteMirrorConnection,
   updateMirrorFunction,
@@ -41,13 +43,26 @@ interface Props {
 
 const SUB_TABS: MirrorKgSubTab[] = ['connections', 'functions', 'circuits', 'triples', 'evidence']
 
-const TAB_TO_TYPE = {
-  connections: 'projection',
-  functions: 'region_function',
-  circuits: 'circuit',
-  triples: 'triple',
-  evidence: 'evidence',
-} as const
+// Sub-tabs under each parent tab: { key, label, formalObjectType, listApi }
+const SUB_ITEM_DEFS: Record<MirrorKgSubTab, { key: string; label: string; type: string; listApi: (p: any) => Promise<any> }[]> = {
+  connections: [
+    { key: 'self', label: '连接自身', type: 'projection', listApi: listMirrorConnections },
+    { key: 'projection_functions', label: '投影功能', type: 'projection_function', listApi: listMirrorProjectionFunctions },
+  ],
+  functions: [
+    { key: 'self', label: '功能自身', type: 'region_function', listApi: listMirrorFunctions },
+  ],
+  circuits: [
+    { key: 'self', label: '回路自身', type: 'circuit', listApi: listMirrorCircuits },
+    { key: 'circuit_steps', label: '步骤', type: 'circuit_step', listApi: listMirrorCircuitSteps },
+  ],
+  triples: [
+    { key: 'self', label: '三元组自身', type: 'triple', listApi: listMirrorTriples },
+  ],
+  evidence: [
+    { key: 'self', label: '证据自身', type: 'evidence', listApi: listMirrorEvidence },
+  ],
+}
 
 export function MirrorKgPanel({
   mirrorTab,
@@ -67,21 +82,19 @@ export function MirrorKgPanel({
   const [circuitBundle, setCircuitBundle] = useState<CircuitBundleFieldCompletionGroup | null>(null)
   const [bundleWarnings, setBundleWarnings] = useState<string[]>([])
   const [overlayPatch, setOverlayPatch] = useState<OverlayPatch>({})
-  // Server-side pagination
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(200)
   const [serverTotal, setServerTotal] = useState(0)
+  // Sub-tab index within the current parent tab
+  const [subIdx, setSubIdx] = useState(0)
 
-  const handlePageSizeChange = useCallback((size: number) => {
-    setPageSize(size)
-    setPage(1)
-  }, [])
-
-  // Reset page when tab or filters change
-  useEffect(() => { setPage(1) }, [mirrorTab, batchId, resourceId, sourceAtlas, granularityLevel])
-
-  const mapping = getFormalFieldMapping(TAB_TO_TYPE[mirrorTab])
+  const subDefs = SUB_ITEM_DEFS[mirrorTab]
+  const activeSub = subDefs[subIdx] ?? subDefs[0]
+  const mapping = getFormalFieldMapping(activeSub.type)
   const refresh = () => setTick(x => x + 1)
+
+  // Reset sub-tab and page when parent tab changes
+  useEffect(() => { setSubIdx(0); setPage(1) }, [mirrorTab])
 
   const handleSaveField = useCallback(async (rowId: string, field: string, value: unknown) => {
     const body = { [field]: value }
@@ -107,20 +120,11 @@ export function MirrorKgPanel({
   }, [mirrorTab])
 
   const handleFetchAll = useCallback(async (): Promise<FormalRow[]> => {
-    const params: Record<string, any> = { limit: 0 }  // 0 = unlimited on backend
-    if (batchId) params.batch_id = batchId
-    if (resourceId) params.resource_id = resourceId
-    if (sourceAtlas) params.source_atlas = sourceAtlas
-    if (granularityLevel) params.granularity_level = granularityLevel
-    let result: any
-    if (mirrorTab === 'connections') result = await listMirrorConnections(params)
-    else if (mirrorTab === 'functions') result = await listMirrorFunctions(params)
-    else if (mirrorTab === 'circuits') result = await listMirrorCircuits(params)
-    else if (mirrorTab === 'triples') result = await listMirrorTriples(params)
-    else return []
+    const params: Record<string, any> = { limit: 0 }
+    const result = await activeSub.listApi(params)
     const items = result?.items ?? []
     return items.map((item: any) => ({ ...item, id: item.id ?? '' }))
-  }, [mirrorTab, batchId, resourceId, sourceAtlas, granularityLevel])
+  }, [activeSub])
 
   const handleBulkDelete = useCallback(async (ids: string[]) => {
     const deleteFn = mirrorTab === 'connections' ? deleteMirrorConnection
@@ -143,63 +147,42 @@ export function MirrorKgPanel({
     refresh()
   }, [])
 
-  const resetKeys = [mirrorTab, batchId, resourceId, sourceAtlas, granularityLevel, tick]
+  const resetKeys = [activeSub.key, tick]
 
-  // Server-side pagination: compute offset from page
   const offset = useMemo(() => (page - 1) * pageSize, [page, pageSize])
 
   const baseParams = useMemo(() => ({
-    batch_id: batchId || undefined,
-    resource_id: resourceId || undefined,
-    source_atlas: sourceAtlas || undefined,
-    granularity_level: granularityLevel || undefined,
     limit: pageSize,
     offset,
-  }), [batchId, resourceId, sourceAtlas, granularityLevel, pageSize, offset])
+  }), [pageSize, offset])
 
-  const connKey = useMemo(() => `${mirrorTab}-conn-${JSON.stringify(baseParams)}-${tick}`, [mirrorTab, baseParams, tick])
-  const funcKey = useMemo(() => `${mirrorTab}-func-${JSON.stringify(baseParams)}-${tick}`, [mirrorTab, baseParams, tick])
-  const circKey = useMemo(() => `${mirrorTab}-circ-${JSON.stringify(baseParams)}-${tick}`, [mirrorTab, baseParams, tick])
-  const tripleKey = useMemo(() => `${mirrorTab}-triple-${JSON.stringify(baseParams)}-${tick}`, [mirrorTab, baseParams, tick])
-  const evKey = useMemo(() => `${mirrorTab}-ev-${tick}-${page}-${pageSize}`, [mirrorTab, tick, page, pageSize])
-
-  // Only fetch the active tab — others stay null until switched
-  const { data: connData, loading: connLoading, error: connError } = useData(
-    () => mirrorTab === 'connections' ? listMirrorConnections(baseParams) : Promise.resolve(null as any),
-    [connKey],
-  )
-  const { data: funcData, loading: funcLoading, error: funcError } = useData(
-    () => mirrorTab === 'functions' ? listMirrorFunctions(baseParams) : Promise.resolve(null as any),
-    [funcKey],
-  )
-  const { data: circData, loading: circLoading, error: circError } = useData(
-    () => mirrorTab === 'circuits' ? listMirrorCircuits(baseParams) : Promise.resolve(null as any),
-    [circKey],
-  )
-  const { data: tripleData, loading: tripleLoading, error: tripleError } = useData(
-    () => mirrorTab === 'triples' ? listMirrorTriples(baseParams) : Promise.resolve(null as any),
-    [tripleKey],
-  )
-  const { data: evData, loading: evLoading, error: evError } = useData(
-    () => mirrorTab === 'evidence' ? listMirrorEvidence({ limit: pageSize, offset }) : Promise.resolve(null as any),
-    [evKey],
+  // Data key changes when sub-tab or page or tick changes
+  const dataKey = useMemo(
+    () => `${mirrorTab}-${activeSub.key}-${JSON.stringify(baseParams)}-${tick}`,
+    [mirrorTab, activeSub.key, baseParams, tick],
   )
 
-  // Derive serverTotal from active tab's API response
-  const activeTotal = useMemo(() => {
-    const data = mirrorTab === 'connections' ? connData
-      : mirrorTab === 'functions' ? funcData
-      : mirrorTab === 'circuits' ? circData
-      : mirrorTab === 'triples' ? tripleData
-      : mirrorTab === 'evidence' ? evData
-      : null
-    return (data as any)?.total ?? 0
-  }, [mirrorTab, connData, funcData, circData, tripleData, evData])
+  const { data: tableData, loading, error } = useData(
+    () => activeSub.listApi(baseParams),
+    [dataKey],
+  )
 
-  // Keep serverTotal in sync
+  const rawItems = (tableData?.items ?? []) as unknown as FormalRow[]
+  const activeTotal = (tableData as any)?.total ?? 0
+
   useEffect(() => {
     if (activeTotal > 0) setServerTotal(activeTotal)
   }, [activeTotal])
+
+  const displayItems = useMemo(
+    () => mergeOverlayPatchIntoRows(rawItems, overlayPatch),
+    [rawItems, overlayPatch],
+  )
+
+  const displaySelected = useMemo(
+    () => (selected ? mergeOverlayPatchIntoRows([selected], overlayPatch)[0] : null),
+    [selected, overlayPatch],
+  )
 
   const subTabLabels: Record<MirrorKgSubTab, string> = {
     connections: 'Connections / Projections',
@@ -208,24 +191,6 @@ export function MirrorKgPanel({
     triples: 'Triples',
     evidence: 'Evidence',
   }
-
-  const tabState = {
-    connections: { items: (connData?.items ?? []) as unknown as FormalRow[], loading: connLoading, error: connError },
-    functions: { items: (funcData?.items ?? []) as unknown as FormalRow[], loading: funcLoading, error: funcError },
-    circuits: { items: (circData?.items ?? []) as unknown as FormalRow[], loading: circLoading, error: circError },
-    triples: { items: (tripleData?.items ?? []) as unknown as FormalRow[], loading: tripleLoading, error: tripleError },
-    evidence: { items: (evData?.items ?? []) as unknown as FormalRow[], loading: evLoading, error: evError },
-  }[mirrorTab]
-
-  const displayItems = useMemo(
-    () => mergeOverlayPatchIntoRows(tabState.items, overlayPatch),
-    [tabState.items, overlayPatch],
-  )
-
-  const displaySelected = useMemo(
-    () => (selected ? mergeOverlayPatchIntoRows([selected], overlayPatch)[0] : null),
-    [selected, overlayPatch],
-  )
 
   return (
     <div className="data-center-panel data-center-formal-tabs">
@@ -242,27 +207,26 @@ export function MirrorKgPanel({
           </button>
         ))}
       </div>
-      <div className="data-center-filter-bar">
-        <input className="form-input" placeholder={t('dataCenter.batch')} value={batchId}
-          onChange={e => onFilterChange({ batchId: e.target.value })} />
-        <input className="form-input" placeholder={t('dataCenter.resource')} value={resourceId}
-          onChange={e => onFilterChange({ resourceId: e.target.value })} />
-        <input className="form-input" placeholder={t('dataCenter.atlas')} value={sourceAtlas}
-          onChange={e => onFilterChange({ sourceAtlas: e.target.value })} />
-        <input className="form-input" placeholder={t('dataCenter.granularity')} value={granularityLevel}
-          onChange={e => onFilterChange({ granularityLevel: e.target.value })} />
-        <button type="button" className="btn" onClick={refresh}>{t('dataCenter.refresh')}</button>
-        <a className="btn" href="#/llm-extraction">{t('dataCenter.viewInWorkflow')}</a>
+
+      {/* Sub-sub-tabs */}
+      <div className="data-center-subtabbar" style={{ marginTop: 4 }}>
+        {subDefs.map((def, i) => (
+          <button key={def.key} type="button"
+            className={`data-center-tab${i === subIdx ? ' data-center-tab-active' : ''}`}
+            onClick={() => { setSubIdx(i); setPage(1); }}>
+            {def.label}
+          </button>
+        ))}
       </div>
 
       {mapping && (
         <FormalObjectTableSection
-          key={mirrorTab}
+          key={`${mirrorTab}-${activeSub.key}`}
           mapping={mapping}
           items={displayItems}
           resetKeys={resetKeys}
-          loading={tabState.loading}
-          error={tabState.error}
+          loading={loading}
+          error={error}
           emptyText={t('dataCenter.noData')}
           pageSize={pageSize}
           serverTotal={serverTotal}

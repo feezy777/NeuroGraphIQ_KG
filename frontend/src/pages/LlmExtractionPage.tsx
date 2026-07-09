@@ -6240,7 +6240,11 @@ export function LlmExtractionPage() {
             const preset = TASK_PRESETS[presetId]
             setSelectedPreset(preset)
             console.log('[llm-preset][selected]', buildPresetLogPayload(tab, preset, { pool_id: pool?.id, candidate_count: selectedCount }))
-            if (selectedCount < 2) { setCandidateMinError('请至少选择 2 个脑区'); return }
+            if (tab === 'connection') {
+              if (selectedCount < 1) { setCandidateMinError('请至少选择 1 条连接'); return }
+            } else {
+              if (selectedCount < 2) { setCandidateMinError('请至少选择 2 个脑区'); return }
+            }
             setShowFullExtractModal(true)
           }}
           onExtractCircuit={async () => {
