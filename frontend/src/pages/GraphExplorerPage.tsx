@@ -117,7 +117,7 @@ export function GraphExplorerPage() {
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-        {tab==='focus'&&<input className="form-input" placeholder="搜索脑区名称…" value={search} onChange={e=>setSearch(e.target.value)} style={{width:180,fontSize:12}}/>}
+        <input className="form-input" placeholder={tab==='focus'?'搜索脑区/回路名称…':'搜索节点名称…'} value={search} onChange={e=>setSearch(e.target.value)} style={{width:180,fontSize:12}}/>
         <select className="form-input" value={fType} onChange={e=>setFType(e.target.value)} style={{width:150,fontSize:12}}>
           <option value="all">全部关系</option>
           <option value="structural_connection">结构连接</option>
@@ -136,7 +136,7 @@ export function GraphExplorerPage() {
 
       <div style={{flex:1,border:'1px solid var(--border)',borderRadius:8,overflow:'hidden',background:'#f8fafc'}}
         onClick={tab==='focus'?()=>setFocusNode(null):undefined}>
-        {tab==='data'?<DataView edges={visEdges} graph={graph}/>:<ForceGraph nodes={visNodes} edges={visEdges} focusNode={focusNode} onNodeClick={tab==='focus'?setFocusNode:undefined}/>}
+        {tab==='data'?<DataView edges={visEdges} graph={graph}/>:<ForceGraph nodes={visNodes} edges={visEdges} focusNode={focusNode} onNodeClick={tab==='focus'?setFocusNode:undefined} tab={tab}/>}
       </div>
 
       <div style={{display:'flex',gap:24,fontSize:11,color:'#555',marginTop:6,flexWrap:'wrap',lineHeight:'18px'}}>
@@ -174,7 +174,7 @@ const td: React.CSSProperties = { padding: '3px 8px', borderBottom: '1px solid #
 
 // ── Force Graph ─────────────────────────────────────────────────────────────
 
-function ForceGraph({ nodes: _nodes, edges: _edges, focusNode, onNodeClick }: { nodes: GNode[]; edges: GEdge[]; focusNode: string | null; onNodeClick?: (id: string) => void }) {
+function ForceGraph({ nodes: _nodes, edges: _edges, focusNode, onNodeClick, tab }: { nodes: GNode[]; edges: GEdge[]; focusNode: string | null; onNodeClick?: (id: string) => void; tab: string }) {
   const ref = useRef<HTMLDivElement>(null)
 
   // Rebuild node set from edges: ensure every edge endpoint has a node
@@ -192,13 +192,20 @@ function ForceGraph({ nodes: _nodes, edges: _edges, focusNode, onNodeClick }: { 
         nm.set(tgtId, { id: tgtId, type: 'connection', group: 'connection', label: tgtId.slice(0, 12), name_en: '', name_cn: '', atlas: '' })
       }
     }
-    // Filter edges: only keep those where both ends are in the node map
+    // Filter edges: only keep those where both ends are in the node map AND connected to visible nodes
     const validEdges = _edges.filter(e => {
       const s = String(typeof e.source === 'object' ? (e.source as any).id || (e.source as any).name : e.source)
       const t = String(typeof e.target === 'object' ? (e.target as any).id || (e.target as any).name : e.target)
       return nm.has(s) && nm.has(t)
     })
-    return { nodes: [...nm.values()], edges: validEdges }
+    // In focus mode: only render edges connected to visible nodes
+    const visIds = new Set(_nodes.map(n => n.id))
+    const renderEdges = tab === 'focus' ? validEdges.filter(e => {
+      const s = String(typeof e.source === 'object' ? (e.source as any).id || (e.source as any).name : e.source)
+      const t = String(typeof e.target === 'object' ? (e.target as any).id || (e.target as any).name : e.target)
+      return visIds.has(s) || visIds.has(t)
+    }) : validEdges
+    return { nodes: [...nm.values()], edges: renderEdges }
   }, [_nodes, _edges])
 
   useEffect(() => {
