@@ -48,6 +48,7 @@ from app.routers import (
     resources,
     rule_validation,
     settings,
+    symptom_query,
     workbench_pipeline,
     workspace_files,
 )
@@ -284,4 +285,7 @@ app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
 app.include_router(database_admin.router, prefix="/api/database", tags=["Database Admin"])
 app.include_router(
     workbench_pipeline.router, prefix="/api/workbench", tags=["Workbench Pipeline"]
+)
+app.include_router(
+    symptom_query.router, prefix="/api/symptom-query", tags=["Symptom Query"]
 )

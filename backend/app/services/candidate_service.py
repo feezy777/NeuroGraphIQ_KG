@@ -371,6 +371,7 @@ def _apply_candidate_filters(
     parse_run_id: uuid.UUID | None,
     candidate_status: str | None,
     laterality: str | None,
+    granularity_level: str | None = None,
 ):
     if resource_id:
         stmt = stmt.where(CandidateBrainRegion.resource_id == resource_id)
@@ -384,6 +385,8 @@ def _apply_candidate_filters(
         stmt = stmt.where(CandidateBrainRegion.candidate_status == candidate_status)
     if laterality:
         stmt = stmt.where(CandidateBrainRegion.laterality == laterality)
+    if granularity_level:
+        stmt = stmt.where(CandidateBrainRegion.granularity_level == granularity_level)
     return stmt
 
 
@@ -396,6 +399,7 @@ async def list_candidate_regions(
     parse_run_id: uuid.UUID | None = None,
     candidate_status: str | None = None,
     laterality: str | None = None,
+    granularity_level: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[CandidateBrainRegion], int]:
@@ -407,6 +411,7 @@ async def list_candidate_regions(
         parse_run_id=parse_run_id,
         candidate_status=candidate_status,
         laterality=laterality,
+        granularity_level=granularity_level,
     )
     count_q = _apply_candidate_filters(
         select(func.count()).select_from(CandidateBrainRegion),
@@ -416,6 +421,7 @@ async def list_candidate_regions(
         parse_run_id=parse_run_id,
         candidate_status=candidate_status,
         laterality=laterality,
+        granularity_level=granularity_level,
     )
     total = int((await session.execute(count_q)).scalar_one())
     rows = (

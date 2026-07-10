@@ -154,7 +154,8 @@ export function MirrorKgPanel({
   const baseParams = useMemo(() => ({
     limit: pageSize,
     offset,
-  }), [pageSize, offset])
+    granularity_level: granularityLevel || undefined,
+  }), [pageSize, offset, granularityLevel])
 
   // Data key changes when sub-tab or page or tick changes
   const dataKey = useMemo(

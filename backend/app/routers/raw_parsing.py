@@ -141,6 +141,7 @@ async def list_raw_aal3_labels(
     batch_id: uuid.UUID | None = None,
     parse_run_id: uuid.UUID | None = None,
     laterality: Laterality | None = None,
+    granularity_level: str | None = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
@@ -151,6 +152,7 @@ async def list_raw_aal3_labels(
         batch_id=batch_id,
         resource_id=resource_id,
         laterality=laterality.value if laterality else None,
+        granularity_level=granularity_level,
         limit=limit,
         offset=offset,
     )
@@ -168,6 +170,7 @@ async def list_raw_macro96_rows(
     batch_id: uuid.UUID | None = None,
     parse_run_id: uuid.UUID | None = None,
     source_file_id: uuid.UUID | None = None,
+    granularity_level: str | None = None,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
@@ -178,6 +181,7 @@ async def list_raw_macro96_rows(
         batch_id=batch_id,
         resource_id=resource_id,
         source_file_id=source_file_id,
+        granularity_level=granularity_level,
         limit=limit,
         offset=offset,
     )

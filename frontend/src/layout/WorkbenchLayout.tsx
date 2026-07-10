@@ -12,9 +12,11 @@ import {
   Settings,
   MonitorPlay,
   Share2,
+  Search,
 } from 'lucide-react'
 import { useI18n } from '../i18n-context'
 import { useWorkbenchLog } from '../logging/useWorkbenchLog'
+import { GranularitySwitcher } from '../components/GranularitySwitcher'
 import { BottomLogConsole } from '../components/BottomLogConsole'
 import { TaskCenterDropdown } from '../components/TaskCenterDropdown'
 import type { BgTask } from '../hooks/useBackgroundTasks'
@@ -33,6 +35,7 @@ const NAV_ITEMS = [
   { path: '/promotions', labelKey: 'nav.promotions', icon: ArrowUpToLine },
   { path: '/task-center', labelKey: 'nav.taskCenter', icon: MonitorPlay },
   { path: '/graph-explorer', labelKey: 'nav.graphExplorer', icon: Share2 },
+  { path: '/symptom-query', labelKey: 'nav.symptomQuery', icon: Search },
   { path: '/settings', labelKey: 'nav.settings', icon: Settings },
 ]
 
@@ -89,6 +92,7 @@ export function WorkbenchLayout({ currentPath, children }: WorkbenchLayoutProps)
             onViewTask={openTask}
             onOpen={fetchDropdownTasks}
           />
+          <GranularitySwitcher />
           <span className="topbar-version">v3.2.9-mvp1</span>
           <span className="topbar-dot" title={t('layout.readonlyMode')} />
         </div>

@@ -4,11 +4,13 @@ import { PageHeader } from '../components/PageHeader'
 import { DataTable, type Column } from '../components/DataTable'
 import { useData } from '../hooks/useData'
 import { listRawMacro96Rows, type RawMacro96Row } from '../api/endpoints'
+import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
 
 interface Props { embedded?: boolean }
 
 export function RawMacro96Page({ embedded }: Props) {
-  const { data, loading, error, reload } = useData(() => listRawMacro96Rows({ limit: 200 }), [])
+  const { granularity } = useGlobalGranularity()
+  const { data, loading, error, reload } = useData(() => listRawMacro96Rows({ limit: 200, granularity_level: granularity || undefined }), [])
   const [page, setPage] = useState(0)
   const pageSize = 50
 

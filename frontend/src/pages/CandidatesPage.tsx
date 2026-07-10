@@ -1,17 +1,22 @@
 /* Candidate Brain Regions — embedded in Data Center or standalone. */
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { PageHeader } from '../components/PageHeader'
 import { DataTable, type Column } from '../components/DataTable'
 import { StatusBadge } from '../components/StatusBadge'
 import { useData } from '../hooks/useData'
 import { fetchCandidates, type CandidateBrainRegion } from '../api/endpoints'
+import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
 
 interface Props { embedded?: boolean }
 
 export function CandidatesPage({ embedded }: Props) {
-  const { data, loading, error, reload } = useData(() => fetchCandidates({ limit: 500 }), [])
+  const { granularity } = useGlobalGranularity()
   const [page, setPage] = useState(0)
   const pageSize = 50
+  // useData with granularty as key forces re-fetch on granularty change
+  const cacheKey = `candidates-${granularity}`
+  const { data, loading, error, reload } = useData(() => fetchCandidates({ limit: 5000, granularity_level: granularity || undefined }), [cacheKey])
+  useEffect(() => { setPage(0) }, [granularity])
 
   const items = data?.items ?? []
   const total = data?.total ?? items.length

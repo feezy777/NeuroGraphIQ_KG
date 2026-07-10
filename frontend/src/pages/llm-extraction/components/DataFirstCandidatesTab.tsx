@@ -13,6 +13,7 @@ import {
   filterWorkbenchBatches,
 } from '../../../api/endpoints'
 import type { CandidateBrainRegion } from '../../../api/endpoints'
+import { useGlobalGranularity } from '../../../hooks/useGlobalGranularity'
 import { useBulkSelection } from '../hooks/useBulkSelection'
 import { useBulkExtraction, type BulkExtractionTask } from '../hooks/useBulkExtraction'
 import { isCandidateBulkTask } from '../llmDataFirstTypes'
@@ -73,6 +74,7 @@ export function DataFirstCandidatesTab({
   pooledCandidateIds,
 }: Props) {
   const { t } = useI18n()
+  const { granularity } = useGlobalGranularity()
   const sess = readSessionIds()
   const initialBatchId = scopeBatchId ?? sess.batch_id ?? ''
 
@@ -104,8 +106,9 @@ export function DataFirstCandidatesTab({
   const filters = useMemo(() => ({
     candidate_status: statusFilter || undefined,
     batch_id: appliedBatchId || undefined,
-    limit: clampApiLimit(API_MAX_LIMIT),
-  }), [statusFilter, appliedBatchId])
+    granularity_level: granularity || undefined,
+    limit: 5000,
+  }), [statusFilter, appliedBatchId, granularity])
 
   const { data, loading, error } = useData(
     () => fetchCandidates(filters),
@@ -113,7 +116,7 @@ export function DataFirstCandidatesTab({
   )
 
   const { data: countProbeData } = useData(
-    () => fetchCandidates({ limit: clampApiLimit(API_MAX_LIMIT) }),
+    () => fetchCandidates({ limit: 5000 }),
     [batchTick, tick],
   )
 

@@ -71,7 +71,7 @@ const EMPTY: DataCenterCounts = {
   warnings: [],
 }
 
-export function useDataCenterCounts(refreshKey = 0) {
+export function useDataCenterCounts(granularity: string, refreshKey = 0) {
   const [counts, setCounts] = useState<DataCenterCounts>(EMPTY)
   const [loading, setLoading] = useState(false)
   const [tick, setTick] = useState(0)
@@ -96,17 +96,17 @@ export function useDataCenterCounts(refreshKey = 0) {
         summaryResult, exportResult,
       ] = await Promise.allSettled([
         // ── Raw counts ──────────────────────────────────────────────
-        safeCount(fetchRawAal3Labels({ limit: 1 })),
-        safeCount(listRawMacro96Rows({ limit: 1 })),
-        safeCount(fetchCandidates({ limit: 1 })),
+        safeCount(fetchRawAal3Labels({ limit: 1, granularity_level: granularity || undefined })),
+        safeCount(listRawMacro96Rows({ limit: 1, granularity_level: granularity || undefined })),
+        safeCount(fetchCandidates({ limit: 1, granularity_level: granularity || undefined })),
         // ── Mirror KG core ──────────────────────────────────────────
-        safeCount(listMirrorConnections({ limit: 1 })),
-        safeCount(listMirrorFunctions({ limit: 1 })),
-        safeCount(listMirrorCircuits({ limit: 1 })),
-        safeCount(listMirrorTriples({ limit: 1 })),
+        safeCount(listMirrorConnections({ limit: 1, granularity_level: granularity || undefined })),
+        safeCount(listMirrorFunctions({ limit: 1, granularity_level: granularity || undefined })),
+        safeCount(listMirrorCircuits({ limit: 1, granularity_level: granularity || undefined })),
+        safeCount(listMirrorTriples({ limit: 1, granularity_level: granularity || undefined })),
         // ── Mirror KG macro clinical ────────────────────────────────
-        safeCount(listMirrorCircuitSteps({ limit: 1 })),
-        safeCount(listMirrorProjectionFunctions({ limit: 1 })),
+        safeCount(listMirrorCircuitSteps({ limit: 1, granularity_level: granularity || undefined })),
+        safeCount(listMirrorProjectionFunctions({ limit: 1, granularity_level: granularity || undefined })),
         safeCount(listMirrorCircuitProjectionMemberships({ limit: 1 })),
         safeCount(listCircuitProjectionCrossValidationResults({ limit: 1 })),
         safeCount(listMirrorDualModelVerificationResults({ limit: 1 })),
@@ -227,7 +227,7 @@ export function useDataCenterCounts(refreshKey = 0) {
     })
 
     return () => { abortRef.current = true }
-  }, [tick, refreshKey])
+  }, [tick, refreshKey, granularity])
 
   return { counts, loading, refresh }
 }

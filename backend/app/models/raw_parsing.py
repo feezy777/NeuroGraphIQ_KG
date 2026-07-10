@@ -64,6 +64,7 @@ class RawAal3RegionLabel(Base):
     en_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
     cn_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
     laterality: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown")
+    granularity_level: Mapped[str] = mapped_column(String(64), nullable=False, default="macro")
     region_base_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
     raw_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     row_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

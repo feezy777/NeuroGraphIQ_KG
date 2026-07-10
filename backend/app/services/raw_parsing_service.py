@@ -841,6 +841,7 @@ async def list_aal3_labels(
     batch_id: uuid.UUID | None = None,
     resource_id: uuid.UUID | None = None,
     laterality: str | None = None,
+    granularity_level: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[RawAal3RegionLabel], int]:
@@ -859,6 +860,9 @@ async def list_aal3_labels(
     if laterality:
         base = base.where(RawAal3RegionLabel.laterality == laterality)
         count_q = count_q.where(RawAal3RegionLabel.laterality == laterality)
+    if granularity_level:
+        base = base.where(RawAal3RegionLabel.granularity_level == granularity_level)
+        count_q = count_q.where(RawAal3RegionLabel.granularity_level == granularity_level)
 
     total = int((await session.execute(count_q)).scalar_one())
     rows = (
@@ -1157,6 +1161,7 @@ async def list_macro96_rows(
     batch_id: uuid.UUID | None = None,
     resource_id: uuid.UUID | None = None,
     source_file_id: uuid.UUID | None = None,
+    granularity_level: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> tuple[list[RawMacro96RegionRow], int]:
@@ -1175,6 +1180,9 @@ async def list_macro96_rows(
     if source_file_id:
         base = base.where(RawMacro96RegionRow.source_file_id == source_file_id)
         count_q = count_q.where(RawMacro96RegionRow.source_file_id == source_file_id)
+    if granularity_level:
+        base = base.where(RawMacro96RegionRow.granularity_level == granularity_level)
+        count_q = count_q.where(RawMacro96RegionRow.granularity_level == granularity_level)
 
     total = int((await session.execute(count_q)).scalar_one())
     rows = (

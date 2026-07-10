@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../../components/PageHeader'
 import { useI18n } from '../../i18n-context'
 import { readHashQueryParams, buildHashUrl } from '../../utils/pipelineNavigation'
+import { useGlobalGranularity } from '../../hooks/useGlobalGranularity'
 import { DataCenterTabBar } from './DataCenterTabBar'
 import { DataCenterOverview } from './DataCenterOverview'
 import { RawDataPanel } from './RawDataPanel'
@@ -37,7 +38,7 @@ function parseNavFromUrl(): DataCenterNavState {
     batchId: q.batch_id ?? '',
     resourceId: q.resource_id ?? '',
     sourceAtlas: q.source_atlas ?? '',
-    granularityLevel: q.granularity_level ?? '',
+    granularityLevel: '',  // set by Context, not hash
   }
 }
 
@@ -51,14 +52,15 @@ function navToQuery(nav: DataCenterNavState): Record<string, string | undefined>
     batch_id: nav.batchId || undefined,
     resource_id: nav.resourceId || undefined,
     source_atlas: nav.sourceAtlas || undefined,
-    granularity_level: nav.granularityLevel || undefined,
+    granularity_level: readHashQueryParams().granularity_level || undefined,
   }
 }
 
 export function DataCenterPage() {
   const { t } = useI18n()
   const [nav, setNav] = useState<DataCenterNavState>(() => parseNavFromUrl())
-  const { counts, loading, refresh } = useDataCenterCounts()
+  const { granularity } = useGlobalGranularity()
+  const { counts, loading, refresh } = useDataCenterCounts(granularity)
 
   useEffect(() => {
     const handler = () => setNav(parseNavFromUrl())
@@ -97,12 +99,11 @@ export function DataCenterPage() {
             batchId={nav.batchId}
             resourceId={nav.resourceId}
             sourceAtlas={nav.sourceAtlas}
-            granularityLevel={nav.granularityLevel}
+            granularityLevel={granularity}
             onFilterChange={patch => updateNav({
               batchId: patch.batchId ?? nav.batchId,
               resourceId: patch.resourceId ?? nav.resourceId,
               sourceAtlas: patch.sourceAtlas ?? nav.sourceAtlas,
-              granularityLevel: patch.granularityLevel ?? nav.granularityLevel,
             })}
           />
         )
@@ -114,12 +115,11 @@ export function DataCenterPage() {
             batchId={nav.batchId}
             resourceId={nav.resourceId}
             sourceAtlas={nav.sourceAtlas}
-            granularityLevel={nav.granularityLevel}
+            granularityLevel={granularity}
             onFilterChange={patch => updateNav({
               batchId: patch.batchId ?? nav.batchId,
               resourceId: patch.resourceId ?? nav.resourceId,
               sourceAtlas: patch.sourceAtlas ?? nav.sourceAtlas,
-              granularityLevel: patch.granularityLevel ?? nav.granularityLevel,
             })}
           />
         )
@@ -135,7 +135,7 @@ export function DataCenterPage() {
       default:
         return <DataCenterOverview counts={counts} loading={loading} onNavigate={setTab} onRefresh={refresh} />
     }
-  }, [nav, counts, loading, refresh, setTab, updateNav])
+  }, [nav, counts, loading, refresh, setTab, updateNav, granularity])
 
   return (
     <div className="data-center-page">

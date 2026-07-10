@@ -3,6 +3,7 @@ import { ChevronLeft, Sparkles, AlertTriangle } from 'lucide-react'
 import { PageHeader } from '../components/PageHeader'
 import { DataTable, type Column } from '../components/DataTable'
 import { StatusBadge } from '../components/StatusBadge'
+import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
 import { KeyValuePanel } from '../components/KeyValuePanel'
 import { ActionButton } from '../components/ActionButton'
 import { ConfirmDialog } from '../components/ConfirmDialog'
@@ -2256,17 +2257,19 @@ function MirrorFilterBar({
 }
 
 function useMirrorFilters() {
+  const { granularity: globalGranularity } = useGlobalGranularity()
   const [sourceAtlas, setSourceAtlas] = useState('')
-  const [granularity, setGranularity] = useState('')
   const [mirrorStatus, setMirrorStatus] = useState('')
   const [reviewStatus, setReviewStatus] = useState('')
   const [llmRunId, setLlmRunId] = useState('')
-  const [applied, setApplied] = useState({ sourceAtlas: '', granularity: '', mirrorStatus: '', reviewStatus: '', llmRunId: '' })
-  const apply = () => setApplied({ sourceAtlas, granularity, mirrorStatus, reviewStatus, llmRunId })
+  const [applied, setApplied] = useState({ sourceAtlas: '', mirrorStatus: '', reviewStatus: '', llmRunId: '' })
+  const apply = () => setApplied({ sourceAtlas, mirrorStatus, reviewStatus, llmRunId })
   return {
-    sourceAtlas, setSourceAtlas, granularity, setGranularity,
+    sourceAtlas, setSourceAtlas,
     mirrorStatus, setMirrorStatus, reviewStatus, setReviewStatus,
-    llmRunId, setLlmRunId, applied, apply,
+    llmRunId, setLlmRunId,
+    applied: { ...applied, granularity: globalGranularity },
+    apply,
   }
 }
 
@@ -2304,8 +2307,8 @@ function MirrorConnectionsTab({ onViewRuns, onViewItems }: {
   }, [currentProvider, modelName])
 
   const { data: candData, loading: candLoading } = useData(
-    () => fetchCandidates({ batch_id: batchFilter || undefined, limit: 200 }),
-    [batchFilter],
+    () => fetchCandidates({ batch_id: batchFilter || undefined, limit: 200, granularity_level: f.applied.granularity || undefined }),
+    [batchFilter, f.applied.granularity],
   )
   const candidates = candData?.items ?? []
   const selected = candidates.filter(c => checked.has(c.id))
@@ -2580,8 +2583,8 @@ function MirrorFunctionsTab({ onViewRuns, onViewItems }: {
   }, [currentProvider, modelName])
 
   const { data: candData, loading: candLoading } = useData(
-    () => fetchCandidates({ batch_id: batchFilter || undefined, limit: 200 }),
-    [batchFilter],
+    () => fetchCandidates({ batch_id: batchFilter || undefined, limit: 200, granularity_level: f.applied.granularity || undefined }),
+    [batchFilter, f.applied.granularity],
   )
   const candidates = candData?.items ?? []
   const selected = candidates.filter(c => checked.has(c.id))
@@ -2876,8 +2879,8 @@ function MirrorCircuitsTab({ onViewRuns, onViewItems }: {
   }, [currentProvider, modelName])
 
   const { data: candData, loading: candLoading } = useData(
-    () => fetchCandidates({ batch_id: batchFilter || undefined, limit: 200 }),
-    [batchFilter],
+    () => fetchCandidates({ batch_id: batchFilter || undefined, limit: 200, granularity_level: f.applied.granularity || undefined }),
+    [batchFilter, f.applied.granularity],
   )
   const candidates = candData?.items ?? []
   const selected = candidates.filter(c => checked.has(c.id))
@@ -6004,16 +6007,15 @@ export function LlmExtractionPage() {
     triples: t('mirror.triples'),
   }), [t])
 
+  const { granularity } = useGlobalGranularity()
+  const sess = readSessionIds()
+
   // ── Candidate pool ──────────────────────────────────────────────────
-  // Derived synchronously (useMemo) so it is never null on first paint
-  // when session scope is already loaded — avoids a race where
-  // openPoolExtractModal calls setPoolCandidates before the useEffect
-  // that used to set poolScope has committed.
   const poolScope: PoolScope = useMemo(() => ({
-    sourceAtlas: scope.source_atlas || 'AAL3',
-    granularityLevel: scope.granularity_level || 'macro',
-    granularityFamily: scope.granularity_family || 'macro_clinical',
-  }), [scope.source_atlas, scope.granularity_level, scope.granularity_family])
+    sourceAtlas: sess.source_atlas || 'AAL3',
+    granularityLevel: granularity || 'macro',
+    granularityFamily: sess.granularity_family || 'macro_clinical',
+  }), [sess.source_atlas, granularity, sess.granularity_family])
 
   const {
     pool,
@@ -6025,10 +6027,10 @@ export function LlmExtractionPage() {
   } = useCandidatePool(poolScope)
 
   // ── Connection Pool (only active on connection tab) ─────────────────────
-  const connPoolScope = useMemo(() => (candidateSource === 'connection' && scope.source_atlas && scope.granularity_level ? {
-    sourceAtlas: scope.source_atlas,
-    granularityLevel: scope.granularity_level || 'macro',
-  } : null), [candidateSource, scope.source_atlas, scope.granularity_level])
+  const connPoolScope = useMemo(() => (candidateSource === 'connection' && granularity ? {
+    sourceAtlas: sess.source_atlas || 'AAL3',
+    granularityLevel: granularity,
+  } : null), [candidateSource, sess.source_atlas, granularity])
 
   const {
     pool: connPool,
@@ -6045,14 +6047,14 @@ export function LlmExtractionPage() {
       throw new PoolSetupError('当前没有可加入提取池的候选脑区（至少需要 2 个）')
     }
     const payloadScope: PoolScope = {
-      sourceAtlas: scope.source_atlas || 'AAL3',
-      granularityLevel: scope.granularity_level || 'macro',
-      granularityFamily: scope.granularity_family || 'macro_clinical',
+      sourceAtlas: sess.source_atlas || 'AAL3',
+      granularityLevel: granularity || 'macro',
+      granularityFamily: sess.granularity_family || 'macro_clinical',
     }
     if (import.meta.env.DEV) {
       console.info('[LlmExtractionPage] setupExtractionPool', {
         selectedIdsLength: ids.length,
-        batchId: scope.batch_id || null,
+        batchId: sess.batch_id || null,
         atlas: payloadScope.sourceAtlas,
         granularity: payloadScope.granularityLevel,
         granularityFamily: payloadScope.granularityFamily,
@@ -6060,7 +6062,7 @@ export function LlmExtractionPage() {
       })
     }
     return setPoolCandidates(ids, payloadScope)
-  }, [scope.source_atlas, scope.granularity_level, scope.granularity_family, scope.batch_id, setPoolCandidates])
+  }, [sess.source_atlas, granularity, sess.granularity_family, sess.batch_id, setPoolCandidates])
 
   const openPoolExtractModal = useCallback(async (
     workflowType: string,
@@ -6134,11 +6136,11 @@ export function LlmExtractionPage() {
           <div className="llm-data-first-subtitle">{t('llm.dataFirst.subtitle')}</div>
         </div>
         <div className="llm-compact-scope-bar">
-          {scope.batch_id && <span className="llm-scope-chip">batch: {scope.batch_id}</span>}
-          {scope.resource_id && <span className="llm-scope-chip">resource: {scope.resource_id}</span>}
-          {scope.source_atlas && <span className="llm-scope-chip">atlas: {scope.source_atlas}</span>}
-          {scope.granularity_level && <span className="llm-scope-chip">gran: {scope.granularity_level}</span>}
-          {!scope.batch_id && !scope.resource_id && !scope.source_atlas && !scope.granularity_level && (
+          {sess.batch_id && <span className="llm-scope-chip">batch: {sess.batch_id}</span>}
+          {sess.resource_id && <span className="llm-scope-chip">resource: {sess.resource_id}</span>}
+          {sess.source_atlas && <span className="llm-scope-chip">atlas: {sess.source_atlas}</span>}
+          {granularity && <span className="llm-scope-chip">gran: {granularity}</span>}
+          {!sess.batch_id && !sess.resource_id && !sess.source_atlas && !granularity && (
             <span className="llm-scope-chip llm-scope-chip-empty">—</span>
           )}
           <button type="button" className="llm-btn llm-btn-ghost" onClick={clearScope}>{t('llm.workflow.clearScope')}</button>
@@ -6263,7 +6265,7 @@ export function LlmExtractionPage() {
                   console.log('[llm-preset] setPoolConnections SUCCESS:', { poolId: result.id, memberCount: result.memberships?.length ?? 0, connectionCount: result.connection_count })
                 } catch (err) {
                   const msg = err instanceof Error ? err.message : String(err)
-                  console.error('[llm-preset] setPoolConnections FAILED:', { msg, connCount: connIds.length, scopeSourceAtlas: scope.source_atlas, scopeGranularity: scope.granularity_level, connIdSample: connIds.slice(0, 3).map((s: string) => s.slice(0, 12)) })
+                  console.error('[llm-preset] setPoolConnections FAILED:', { msg, connCount: connIds.length, scopeSourceAtlas: sess.source_atlas, scopeGranularity: granularity, connIdSample: connIds.slice(0, 3).map((s: string) => s.slice(0, 12)) })
                   setCandidateMinError(`连接池同步失败: ${msg}`)
                   return
                 }
@@ -6444,7 +6446,7 @@ export function LlmExtractionPage() {
             modelName={modelName}
             dryRun={dryRun}
             confirmTrigger={bulkConfirmTrigger}
-            scopeBatchId={scope.batch_id}
+            scopeBatchId={sess.batch_id}
             onScopeBatchChange={batchId => updateScope({ batch_id: batchId })}
             onBatchStart={() => setBatchLoading(true)}
             onBatchEnd={() => setBatchLoading(false)}

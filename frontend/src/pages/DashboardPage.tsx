@@ -20,6 +20,8 @@ import {
 } from '../api/endpoints'
 import { ApiError } from '../api/client'
 import { SessionIdsPanel } from '../components/SessionIdsPanel'
+import { GranularitySwitcher } from '../components/GranularitySwitcher'
+import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
 import { useI18n } from '../i18n-context'
 
 function schemaStatusLabel(t: (k: string) => string, status: DatabaseSchemaStatus): string {
@@ -125,6 +127,9 @@ export function DashboardPage() {
         readonly={false}
         actions={<ActionButton label={t('common.refresh')} onClick={() => void loadDashboard()} loading={dbLoading} />}
       />
+      <div style={{ marginBottom: 16, padding: '8px 0' }}>
+        <GranularitySwitcher />
+      </div>
       <Notice notice={notice} onClose={() => setNotice(null)} />
 
       <div className="dash-grid">

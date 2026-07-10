@@ -1810,7 +1810,7 @@ async def run_connection_with_function_workflow(
             composite_workflow_run_id=workflow_run.id,
             workflow_step_key="extract_connections",
             on_progress=_connection_progress,
-            commit_progress=commit_progress,
+            commit_progress=True,  # Per-pack commit for live data visibility
         )
 
         # Dry-run sample pack: execute the first pack against the real LLM for preview

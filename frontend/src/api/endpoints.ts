@@ -392,6 +392,7 @@ export const fetchRawAal3Labels = (p?: {
   batch_id?: string
   parse_run_id?: string
   resource_id?: string
+  granularity_level?: string
   limit?: number
   offset?: number
 }) => getJson<Paginated<RawAal3Label>>('/api/raw-parsing/aal3-labels', p)
@@ -424,6 +425,7 @@ export const fetchCandidates = (p?: {
   resource_id?: string
   generation_run_id?: string
   parse_run_id?: string
+  granularity_level?: string
   limit?: number
   offset?: number
 }) => getJson<Paginated<CandidateBrainRegion>>('/api/candidates/brain-regions', p)
@@ -1099,6 +1101,7 @@ export const listRawMacro96Rows = (params: {
   parse_run_id?: string
   resource_id?: string
   source_file_id?: string
+  granularity_level?: string
   limit?: number
   offset?: number
 }) => getJson<RawMacro96RowListResponse>('/api/raw-parsing/macro96-rows', params as Record<string, string | number | boolean | null | undefined>)

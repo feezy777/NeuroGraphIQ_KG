@@ -3,11 +3,13 @@ import { ReactFlowProvider } from '@xyflow/react'
 import { FinalKgGraphCanvas } from './FinalKgGraphCanvas'
 import { FinalKgGraphSidebar } from './FinalKgGraphSidebar'
 import { useGraphData } from './useGraphData'
+import { useGlobalGranularity } from '../../hooks/useGlobalGranularity'
 import '@xyflow/react/dist/style.css'
 import './FinalKgGraphPage.css'
 
 export function FinalKgGraphPage() {
-  const [filters, setFilters] = useState({ atlas: '', granularity: '', type: 'brain_region' })
+  const { granularity: globalGranularity } = useGlobalGranularity()
+  const [filters, setFilters] = useState({ atlas: '', granularity: globalGranularity, type: 'brain_region' })
   const [selectedNode, setSelectedNode] = useState<Record<string, unknown> | null>(null)
   const { nodes, edges, loading, error, loadGraph } = useGraphData()
 
@@ -15,14 +17,14 @@ export function FinalKgGraphPage() {
     (params?: Record<string, string>) => {
       const merged: Record<string, string> = { ...params }
       if (filters.atlas) merged.source_atlas = filters.atlas
-      if (filters.granularity) merged.granularity_level = filters.granularity
+      merged.granularity_level = filters.granularity || globalGranularity
       if (filters.type) merged.center_type = filters.type
       if (!merged.depth) merged.depth = '1'
       if (!merged.include_functions) merged.include_functions = 'true'
       if (!merged.limit) merged.limit = '200'
       loadGraph(merged)
     },
-    [filters, loadGraph],
+    [filters, loadGraph, globalGranularity],
   )
 
   const handleExpandNode = useCallback(

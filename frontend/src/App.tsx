@@ -3,6 +3,8 @@ import { I18nProvider } from './i18n-context'
 import { WorkbenchLogProvider } from './logging/WorkbenchLogContext'
 import { WorkbenchLayout } from './layout/WorkbenchLayout'
 import { DashboardPage } from './pages/DashboardPage'
+import { SymptomQueryPage } from './pages/SymptomQueryPage'
+import { GranularityProvider } from './hooks/useGlobalGranularity'
 import { ResourcesPage } from './pages/ResourcesPage'
 import { FilesPage } from './pages/FilesPage'
 import { ImportBatchesPage } from './pages/ImportBatchesPage'
@@ -30,6 +32,7 @@ const ROUTES: Record<string, ComponentType> = {
   '/mirror-kg': MirrorKgPage,
   '/task-center': BackgroundTaskCenterPage,
   '/graph-explorer': GraphExplorerPage,
+  '/symptom-query': SymptomQueryPage,
   '/rule-validation': RuleValidationPage,
   '/human-review': HumanReviewPage,
   '/promotions': PromotionsPage,
@@ -70,9 +73,11 @@ export default function App() {
     <I18nProvider>
       <TaskDetailModalProvider>
         <WorkbenchLogProvider>
-          <WorkbenchLayout currentPath={path}>
-            <Page />
-          </WorkbenchLayout>
+          <GranularityProvider>
+            <WorkbenchLayout currentPath={path}>
+              <Page />
+            </WorkbenchLayout>
+          </GranularityProvider>
         </WorkbenchLogProvider>
       </TaskDetailModalProvider>
     </I18nProvider>

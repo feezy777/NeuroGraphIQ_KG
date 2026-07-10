@@ -53,6 +53,7 @@ class RawMacro96RegionRow(Base):
     raw_cn_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_sheet: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
+    granularity_level: Mapped[str] = mapped_column(String(64), nullable=False, default="macro")
     parser_key: Mapped[str] = mapped_column(String(64), nullable=False, default="macro96_xlsx")
     parser_version: Mapped[str] = mapped_column(String(32), nullable=False, default="v1")
     raw_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
