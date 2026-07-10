@@ -284,3 +284,56 @@ def build_batch_field_prompt(
     })
     return system_prompt, user_prompt, prompt_json, prompt_key
 
+
+
+def build_multi_field_batch_prompt(
+    entry,
+    records: list[dict[str, Any]],
+    request,
+    *,
+    prompt_overrides: dict[str, str] | None = None,
+) -> tuple[str, str, dict[str, Any], str]:
+    """Build a single prompt to fill ALL missing fields for multiple targets at once."""
+    from app.utils.json_safety import json_dumps_safe
+
+    prompt_key = "multi_field_batch"
+    all_fields: set[str] = set()
+    for rec in records:
+        all_fields.update(rec.get("fields", []))
+    payload = {
+        "task": f"Complete missing fields for {len(records)} {entry.target_type.value} records",
+        "target_fields": sorted(all_fields),
+        "overwrite_policy": request.overwrite_policy.value,
+        "records": records,
+        "output_note": (
+            "Return field_updates array. Each update must have: "
+            "target_id, field_name, value, confidence (0.0-1.0), evidence_text, uncertainty_reason."
+        ),
+    }
+    system_prompt = (
+        "You are a brain science knowledge graph field completion assistant. "
+        "For each target record, fill ALL listed target_fields with the best values "
+        "synthesized from the available context (region names, connection type, evidence, etc.). "
+        "Always provide a non-null value. If uncertain, make your best inference and note it in uncertainty_reason. "
+        "Output valid JSON only, no markdown."
+    )
+    tpl = resolve_prompt_template("default_field_completion", prompt_overrides)
+    override_text = (prompt_overrides or {}).get(prompt_key)
+    if override_text:
+        user_prompt = override_text + "\n\n" + json_dumps_safe(payload, ensure_ascii=False)
+    else:
+        user_prompt = (
+            f"Complete all missing fields ({', '.join(sorted(all_fields))}) "
+            f"for each target record below. "
+            f"Return JSON: {{\"field_updates\": ["
+            f"{{\"target_id\": \"...\", \"field_name\": \"...\", \"value\": \"...\", \"confidence\": 0.8, \"evidence_text\": \"...\", \"uncertainty_reason\": \"...\"}}"
+            f"]}}\n\n"
+            + json_dumps_safe(payload, ensure_ascii=False)
+        )
+    prompt_json = to_jsonable({
+        "template_key": prompt_key,
+        "multi_field": True,
+        "fields": sorted(all_fields),
+        "batch_size": len(records),
+    })
+    return system_prompt, user_prompt, prompt_json, prompt_key

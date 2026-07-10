@@ -120,7 +120,7 @@ export function MirrorKgPanel({
   }, [mirrorTab])
 
   const handleFetchAll = useCallback(async (): Promise<FormalRow[]> => {
-    const params: Record<string, any> = { limit: 0 }
+    const params: Record<string, any> = { limit: 5000 }  // max backend limit, covers all
     const result = await activeSub.listApi(params)
     const items = result?.items ?? []
     return items.map((item: any) => ({ ...item, id: item.id ?? '' }))

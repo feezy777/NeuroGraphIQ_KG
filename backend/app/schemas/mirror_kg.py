@@ -261,6 +261,16 @@ class MirrorRegionConnectionRead(BaseModel):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
+    def name_cn(self) -> str | None:
+        return (self.raw_payload_json or {}).get("name_cn")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def name_en(self) -> str | None:
+        return (self.raw_payload_json or {}).get("name_en")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def attributes(self) -> dict[str, Any]:
         """Alias for overlay storage (formal_field_overlay lives in normalized_payload_json)."""
         return self.normalized_payload_json or {}

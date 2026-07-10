@@ -239,6 +239,8 @@ class MirrorProjectionFunctionRead(BaseModel):
     granularity_family: str | None
     source_atlas: str
     source_version: str | None
+    connection_name_cn: str | None = None
+    connection_name_en: str | None = None
     function_term: str
     function_category: str
     relation_type: str

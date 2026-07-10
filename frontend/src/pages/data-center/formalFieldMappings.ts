@@ -121,10 +121,10 @@ const BASE_MAPPINGS: FormalFieldMapping[] = [
     dataCenterSubTab: 'connections',
     implemented: true,
     columns: [
+      col('name_cn', 'name_cn（中文名）', 'name_cn', ['name_cn'], { width: 180 }),
+      col('name_en', 'name_en（英文名）', 'name_en', ['name_en'], { width: 180 }),
       col('id', 'id', 'id', ['id'], { renderType: 'id', width: 130 }),
       col('canonical_id', 'canonical_id', 'canonical_id', ['canonical_id'], { renderType: 'canonical_id', width: 200 }),
-      col('name_en', 'name_en（英文名）', 'name_en', ['name_en'], { enrichable: true }),
-      col('name_cn', 'name_cn（中文名）', 'name_cn', ['name_cn'], { enrichable: true }),
       col('source_region_id', 'source_region_id（起始脑区）', 'source_region_id', ['source_region_candidate_id', 'source_region_final_id', 'source_region_id'], { required: true, renderType: 'id' }),
       col('source_region_name', 'source_region_name（起始脑区名）', 'source_region_name', ['source_region_name_cn', 'source_region_name_en'], { renderType: 'text' }),
       col('target_region_id', 'target_region_id（目标脑区）', 'target_region_id', ['target_region_candidate_id', 'target_region_final_id', 'target_region_id'], { required: true, renderType: 'id' }),
@@ -161,6 +161,8 @@ const BASE_MAPPINGS: FormalFieldMapping[] = [
     dataCenterSubTab: 'projection_functions',
     implemented: true,
     columns: [
+      col('connection_name_cn', '连接中文名', 'connection_name_cn', ['connection_name_cn'], { width: 180 }),
+      col('connection_name_en', '连接英文名', 'connection_name_en', ['connection_name_en'], { width: 200 }),
       col('id', 'id', 'id', ['id'], { renderType: 'id', width: 130 }),
       col('projection_id', 'projection_id', 'projection_id', ['projection_id'], { renderType: 'id', required: true }),
       col('function_term_en', 'function_term_en（功能术语英文）', 'function_term_en', ['function_term', 'function_term_en', 'function_label'], { required: true, enrichable: true }),

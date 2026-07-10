@@ -405,6 +405,27 @@ async def list_projection_functions(
             base.order_by(MirrorProjectionFunction.created_at.desc()).limit(limit).offset(offset)
         )
     ).scalars().all()
+
+    # Enrich with connection names
+    conn_ids = list({r.projection_id for r in rows if r.projection_id})
+    if conn_ids:
+        from app.models.mirror_kg import MirrorRegionConnection
+        conn_rows = (
+            await session.execute(
+                select(MirrorRegionConnection).where(MirrorRegionConnection.id.in_(conn_ids))
+            )
+        ).scalars().all()
+        conn_map = {c.id: c for c in conn_rows}
+        for r in rows:
+            conn = conn_map.get(r.projection_id)
+            if conn:
+                cn = conn.source_region_name_cn or ""
+                en = conn.source_region_name_en or ""
+                tcn = conn.target_region_name_cn or ""
+                ten = conn.target_region_name_en or ""
+                r.connection_name_cn = f"{cn} → {tcn}"
+                r.connection_name_en = f"{en} → {ten}"
+
     return list(rows), total
 
 

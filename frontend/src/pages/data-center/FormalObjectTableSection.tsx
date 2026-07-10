@@ -136,19 +136,19 @@ export function FormalObjectTableSection({
 
   const openBulkCompletion = useCallback(async () => {
     const ids = [...effectiveSelected]
-    if (ids.length === 0) return
-    // Server-paginated: fetch all items if selection exceeds current page
+    if (ids.length === 0 && !selectAllFiltered) return
+    // Server-paginated + "select all": fetch all items for bulk operation
     let lookup = itemById
-    const allInLookup = ids.every(id => lookup.has(id))
-    if (isServerPaged && onFetchAll && !allInLookup) {
+    if (isServerPaged && onFetchAll && (selectAllFiltered || !ids.every(id => lookup.has(id)))) {
       try {
         const allItems = await onFetchAll()
         lookup = new Map(allItems.map(r => [r.id, r]))
       } catch { /* fall back to current page items */ }
     }
-    const rows = ids.map(id => lookup.get(id)).filter(Boolean) as FormalRow[]
+    const targetIds = selectAllFiltered ? [...lookup.keys()] : ids
+    const rows = targetIds.map(id => lookup.get(id)).filter(Boolean) as FormalRow[]
     openCompletionForRows(rows)
-  }, [effectiveSelected, itemById, items.length, isServerPaged, onFetchAll, openCompletionForRows])
+  }, [effectiveSelected, selectAllFiltered, itemById, items.length, isServerPaged, onFetchAll, openCompletionForRows])
 
   const completionIds = useMemo(
     () => completionTargets.map(r => r.id),
@@ -181,7 +181,7 @@ export function FormalObjectTableSection({
     [mapping, onOpenDetail, t, effectiveSelected, toggleRow, openCompletionForRows],
   )
 
-  const selectedCount = effectiveSelected.size
+  const selectedCount = selectAllFiltered && isServerPaged ? (serverTotal ?? effectiveSelected.size) : effectiveSelected.size
 
   return (
     <div className="data-center-formal-table">
@@ -203,17 +203,9 @@ export function FormalObjectTableSection({
         <button
           type="button"
           className="btn"
-          onClick={async () => {
-            if (isServerPaged && onFetchAll) {
-              try {
-                const allItems = await onFetchAll()
-                setSelectAllFiltered(false)
-                setSelectedIds(new Set(allItems.map(r => r.id)))
-              } catch { /* fallback to page */ }
-            } else {
-              setSelectAllFiltered(true)
-              setSelectedIds(new Set(allIds))
-            }
+          onClick={() => {
+            setSelectAllFiltered(true)
+            setSelectedIds(new Set())
           }}
         >
           {t('dataCenter.selectAllFiltered')}

@@ -1162,293 +1162,229 @@ async def execute_batched_llm_fields(
         _, llm_fields = split_deterministic_and_llm_fields(entry, fields)
         llm_field_names.update(llm_fields)
 
-    # Pre-count total packs for progress tracking
-    total_packs = 0
-    for pf_name in sorted(llm_field_names):
-        pf_records: list[dict[str, Any]] = []
-        for ptid, ptarget in targets.items():
-            pf_fields = determine_fields_to_complete(
-                ptarget, entry,
-                field_scope=request.field_scope,
-                selected_fields=request.selected_fields,
+    # Build multi-field context records: one record per target, all LLM fields at once
+    from app.services.field_completion_prompt_engineering import build_multi_field_batch_prompt
+
+    records: list[dict[str, Any]] = []
+    target_map: dict[str, tuple[uuid.UUID, Any]] = {}
+    for tid, target in targets.items():
+        fields = determine_fields_to_complete(
+            target, entry,
+            field_scope=request.field_scope,
+            selected_fields=request.selected_fields,
+        )
+        _, llm_fields = split_deterministic_and_llm_fields(entry, fields)
+        if not llm_fields:
+            continue
+        field_contexts: dict[str, Any] = {}
+        circuit_id = tid if request.target_type == TargetType.circuit else None
+        canonical_resolution = canonical_cache.get(circuit_id or tid, {})
+        for fname in llm_fields:
+            compact = build_compact_field_context(
+                target, fname, canonical_resolution=canonical_resolution,
             )
-            if pf_name not in pf_fields or is_deterministic_field(entry, pf_name):
-                continue
-            pcircuit_id = ptid if request.target_type == TargetType.circuit else None
-            pcanonical = canonical_cache.get(pcircuit_id or ptid, {})
-            pcompact = build_compact_field_context(
-                ptarget, pf_name, canonical_resolution=pcanonical,
-            )
-            pcompact["target_id"] = str(ptid)
-            pf_records.append(pcompact)
-        if pf_records:
-            sys_prompt, usr_prompt, _, _ = build_batch_field_prompt(
-                entry, pf_name, pf_records, request, prompt_overrides=request.prompt_overrides,
-            )
-            total_packs += len(pack_target_batches(pf_records, system_prompt=sys_prompt, template_body=usr_prompt))
+            field_contexts[fname] = compact
+        records.append({
+            "target_id": str(tid),
+            "target_type": entry.target_type.value,
+            "fields": sorted(llm_fields),
+            "field_contexts": field_contexts,
+        })
+        target_map[str(tid)] = (tid, target)
+
+    if not records:
+        return 0, 0, 0, 0, 0
+
+    system_prompt, user_prompt, prompt_json, prompt_key = build_multi_field_batch_prompt(
+        entry, records, request, prompt_overrides=request.prompt_overrides,
+    )
+    packs = pack_target_batches(records, system_prompt=system_prompt, template_body=user_prompt)
+    pack_count = len(packs)
+    total_packs = pack_count
 
     run.summary_json = to_jsonable({
         **(run.summary_json or {}),
         "total_packs": total_packs,
         "processed_packs": 0,
-        "current_field": "",
+        "current_field": "multi_field",
         "processed_items": 0,
     })
     flag_modified(run, "summary_json")
     await session.commit()
 
-    for field_name in sorted(llm_field_names):
-        records: list[dict[str, Any]] = []
-        target_map: dict[str, tuple[uuid.UUID, Any]] = {}
-        for tid, target in targets.items():
-            fields = determine_fields_to_complete(
-                target,
-                entry,
-                field_scope=request.field_scope,
-                selected_fields=request.selected_fields,
-            )
-            if field_name not in fields or is_deterministic_field(entry, field_name):
-                continue
-            circuit_id = tid if request.target_type == TargetType.circuit else None
-            canonical_resolution = canonical_cache.get(circuit_id or tid, {})
-            compact = build_compact_field_context(
-                target,
-                field_name,
-                canonical_resolution=canonical_resolution,
-            )
-            compact["target_id"] = str(tid)
-            records.append(compact)
-            target_map[str(tid)] = (tid, target)
+    for pack_idx, pack in enumerate(packs):
+        # Cancellation check before LLM call
+        if check_cancelled is not None and await check_cancelled(session, run.id):
+            return model_call_count, rejected_count, estimated_input_tokens, pack_count, llm_applied
 
-        if not records:
+        _, batch_user_prompt, _, _ = build_multi_field_batch_prompt(
+            entry, pack, request, prompt_overrides=request.prompt_overrides,
+        )
+        estimated_input_tokens += estimate_prompt_tokens(system_prompt) + estimate_prompt_tokens(batch_user_prompt)
+
+        try:
+            if provider_key == "mock":
+                raise RuntimeError("mock provider must be patched in tests")
+            from app.services.field_completion_prompt_engineering import resolve_prompt_template
+
+            tpl = resolve_prompt_template("default_field_completion", request.prompt_overrides)
+            response = await call_provider(
+                provider_key,
+                model=resolved_model,
+                system_prompt=system_prompt,
+                user_prompt=batch_user_prompt,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                response_schema=tpl.output_schema_json or None,
+            )
+            model_call_count += 1
+            if response.parsed_json is None and response.raw_text:
+                parsed = parse_field_completion_provider_response(response.raw_text)
+            elif response.parsed_json is not None:
+                parsed = parse_field_completion_provider_response(response.parsed_json)
+            else:
+                raise ValueError("empty provider response")
+        except Exception as exc:
+            logger.exception("multi-field batch completion failed")
+            for rec in pack:
+                tid_str = str(rec.get("target_id"))
+                if not tid_str or tid_str not in target_map:
+                    continue
+                tid, target = target_map[tid_str]
+                for fname in rec.get("fields", []):
+                    errors.append(f"target {tid} field {fname}: {exc}")
+                    item = make_item(
+                        run.id, request.target_type.value, tid, fname,
+                        old_value=get_field_value(target, fname),
+                        status=ItemStatus.failed, error_message=str(exc),
+                        reasoning_summary="prompt_key=multi_field_batch",
+                    )
+                    session.add(item)
+                    items.append(item)
             continue
 
-        system_prompt, user_prompt, prompt_json, prompt_key = build_batch_field_prompt(
-            entry,
-            field_name,
-            records,
-            request,
-            prompt_overrides=request.prompt_overrides,
-        )
-        packs = pack_target_batches(records, system_prompt=system_prompt, template_body=user_prompt)
-        pack_count += len(packs)
+        # Parse multi-field updates from LLM response
+        raw_updates = parsed.get("field_updates", [])
+        validated = validate_field_updates(entry, raw_updates)
+        handled_targets: dict[str, set[str]] = {}  # tid -> set of field_names handled
+        for upd, err in validated:
+            upd_field = upd.get("field_name", "")
+            tid_raw = upd.get("target_id")
+            tid_key = str(tid_raw) if tid_raw is not None else ""
+            if tid_key not in target_map:
+                continue
+            tid, target = target_map[tid_key]
+            if tid_key not in handled_targets:
+                handled_targets[tid_key] = set()
+            handled_targets[tid_key].add(upd_field)
 
-        for pack in packs:
-            _, batch_user_prompt, _, _ = build_batch_field_prompt(
-                entry,
-                field_name,
-                pack,
-                request,
-                prompt_overrides=request.prompt_overrides,
-            )
-            estimated_input_tokens += estimate_prompt_tokens(system_prompt) + estimate_prompt_tokens(batch_user_prompt)
-
-            # ── Cancellation check before LLM call ────────────────────────
-            if check_cancelled is not None and await check_cancelled(session, run.id):
-                # Abort mid-execution: return current counts without processing remaining packs
-                return model_call_count, rejected_count, estimated_input_tokens, pack_count, llm_applied
-
-            try:
-                if provider_key == "mock":
-                    raise RuntimeError("mock provider must be patched in tests")
-                from app.services.field_completion_prompt_engineering import resolve_prompt_template
-
-                tpl = resolve_prompt_template(prompt_key, request.prompt_overrides)
-                response = await call_provider(
-                    provider_key,
-                    model=resolved_model,
-                    system_prompt=system_prompt,
-                    user_prompt=batch_user_prompt,
-                    temperature=request.temperature,
-                    max_tokens=request.max_tokens,
-                    response_schema=tpl.output_schema_json or None,
+            if err:
+                rejected_count += 1
+                item = make_item(
+                    run.id, request.target_type.value, tid, upd_field,
+                    old_value=get_field_value(target, upd_field),
+                    status=ItemStatus.skipped_invalid_field,
+                    suggested=upd.get("value"), error_message=err,
+                    reasoning_summary=format_reasoning_with_consistency(upd),
                 )
-                model_call_count += 1
-                if response.parsed_json is None and response.raw_text:
-                    parsed = parse_field_completion_provider_response(response.raw_text)
-                elif response.parsed_json is not None:
-                    parsed = parse_field_completion_provider_response(response.parsed_json)
-                else:
-                    raise ValueError("empty provider response")
-            except Exception as exc:
-                logger.exception("batch field completion failed field=%s", field_name)
-                for rec in pack:
-                    tid_str = rec.get("target_id")
-                    if not tid_str or tid_str not in target_map:
-                        continue
-                    tid, target = target_map[tid_str]
-                    errors.append(f"target {tid} field {field_name}: {exc}")
-                    item = make_item(
-                        run.id,
-                        request.target_type.value,
-                        tid,
-                        field_name,
-                        old_value=get_field_value(target, field_name),
-                        status=ItemStatus.failed,
-                        error_message=str(exc),
-                        reasoning_summary=f"prompt_key={prompt_key}",
-                    )
-                    session.add(item)
-                    items.append(item)
+                session.add(item)
+                items.append(item)
                 continue
 
-            # Inject field_name into each update before validation (LLM may omit it)
-            raw_updates = parsed.get("field_updates", [])
-            for u in raw_updates:
-                if isinstance(u, dict) and "field_name" not in u:
-                    u["field_name"] = field_name
-
-            validated = validate_field_updates(entry, raw_updates)
-            handled_targets: set[str] = set()
-            for upd, err in validated:
-                upd_field = upd.get("field_name", field_name)
-                tid_raw = upd.get("target_id")
-                if tid_raw is None and len(pack) == 1:
-                    tid_raw = pack[0].get("target_id")
-                tid_key = str(tid_raw) if tid_raw is not None else ""
-                if tid_key not in target_map:
-                    continue
-                tid, target = target_map[tid_key]
-                handled_targets.add(tid_key)
-                if err or upd_field != field_name:
-                    err = err or f"expected field_name={field_name}, got {upd_field}"
-                    rejected_count += 1
-                    item = make_item(
-                        run.id,
-                        request.target_type.value,
-                        tid,
-                        field_name,
-                        old_value=get_field_value(target, field_name),
-                        status=ItemStatus.skipped_invalid_field,
-                        suggested=upd.get("value"),
-                        error_message=err,
-                        reasoning_summary=format_reasoning_with_consistency(upd),
-                    )
-                    session.add(item)
-                    items.append(item)
-                    continue
-
-                value = upd.get("value")
-                accept, reject_reason, quality_warnings = validate_field_value_quality(field_name, value)
-                if quality_warnings:
-                    warnings.extend(quality_warnings)
-                if not accept:
-                    rejected_count += 1
-                    item = make_item(
-                        run.id,
-                        request.target_type.value,
-                        tid,
-                        field_name,
-                        old_value=get_field_value(target, field_name),
-                        status=ItemStatus.skipped_invalid_field,
-                        suggested=value,
-                        error_message=reject_reason,
-                        reasoning_summary=format_reasoning_with_consistency(upd),
-                    )
-                    session.add(item)
-                    items.append(item)
-                    continue
-
-                confidence = upd.get("confidence")
-                try:
-                    if confidence is not None:
-                        confidence = max(0.0, min(1.0, float(confidence)))
-                except (TypeError, ValueError):
-                    confidence = None
-
-                old_value = get_field_value(target, field_name)
-                if value is None or is_empty_value(value):
-                    item = make_item(
-                        run.id,
-                        request.target_type.value,
-                        tid,
-                        field_name,
-                        old_value=old_value,
-                        status=ItemStatus.suggested,
-                        suggested=value,
-                        confidence=confidence,
-                        evidence_text=upd.get("evidence_text"),
-                        reasoning_summary=format_reasoning_with_consistency(upd),
-                        uncertainty_reason=upd.get("uncertainty_reason"),
-                    )
-                    session.add(item)
-                    items.append(item)
-                    continue
-
-                status = apply_field_update(
-                    target,
-                    field_name,
-                    value,
-                    overwrite_policy=request.overwrite_policy,
-                    create_mirror_updates=request.create_mirror_updates,
-                    entry=entry,
-                    run_id=run.id,
-                    confidence=confidence,
-                    resolved_model=resolved_model,
-                )
-                if status in (ItemStatus.applied, ItemStatus.applied_direct, ItemStatus.applied_overlay):
-                    llm_applied += 1
-                reasoning = format_reasoning_with_consistency(upd)
-                if reasoning:
-                    reasoning = f"prompt_key={prompt_key} | {reasoning}"
-                else:
-                    reasoning = f"prompt_key={prompt_key}"
+            value = upd.get("value")
+            accept, reject_reason, quality_warnings = validate_field_value_quality(upd_field, value)
+            if quality_warnings:
+                warnings.extend(quality_warnings)
+            if not accept:
+                rejected_count += 1
                 item = make_item(
-                    run.id,
-                    request.target_type.value,
-                    tid,
-                    field_name,
-                    old_value=old_value,
-                    status=status,
-                    suggested=value,
-                    applied=value if status in (
-                        ItemStatus.applied,
-                        ItemStatus.applied_direct,
-                        ItemStatus.applied_overlay,
-                    ) else None,
-                    confidence=confidence,
+                    run.id, request.target_type.value, tid, upd_field,
+                    old_value=get_field_value(target, upd_field),
+                    status=ItemStatus.skipped_invalid_field,
+                    suggested=value, error_message=reject_reason,
+                    reasoning_summary=format_reasoning_with_consistency(upd),
+                )
+                session.add(item)
+                items.append(item)
+                continue
+
+            confidence = upd.get("confidence")
+            try:
+                if confidence is not None:
+                    confidence = max(0.0, min(1.0, float(confidence)))
+            except (TypeError, ValueError):
+                confidence = None
+
+            old_value = get_field_value(target, upd_field)
+            if value is None or is_empty_value(value):
+                item = make_item(
+                    run.id, request.target_type.value, tid, upd_field,
+                    old_value=old_value, status=ItemStatus.suggested,
+                    suggested=value, confidence=confidence,
                     evidence_text=upd.get("evidence_text"),
-                    reasoning_summary=reasoning,
+                    reasoning_summary=format_reasoning_with_consistency(upd),
                     uncertainty_reason=upd.get("uncertainty_reason"),
                 )
                 session.add(item)
                 items.append(item)
+                continue
 
-            for rec in pack:
-                tid_str = str(rec.get("target_id"))
-                if tid_str in handled_targets:
-                    continue
-                tid, target = target_map[tid_str]
-                rejected_count += 1
-                item = make_item(
-                    run.id,
-                    request.target_type.value,
-                    tid,
-                    field_name,
-                    old_value=get_field_value(target, field_name),
-                    status=ItemStatus.skipped_invalid_field,
-                    error_message=f"no field_update returned for target {tid_str}",
-                    reasoning_summary=f"prompt_key={prompt_key}",
-                )
-                session.add(item)
-                items.append(item)
+            status = apply_field_update(
+                target, upd_field, value,
+                overwrite_policy=request.overwrite_policy,
+                create_mirror_updates=request.create_mirror_updates,
+                entry=entry, run_id=run.id,
+                confidence=confidence, resolved_model=resolved_model,
+            )
+            if status in (ItemStatus.applied, ItemStatus.applied_direct, ItemStatus.applied_overlay):
+                llm_applied += 1
+            reasoning = format_reasoning_with_consistency(upd)
+            reasoning = f"prompt_key=multi_field_batch | {reasoning}" if reasoning else "prompt_key=multi_field_batch"
+            item = make_item(
+                run.id, request.target_type.value, tid, upd_field,
+                old_value=old_value, status=status, suggested=value,
+                applied=value if status in (ItemStatus.applied, ItemStatus.applied_direct, ItemStatus.applied_overlay) else None,
+                confidence=confidence, evidence_text=upd.get("evidence_text"),
+                reasoning_summary=reasoning, uncertainty_reason=upd.get("uncertainty_reason"),
+            )
+            session.add(item)
+            items.append(item)
 
-            # ── Incremental progress update after each pack ───────────────
-            processed_packs += 1
-            # Count live stats from items list (covers both deterministic + LLM phases)
-            live_applied = sum(1 for i in items if getattr(i, 'update_status', None) in ('applied_direct', 'applied_overlay'))
-            live_skipped = sum(1 for i in items if getattr(i, 'update_status', None) in ('skipped_existing_value', 'skipped_readonly_field', 'skipped_invalid_field'))
-            run.summary_json = to_jsonable({
-                **(run.summary_json or {}),
-                "total_packs": total_packs,
-                "processed_packs": processed_packs,
-                "current_field": field_name,
-                "processed_items": len(items),
-                "model_call_count": model_call_count,
-                "skipped_existing": live_skipped,
-                "llm_applied": live_applied,
-            })
-            flag_modified(run, "summary_json")
-            await session.commit()
+        # Mark targets not handled in LLM response
+        for rec in pack:
+            tid_str = str(rec.get("target_id"))
+            if tid_str not in target_map:
+                continue
+            tid, target = target_map[tid_str]
+            handled = handled_targets.get(tid_str, set())
+            for fname in rec.get("fields", []):
+                if fname not in handled:
+                    rejected_count += 1
+                    item = make_item(
+                        run.id, request.target_type.value, tid, fname,
+                        old_value=get_field_value(target, fname),
+                        status=ItemStatus.skipped_invalid_field,
+                        error_message=f"no field_update for target {tid_str} field {fname}",
+                        reasoning_summary="prompt_key=multi_field_batch",
+                    )
+                    session.add(item)
+                    items.append(item)
+
+        # Write after each pack
+        processed_packs += 1
+        live_applied = sum(1 for i in items if getattr(i, 'update_status', None) in ('applied_direct', 'applied_overlay'))
+        live_skipped = sum(1 for i in items if getattr(i, 'update_status', None) in ('skipped_existing_value', 'skipped_readonly_field', 'skipped_invalid_field'))
+        run.summary_json = to_jsonable({
+            **(run.summary_json or {}),
+            "total_packs": total_packs,
+            "processed_packs": processed_packs,
+            "current_field": "multi_field",
+            "processed_items": len(items),
+            "model_call_count": model_call_count,
+            "skipped_existing": live_skipped,
+            "llm_applied": live_applied,
+        })
+        flag_modified(run, "summary_json")
+        await session.commit()
 
     return model_call_count, rejected_count, estimated_input_tokens, pack_count, llm_applied
