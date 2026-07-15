@@ -160,7 +160,7 @@ async def search_circuits(
         JOIN mirror_region_circuits c ON c.id = cf.circuit_id
         WHERE ({where_clause})
           AND c.granularity_level = :granularity
-        LIMIT 200
+        LIMIT 500
     """)
     params["granularity"] = body.granularity_level
     params["sim_q"] = " ".join(body.functions)
@@ -222,8 +222,6 @@ async def search_circuits(
     threshold = 12 if body.mode == "focused" else 3
     scored = [d for d in scored if d["relevance"] >= threshold]
     scored.sort(key=lambda d: d["relevance"], reverse=True)
-    if body.mode == "focused":
-        scored = scored[:50]  # cap focused for UI performance
 
     # Build CircuitResult list
     circuits = []
