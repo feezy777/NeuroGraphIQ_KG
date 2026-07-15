@@ -126,6 +126,13 @@ export function SymptomQueryPage() {
     <div className="page">
       <PageHeader title="症状回路查询" description="输入症状，AI 转化为标准功能并检索关联回路" readonly />
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+        {(phase === 'idle' || phase === 'chatting') && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            <span style={{ fontSize: 12, color: '#888', lineHeight: '24px' }}>模式：</span>
+            <button className={`btn btn-sm ${mode === 'focused' ? 'btn-primary' : ''}`} onClick={() => setMode('focused')}>🎯 聚焦</button>
+            <button className={`btn btn-sm ${mode === 'exploratory' ? 'btn-primary' : ''}`} onClick={() => setMode('exploratory')}>🔍 探索</button>
+          </div>
+        )}
         {phase !== 'results' && (
           <>
             {messages.length > 0 && (
@@ -154,13 +161,6 @@ export function SymptomQueryPage() {
                   <button className="btn btn-primary btn-sm" onClick={handleConfirm}>确认并开始分析</button>
                   <button className="btn btn-sm" onClick={handleContinueChat}>继续对话</button>
                 </div>
-              </div>
-            )}
-            {(phase === 'idle' || phase === 'chatting') && (
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <span style={{ fontSize: 12, color: '#888', lineHeight: '24px' }}>模式：</span>
-                <button className={`btn btn-sm ${mode === 'focused' ? 'btn-primary' : ''}`} onClick={() => setMode('focused')}>🎯 聚焦</button>
-                <button className={`btn btn-sm ${mode === 'exploratory' ? 'btn-primary' : ''}`} onClick={() => setMode('exploratory')}>🔍 探索</button>
               </div>
             )}
             {phase !== 'summarizing' && (
