@@ -167,9 +167,26 @@ async def _resolve_pair(
     )
 
 
-def _name_tokens(text: str) -> list[str]:
+# Generic anatomical / connector words that carry no distinguishing signal when
+# matching a circuit *name* against region labels. Matching on these produces
+# false positives (e.g. "…_nucleus_…" matching "Anterior hypothalamic nucleus").
+_GENERIC_NAME_TOKENS = frozenset({
+    "pathway", "circuit", "loop", "network", "tract", "projection", "projections",
+    "connection", "connections", "system", "from", "and", "via", "the", "of", "in",
+    "into", "onto", "between", "layer", "part", "region", "regions", "area", "areas",
+    "nucleus", "nuclei", "cortex", "cortical", "subcortical", "zone", "division",
+    "complex", "dorsal", "ventral", "medial", "lateral", "anterior", "posterior",
+    "superior", "inferior", "rostral", "caudal", "left", "right", "deep", "superficial",
+    "input", "output", "relay", "hub", "primary", "secondary", "association",
+})
+
+
+def _name_tokens(text: str, *, drop_generic: bool = False) -> list[str]:
     text = text.lower().replace("_", " ").replace("-", " ")
-    return [t for t in re.split(r"[\s,;/]+", text) if len(t) > 2]
+    tokens = [t for t in re.split(r"[\s,;/]+", text) if len(t) > 2]
+    if drop_generic:
+        tokens = [t for t in tokens if t not in _GENERIC_NAME_TOKENS]
+    return tokens
 
 
 async def _match_regions_by_name(
@@ -179,7 +196,7 @@ async def _match_regions_by_name(
     source_atlas: str | None,
     limit: int = 2,
 ) -> list[tuple[uuid.UUID, str]]:
-    tokens = _name_tokens(text)
+    tokens = _name_tokens(text, drop_generic=True)
     if len(tokens) < 2:
         return []
     q = select(CandidateBrainRegion)
@@ -204,6 +221,75 @@ async def _match_regions_by_name(
         if len(out) >= limit:
             break
     return out
+
+
+_STEP_START_ROLES = frozenset({"source", "start", "input", "origin", "afferent"})
+_STEP_END_ROLES = frozenset({"target", "output", "end", "sink", "efferent", "terminal"})
+
+
+async def _resolve_from_circuit_steps(
+    session: AsyncSession,
+    circuit_id: uuid.UUID,
+    *,
+    source_atlas: str | None,
+    evidence: dict[str, Any],
+) -> CanonicalRegionResolution | None:
+    """Resolve start/end from mirror_circuit_steps region assignments (ordered, role-aware).
+
+    Steps carry real region_candidate_ids grounded during extraction, so they are a far
+    more reliable source than crude circuit_name token matching. Returns None when fewer
+    than two distinct step regions exist (caller falls through to other strategies).
+    """
+    from app.models.mirror_macro_clinical import MirrorCircuitStep
+
+    stmt = (
+        select(MirrorCircuitStep)
+        .where(MirrorCircuitStep.circuit_id == circuit_id)
+        .order_by(MirrorCircuitStep.step_order)
+    )
+    steps = list((await session.execute(stmt)).scalars().all())
+    rows: list[tuple[int, uuid.UUID, str]] = []
+    for idx, s in enumerate(steps):
+        cid = _parse_uuid(getattr(s, "region_candidate_id", None))
+        if cid is None:
+            continue
+        order = getattr(s, "step_order", None)
+        try:
+            order = int(order) if order is not None else idx
+        except (TypeError, ValueError):
+            order = idx
+        role = str(getattr(s, "role", "") or "").strip().lower()
+        rows.append((order, cid, role))
+
+    if len(rows) < 2:
+        return None
+    rows.sort(key=lambda x: x[0])
+
+    start = next((r for r in rows if r[2] in _STEP_START_ROLES), rows[0])
+    end = next((r for r in reversed(rows) if r[2] in _STEP_END_ROLES), rows[-1])
+    if start[1] == end[1]:
+        # Role heuristic collapsed to one region — fall back to first/last by order.
+        start, end = rows[0], rows[-1]
+    if start[1] == end[1]:
+        return None
+
+    evidence["region_candidate_ids"] = [str(r[1]) for r in rows]
+    evidence["region_roles"] = [r[2] for r in rows]
+    evidence["region_source"] = "mirror_circuit_steps"
+    used_roles = start[2] in _STEP_START_ROLES or end[2] in _STEP_END_ROLES
+    extra = [] if used_roles else [
+        "start/end inferred from step_order; steps did not mark explicit source/target roles"
+    ]
+    return await _resolve_pair(
+        session,
+        start[1],
+        end[1],
+        source_atlas=source_atlas,
+        method="circuit_step_regions",
+        base_confidence=0.8,
+        extra_warnings=extra,
+        evidence=evidence,
+    )
 
 
 async def resolve_circuit_canonical_regions(
@@ -276,6 +362,15 @@ async def resolve_circuit_canonical_regions(
             extra_warnings=extra,
             evidence=evidence,
         )
+
+    # Priority 1.5: mirror_circuit_steps region assignments (ordered, role-aware).
+    # These are grounded region_candidate_ids and far more reliable than name matching.
+    if circuit_id is not None:
+        step_res = await _resolve_from_circuit_steps(
+            session, circuit_id, source_atlas=source_atlas, evidence=evidence
+        )
+        if step_res is not None:
+            return step_res
 
     # Priority 2: involved_region_candidate_ids
     involved = _extract_involved_ids(payload)

@@ -257,6 +257,7 @@ class MirrorEvidenceRecord(Base):
     llm_item_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("llm_extraction_items.id", ondelete="SET NULL"), nullable=True
     )
+    granularity_level: Mapped[str | None] = mapped_column(String(64), nullable=True)
     evidence_type: Mapped[str] = mapped_column(String(64), nullable=False, default="llm_explanation")
     evidence_text: Mapped[str] = mapped_column(Text, nullable=False)
     source_document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

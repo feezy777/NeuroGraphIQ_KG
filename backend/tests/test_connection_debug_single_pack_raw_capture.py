@@ -11,6 +11,7 @@ from app.models.llm_extraction import LlmExtractionRun
 from app.schemas.llm_composite_workflow import CompositeStepStatus
 from app.services import llm_composite_workflow_service as composite_svc
 from app.services.llm_connection_extraction_service import (
+    DEFAULT_PAIRS_PER_PACK_OVERRIDE,
     compute_pairs,
     run_same_granularity_connection_extraction,
 )
@@ -295,14 +296,15 @@ def test_raw_responses_debug_endpoint_returns_pack_summaries():
 
 
 def test_planned_vs_executed_pack_count_with_many_pairs():
-    candidates = _many_candidates(10)
+    # Enough candidates that pairs span >= 2 packs at the run's actual pack size.
+    candidates = _many_candidates(15)
     pairs = compute_pairs(
         [c.id for c in candidates],
         pair_strategy="all_pairs",
         center_candidate_id=None,
     )
     pair_records = [{"pair_id": f"p{i}", "source_region_candidate_id": candidates[0].id, "target_region_candidate_id": candidates[1].id} for i in range(len(pairs))]
-    packs = pack_pair_records(pair_records, pairs_per_pack=DEFAULT_PAIRS_PER_PACK)
+    packs = pack_pair_records(pair_records, pairs_per_pack=DEFAULT_PAIRS_PER_PACK_OVERRIDE)
     assert len(packs) >= 2
     mock_provider = AsyncMock()
     _wire_complete_text(mock_provider)

@@ -644,6 +644,98 @@ def test_invalid_field_function_association_skipped(monkeypatch):
     assert any(f.update_status == ItemStatus.skipped_invalid_field for f in resp.field_updates)
 
 
+def test_circuit_bundle_malformed_circuit_string_does_not_crash(monkeypatch):
+    """Regression: when the LLM returns `circuit` as a STRING (not an object), the
+    circuit bundle must NOT crash the whole run with `'str' object has no attribute
+    'get'`. The bad circuit is skipped/recorded and the run still returns."""
+    circuit = _circuit(normalized_payload_json={})
+    session = _mock_session({circuit.id: circuit})
+    response = LlmProviderResponse(
+        provider="deepseek",
+        model="deepseek-chat",
+        raw_text='{"circuit":"just a string not an object","steps":["also a string"]}',
+        parsed_json={"circuit": "just a string not an object", "steps": ["also a string"]},
+        usage=LlmProviderUsage(),
+        finish_reason="stop",
+        request_payload_redacted={},
+        response_payload={},
+        latency_ms=1,
+    )
+    _patch_mock_provider(monkeypatch, response)
+    req = UniversalFieldCompletionRequest(
+        target_type=TargetType.circuit,
+        target_ids=[circuit.id],
+        dry_run=False,
+        create_mirror_updates=True,
+    )
+    # Must not raise AttributeError; run completes and returns a response.
+    resp = asyncio.run(run_universal_field_completion(session, req))
+    assert resp is not None
+
+
+def test_circuit_bundle_strength_parses_noisy_number(monkeypatch):
+    """circuit_strength must be extracted even when the LLM wraps the number in text
+    (e.g. '0.75 (high impact)') rather than returning a bare number."""
+    circuit = _circuit(normalized_payload_json={})
+    session = _mock_session({circuit.id: circuit})
+    response = LlmProviderResponse(
+        provider="deepseek",
+        model="deepseek-chat",
+        raw_text='0.75 (high impact)',
+        parsed_json={"circuit": {"name_cn": "测试回路"}, "steps": []},
+        usage=LlmProviderUsage(),
+        finish_reason="stop",
+        request_payload_redacted={},
+        response_payload={},
+        latency_ms=1,
+    )
+    _patch_mock_provider(monkeypatch, response)
+    req = UniversalFieldCompletionRequest(
+        target_type=TargetType.circuit,
+        target_ids=[circuit.id],
+        dry_run=False,
+        create_mirror_updates=True,
+    )
+    asyncio.run(run_universal_field_completion(session, req))
+    overlay = circuit.normalized_payload_json.get("formal_field_overlay", {})
+    assert overlay.get("circuit_strength") == 0.75
+
+
+_VALID_CIRCUIT_TYPES_TEST = {
+    'sensory_circuit', 'motor_circuit', 'limbic_circuit', 'cognitive_control_circuit',
+    'default_mode_related', 'salience_related', 'memory_related', 'reward_related',
+    'language_related', 'attention_related', 'uncertain_circuit', 'unknown',
+}
+
+
+def test_circuit_bundle_coerces_invalid_circuit_class(monkeypatch):
+    """An LLM circuit_class not in the DB enum must be coerced to a valid circuit_type,
+    otherwise the CHECK constraint chk_mirror_circuit_type raises on flush and poisons
+    the whole run."""
+    circuit = _circuit(circuit_type="", normalized_payload_json={})
+    session = _mock_session({circuit.id: circuit})
+    response = LlmProviderResponse(
+        provider="deepseek",
+        model="deepseek-chat",
+        raw_text='{"circuit":{"circuit_class":"temporal_entorhinal_cerebellar"},"steps":[]}',
+        parsed_json={"circuit": {"circuit_class": "temporal_entorhinal_cerebellar"}, "steps": []},
+        usage=LlmProviderUsage(),
+        finish_reason="stop",
+        request_payload_redacted={},
+        response_payload={},
+        latency_ms=1,
+    )
+    _patch_mock_provider(monkeypatch, response)
+    req = UniversalFieldCompletionRequest(
+        target_type=TargetType.circuit,
+        target_ids=[circuit.id],
+        dry_run=False,
+        create_mirror_updates=True,
+    )
+    asyncio.run(run_universal_field_completion(session, req))
+    assert circuit.circuit_type in _VALID_CIRCUIT_TYPES_TEST
+
+
 def test_invalid_field_promotion_status_skipped(monkeypatch):
     """promotion_status is readonly ? skipped_invalid_field at validation."""
     proj = _projection()
@@ -1713,6 +1805,54 @@ def test_resolve_circuit_regions_sort_order():
     assert res.start_region_id == str(start_c.id)
     assert res.end_region_id == str(end_c.id)
     assert any("sort_order" in w for w in res.warnings)
+
+
+def test_resolve_circuit_regions_from_steps_role_aware():
+    """When mirror_circuit_regions is empty, resolve start/end from mirror_circuit_steps
+    using step roles (source→start, target→end), NOT crude circuit_name token matching."""
+    from app.services.canonical_region_resolver import resolve_circuit_canonical_regions
+
+    # circuit_name would name-match the generic word "nucleus" against the distractor
+    circuit = _circuit(circuit_name="gustatory pathway from nucleus to cortex")
+    start_c = _candidate(en_name="Spinal nucleus of the trigeminal, oral part")
+    mid_c = _candidate(en_name="left thalamus proper")
+    end_c = _candidate(en_name="Orbital area")
+    distractor = _candidate(en_name="Anterior hypothalamic nucleus")
+    candidates = {start_c.id: start_c, mid_c.id: mid_c, end_c.id: end_c, distractor.id: distractor}
+
+    # Roles deliberately out of step_order sequence to exercise role precedence:
+    # first-by-order is the relay, so a naive first/last pick would be wrong.
+    steps = [
+        _circuit_step(circuit.id, step_order=1, role="relay", region_candidate_id=mid_c.id),
+        _circuit_step(circuit.id, step_order=2, role="source", region_candidate_id=start_c.id),
+        _circuit_step(circuit.id, step_order=3, role="target", region_candidate_id=end_c.id),
+    ]
+
+    session = AsyncMock()
+
+    async def _get(model, tid):
+        if model is CandidateBrainRegion:
+            return candidates.get(tid)
+        return {circuit.id: circuit}.get(tid)
+
+    async def _execute(stmt):
+        s = str(stmt)
+        if "mirror_circuit_regions" in s:
+            return MagicMock(scalars=MagicMock(return_value=MagicMock(all=lambda: [])))
+        if "mirror_circuit_steps" in s:
+            return MagicMock(scalars=MagicMock(return_value=MagicMock(all=lambda: steps)))
+        if "final_brain_regions" in s:
+            return MagicMock(scalar_one_or_none=lambda: None)
+        return MagicMock(scalars=MagicMock(return_value=MagicMock(all=lambda: [])))
+
+    session.get = AsyncMock(side_effect=_get)
+    session.execute = _execute
+
+    res = asyncio.run(resolve_circuit_canonical_regions(session, circuit))
+    assert res.method == "circuit_step_regions"
+    assert res.start_region_id == str(start_c.id)  # role=source wins over first-by-order
+    assert res.end_region_id == str(end_c.id)      # role=target
+    assert res.start_region_id != str(distractor.id)  # name-match distractor ignored
 
 
 def test_resolve_region_candidate_to_final_brain_region():

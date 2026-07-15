@@ -14,6 +14,7 @@ import {
 } from '../api/endpoints'
 import { ApiError } from '../api/client'
 import { readSessionIds, useSessionIds } from '../hooks/useSessionIds'
+import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
 import { readHashQueryParams, resolvePipelineFilters, pipelineReturnUrl } from '../utils/pipelineNavigation'
 import { useI18n } from '../i18n-context'
 
@@ -27,6 +28,7 @@ interface ReviewDecisionState {
 
 export function HumanReviewPage() {
   const { t } = useI18n()
+  const { granularity } = useGlobalGranularity()
   const initial = useMemo(() => {
     const q = readHashQueryParams()
     const f = resolvePipelineFilters()
@@ -51,12 +53,12 @@ export function HumanReviewPage() {
   const [decidingId, setDecidingId] = useState<string | null>(null)
 
   const { data: pending, loading: pendingLoading } = useData(
-    () => fetchPendingReviews({ limit: 100 }),
-    [tick],
+    () => fetchPendingReviews({ limit: 100, granularity_level: granularity || undefined }),
+    [tick, granularity],
   )
   const { data: records, loading: recordsLoading } = useData(
-    () => fetchReviewRecords({ batch_id: queryBatchId || undefined, action: actionFilter || undefined, limit: 100 }),
-    [queryBatchId, actionFilter, tick],
+    () => fetchReviewRecords({ batch_id: queryBatchId || undefined, action: actionFilter || undefined, limit: 100, granularity_level: granularity || undefined }),
+    [queryBatchId, actionFilter, tick, granularity],
   )
 
   useEffect(() => {

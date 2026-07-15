@@ -116,7 +116,8 @@ SAME_GRANULARITY_CONNECTION_COMPLETION_V1 = PromptTemplateDefaults(
         "- 每个 pair 必须有 pair_id；\n"
         "- 无连接时写入 no_connections；\n"
         "- 不要把完整 candidate object 或 attributes/raw JSON 复制到输出；\n"
-        "- evidence_level 只能是 low / moderate / high / insufficient。\n\n"
+        "- evidence_level 只能是 low / moderate / high / insufficient；\n"
+        "- strength_score 与 confidence_score 必须给出 0.0-1.0 的真实评估，不要一律填 0.0。\n\n"
         "候选 pair（compact context）：\n{{pairs_json}}\n\n"
         "输出 JSON schema（必须严格使用这些字段名和值）：\n"
         "{\n"
@@ -133,8 +134,8 @@ SAME_GRANULARITY_CONNECTION_COMPLETION_V1 = PromptTemplateDefaults(
         '      "name_cn": "{起始脑区中文名} → {终止脑区中文名}连接",  # 推荐生成，便于人工审核\n'
         '      "projection_type": "anatomical|functional|structural|unknown",  # 不要用 connection_type\n'
         '      "directionality": "directed|bidirectional|unknown",\n'
-        '      "strength_score": 0.0,\n'
-        '      "confidence_score": 0.0,\n'
+        '      "strength_score": 0.0,    # 0.0-1.0 连接强度：弱0.1-0.3/中0.4-0.6/强0.7-1.0，按解剖证据给真实值，勿留0.0\n'
+        '      "confidence_score": 0.0,   # 0.0-1.0 该连接判断的置信度，按证据充分度给真实值\n'
         '      "evidence_level": "low|moderate|high|insufficient",\n'
         '      "description": "...",\n'
         '      "evidence_text": "...",\n'

@@ -397,6 +397,158 @@ _CIRCUIT_STEPS_USER = (
     "Output all {step_count} steps as a JSON array."
 )
 
+# ── Circuit-level text fields (Call 3 fallback) ─────────────────────────
+# The combined bundle prompt frequently returns an empty/unusable `circuit` object
+# (large nested JSON), so circuit-level fields like name_cn never get filled. This
+# focused call fills only the requested text fields; applied with fill_missing_only
+# so existing values are preserved.
+_CIRCUIT_FIELDS_SYSTEM = (
+    "You are a neuroscientist annotating brain circuit metadata. "
+    "Given a brain circuit, output ONLY a JSON object with the requested fields. "
+    "name_en: concise English circuit name; name_cn: Chinese circuit name (中文名); "
+    "circuit_class: functional classification (e.g. sensory_circuit, motor_circuit, "
+    "limbic_circuit, cognitive_control_circuit, memory_related); "
+    "description: one-sentence functional description. "
+    "No markdown, no explanation, no code fences."
+)
+
+_CIRCUIT_FIELDS_USER = (
+    "Circuit: {name}\nType: {type}\nDescription: {desc}\nFunction: {func}\n\n"
+    "Output ONLY a JSON object with these fields: {fields}\n"
+    'Example: {{"name_en":"...","name_cn":"...","circuit_class":"...","description":"..."}}'
+)
+
+
+# Values allowed by the DB CHECK constraint chk_mirror_circuit_type. The bundle LLM
+# returns free-text circuit_class, which must be coerced before writing to circuit_type
+# (an out-of-range value raises CheckViolation on flush and poisons the whole run).
+_VALID_CIRCUIT_TYPES = frozenset({
+    'sensory_circuit', 'motor_circuit', 'limbic_circuit', 'cognitive_control_circuit',
+    'default_mode_related', 'salience_related', 'memory_related', 'reward_related',
+    'language_related', 'attention_related', 'uncertain_circuit', 'unknown',
+})
+
+_CIRCUIT_TYPE_KEYWORDS = (
+    ('sensor', 'sensory_circuit'),
+    ('motor', 'motor_circuit'),
+    ('limbic', 'limbic_circuit'),
+    ('emotion', 'limbic_circuit'),
+    ('cogni', 'cognitive_control_circuit'),
+    ('executive', 'cognitive_control_circuit'),
+    ('control', 'cognitive_control_circuit'),
+    ('default', 'default_mode_related'),
+    ('dmn', 'default_mode_related'),
+    ('salien', 'salience_related'),
+    ('memor', 'memory_related'),
+    ('hippocamp', 'memory_related'),
+    ('reward', 'reward_related'),
+    ('languag', 'language_related'),
+    ('attention', 'attention_related'),
+)
+
+
+def coerce_circuit_type(value: Any) -> str:
+    """Map an LLM circuit_class to a value allowed by chk_mirror_circuit_type."""
+    if value is None:
+        return 'uncertain_circuit'
+    normalized = str(value).strip().lower().replace(' ', '_').replace('-', '_')
+    if normalized in _VALID_CIRCUIT_TYPES:
+        return normalized
+    for keyword, mapped in _CIRCUIT_TYPE_KEYWORDS:
+        if keyword in normalized:
+            return mapped
+    return 'uncertain_circuit'
+
+
+# Values allowed by chk_mirror_circuit_function_status. The bundle LLM tends to emit
+# "proposed", which is NOT allowed and would raise CheckViolation on flush.
+_VALID_FUNCTION_STATUS = frozenset({'active', 'inactive', 'deprecated', 'candidate', 'unknown'})
+
+
+def coerce_function_status(value: Any) -> str:
+    """Map an LLM function status to a value allowed by chk_mirror_circuit_function_status."""
+    if value is None:
+        return 'candidate'
+    normalized = str(value).strip().lower()
+    if normalized in _VALID_FUNCTION_STATUS:
+        return normalized
+    # "proposed" / "suggested" / "llm_*" → candidate; anything else → unknown
+    if 'propos' in normalized or 'suggest' in normalized or 'candidate' in normalized or 'llm' in normalized:
+        return 'candidate'
+    return 'unknown'
+
+
+def _extract_json_array(raw_text: str) -> list | None:
+    """Best-effort parse of a JSON array from possibly fenced/mixed LLM text."""
+    import json as _json
+    import re as _re
+
+    if not raw_text:
+        return None
+    cleaned = raw_text.strip()
+    if cleaned.startswith('```'):
+        cleaned = '\n'.join(l for l in cleaned.split('\n') if not l.startswith('```')).strip()
+    try:
+        parsed = _json.loads(cleaned)
+        return parsed if isinstance(parsed, list) else None
+    except (_json.JSONDecodeError, TypeError):
+        match = _re.search(r'\[.*\]', cleaned, _re.DOTALL)
+        if match:
+            try:
+                parsed = _json.loads(match.group(0))
+                return parsed if isinstance(parsed, list) else None
+            except (_json.JSONDecodeError, TypeError):
+                return None
+    return None
+
+
+# ── Function completion (Call 4) — the bundle's steps[].functions[] is usually empty,
+# so a circuit's existing functions never get their fields filled. This focused call
+# annotates the circuit's functions directly. Only unconstrained columns are written.
+_CIRCUIT_FUNCTIONS_SYSTEM = (
+    "You are a neuroscientist annotating brain-circuit FUNCTIONS. For each function name "
+    "given, infer its fields based on the circuit context and neuroanatomy. "
+    "Output ONLY a JSON array, no markdown, no explanation.\n"
+    "function_domain: cognitive|memory|motor|sensory|emotional|autonomic|other\n"
+    "function_role: execution|modulation|inhibition|gating|integration|other\n"
+    "effect_type: excitatory|inhibitory|modulatory|unknown\n"
+    "function_term_cn: concise Chinese term; description: one-sentence function description.\n"
+    '[{"function_term_en":"<copy from input>","function_term_cn":"...","function_domain":"...",'
+    '"function_role":"...","effect_type":"...","description":"..."}]'
+)
+
+_CIRCUIT_FUNCTIONS_USER = (
+    "Circuit: {name} (type: {type})\nDescription: {desc}\n\n"
+    "Functions to annotate ({count}) — return one object per function, copy function_term_en exactly:\n"
+    "{functions_list}"
+)
+
+
+def _extract_json_object(raw_text: str) -> dict | None:
+    """Best-effort parse of a JSON object from possibly fenced/mixed LLM text."""
+    import json as _json
+    import re as _re
+
+    if not raw_text:
+        return None
+    cleaned = raw_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = "\n".join(
+            l for l in cleaned.split("\n") if not l.startswith("```")
+        ).strip()
+    try:
+        parsed = _json.loads(cleaned)
+        return parsed if isinstance(parsed, dict) else None
+    except (_json.JSONDecodeError, TypeError):
+        match = _re.search(r"\{.*\}", cleaned, _re.DOTALL)
+        if match:
+            try:
+                parsed = _json.loads(match.group(0))
+                return parsed if isinstance(parsed, dict) else None
+            except (_json.JSONDecodeError, TypeError):
+                return None
+    return None
+
 
 async def _build_step_connection_candidates(
     session: AsyncSession,
@@ -700,6 +852,10 @@ async def execute_circuit_bundle_fields(
         # ── Apply circuit fields ─────────────────────────────────────────────
         _circuit_entry = get_registry_entry(TargetType.circuit)
         circuit_data = parsed.get('circuit', {})
+        if not isinstance(circuit_data, dict):
+            # LLM sometimes returns "circuit" as a string/list instead of an object —
+            # coerce to empty dict so this circuit is skipped, never crashing the run.
+            circuit_data = {}
 
         # Fix garbage names: propagate overlay name_en to circuit_name column
         current_col_name = getattr(circuit, 'circuit_name', '') or ''
@@ -718,6 +874,9 @@ async def execute_circuit_bundle_fields(
             value = circuit_data.get(fname)
             if value is None or is_empty_value(value):
                 continue
+            # circuit_class → circuit_type is a constrained column; coerce free-text to a valid enum.
+            if fname == 'circuit_class':
+                value = coerce_circuit_type(value)
             # Force-overwrite garbage names
             _effective_policy = request.overwrite_policy
             if fname in ('name_en', 'name_cn') and not is_empty_value(value):
@@ -742,6 +901,57 @@ async def execute_circuit_bundle_fields(
                 items.append(item)
             except Exception as _e:
                 logger.warning("Circuit bundle: apply circuit field failed cid=%s field=%s: %s", str(cid)[:12], fname, _e)
+
+        # ── Fallback (Call 3): fill circuit-level text fields the bundle missed ──
+        # The combined bundle call often returns an empty `circuit` object, leaving
+        # name_cn / circuit_class / description unfilled. Do a focused call for any
+        # circuit-level field still empty on the target. Applied with fill_missing_only
+        # so existing values are never overwritten.
+        if request.create_mirror_updates and not request.dry_run:
+            needed_fields = [
+                f for f in ('name_en', 'name_cn', 'circuit_class', 'description')
+                if is_empty_value(get_field_value(circuit, f))
+            ]
+            if needed_fields:
+                try:
+                    cf_resp = await call_provider(
+                        provider_key,
+                        model=resolved_model,
+                        system_prompt=_CIRCUIT_FIELDS_SYSTEM,
+                        user_prompt=_CIRCUIT_FIELDS_USER.format(
+                            name=name, type=_type, desc=desc, func=func,
+                            fields=', '.join(needed_fields),
+                        ),
+                        temperature=request.temperature,
+                        max_tokens=600,
+                        response_schema=None,
+                    )
+                    model_call_count += 1
+                    cf_parsed = getattr(cf_resp, 'parsed_json', None)
+                    if not isinstance(cf_parsed, dict):
+                        cf_parsed = _extract_json_object(getattr(cf_resp, 'raw_text', '') or '')
+                    if isinstance(cf_parsed, dict):
+                        for fname in needed_fields:
+                            value = cf_parsed.get(fname)
+                            if value is None or is_empty_value(value):
+                                continue
+                            old_val = get_field_value(circuit, fname)
+                            status = apply_field_update(
+                                circuit, fname, value,
+                                overwrite_policy=request.overwrite_policy,
+                                create_mirror_updates=request.create_mirror_updates,
+                                entry=_circuit_entry, run_id=run.id, resolved_model=resolved_model,
+                            )
+                            _applied_flag = status and 'applied' in str(getattr(status, 'value', status))
+                            if _applied_flag:
+                                llm_applied += 1
+                            item = make_item(run.id, request.target_type.value, cid, fname,
+                                             old_value=old_val, status=status, suggested=value,
+                                             applied=value if _applied_flag else None)
+                            session.add(item)
+                            items.append(item)
+                except Exception as _cf_exc:
+                    logger.warning("Circuit %s: circuit-fields fallback failed: %s", str(cid)[:12], _cf_exc)
 
         # ── Match + backfill region IDs ──────────────────────────────────────
         start_name = circuit_data.get('start_region_name', '')
@@ -863,45 +1073,54 @@ async def execute_circuit_bundle_fields(
                 except Exception as _e:
                     logger.warning("Circuit bundle: step field failed field=%s: %s", fname, _e)
 
-            # Step region matching
-            region_name = sdata.get('region_name', '')
-            if region_name:
-                region_id = await match_region_name(session, region_name)
-                if region_id:
-                    match_step.region_candidate_id = region_id
+            # Step region matching + membership (backend-driven via region matching).
+            # Wrapped so a single step's matching/DB failure never aborts the whole run.
+            try:
+                region_name = sdata.get('region_name', '')
+                region_id = None
+                if region_name:
+                    region_id = await match_region_name(session, region_name)
+                    if region_id:
+                        match_step.region_candidate_id = region_id
 
-            # Connection mapping -> membership (backend-driven via region matching)
-            if match_step.region_candidate_id:
-                await session.flush()  # flush step update before query
-                from app.models.mirror_kg import MirrorRegionConnection
-                from sqlalchemy import select as _sa_select, desc as _sa_desc
-                proj_stmt = (
-                    _sa_select(MirrorRegionConnection)
-                    .where(
-                        (MirrorRegionConnection.source_region_candidate_id == match_step.region_candidate_id)
-                        | (MirrorRegionConnection.target_region_candidate_id == match_step.region_candidate_id)
+                # Connection mapping -> membership (backend-driven via region matching)
+                if match_step.region_candidate_id:
+                    await session.flush()  # flush step update before query
+                    from app.models.mirror_kg import MirrorRegionConnection
+                    from sqlalchemy import select as _sa_select, desc as _sa_desc
+                    proj_stmt = (
+                        _sa_select(MirrorRegionConnection)
+                        .where(
+                            (MirrorRegionConnection.source_region_candidate_id == match_step.region_candidate_id)
+                            | (MirrorRegionConnection.target_region_candidate_id == match_step.region_candidate_id)
+                        )
+                        .order_by(_sa_desc(MirrorRegionConnection.confidence))
+                        .limit(5)
                     )
-                    .order_by(_sa_desc(MirrorRegionConnection.confidence))
-                    .limit(5)
-                )
-                proj_result = await session.execute(proj_stmt)
-                best_proj = proj_result.scalars().first()
-                if best_proj:
-                    conn_conf = float(getattr(best_proj, 'confidence', 0.5) or 0.5)
-                    is_suspected = conn_conf < 0.5
-                    await _upsert_membership(
-                        session, cid, match_step.id, best_proj.id,
-                        verification_status='unverified' if is_suspected else 'circuit_supported',
-                        confidence=conn_conf,
-                        evidence_text=f"Backend-matched via region={str(region_id)[:12]}",
-                    )
+                    proj_result = await session.execute(proj_stmt)
+                    best_proj = proj_result.scalars().first()
+                    if best_proj:
+                        conn_conf = float(getattr(best_proj, 'confidence', 0.5) or 0.5)
+                        is_suspected = conn_conf < 0.5
+                        await _upsert_membership(
+                            session, cid, match_step.id, best_proj.id,
+                            verification_status='unverified' if is_suspected else 'circuit_supported',
+                            confidence=conn_conf,
+                            evidence_text=f"Backend-matched via region={str(region_id)[:12]}",
+                        )
+            except Exception as _rm_exc:
+                logger.warning("Circuit bundle: region/membership step failed cid=%s: %s", str(cid)[:12], _rm_exc)
 
             # Functions
             for fdata in sdata.get('functions', []):
+                if not isinstance(fdata, dict):
+                    continue
                 for fname in ('function_term_en', 'function_term_cn', 'function_domain', 'function_role', 'effect_type', 'confidence_score', 'evidence_level', 'description', 'source_db', 'status', 'projection_id', 'projection_name'):
                     value = fdata.get(fname)
                     if value is None or is_empty_value(value):
                         continue
+                    if fname == 'status':
+                        value = coerce_function_status(value)
                     # Find matching existing function or create new placeholder
                     target_func = next((f for f in funcs if getattr(f, 'function_term_en', '') == fdata.get('function_term_en', '')), None)
                     if target_func:
@@ -917,24 +1136,113 @@ async def execute_circuit_bundle_fields(
                         except Exception as _e:
                             logger.warning("Circuit bundle: func field failed field=%s: %s", fname, _e)
 
+        # ── Function completion (Call 4) — the bundle rarely embeds functions in steps,
+        # so annotate the circuit's existing functions directly. Only unconstrained
+        # columns are written (function_term_cn/domain/role/effect_type/description), so
+        # the writes always persist (no CHECK constraint on these columns).
+        _fn_fields = ('function_term_cn', 'function_domain', 'function_role', 'effect_type', 'description')
+        if request.create_mirror_updates and not request.dry_run and funcs:
+            _need_fn = [
+                f for f in funcs
+                if getattr(f, 'function_term_en', None)
+                and any(is_empty_value(get_field_value(f, _ff)) for _ff in _fn_fields)
+            ]
+            if _need_fn:
+                try:
+                    _flist = '\n'.join(
+                        f"  - {getattr(f, 'function_term_en', '') or '?'}" for f in _need_fn
+                    )
+                    _fn_resp = await call_provider(
+                        provider_key, model=resolved_model,
+                        system_prompt=_CIRCUIT_FUNCTIONS_SYSTEM,
+                        user_prompt=_CIRCUIT_FUNCTIONS_USER.format(
+                            name=name, type=_type, desc=desc,
+                            count=len(_need_fn), functions_list=_flist,
+                        ),
+                        temperature=request.temperature,
+                        max_tokens=max(800, len(_need_fn) * 200),
+                        response_schema=None,
+                    )
+                    model_call_count += 1
+                    _fn_parsed = getattr(_fn_resp, 'parsed_json', None)
+                    if not isinstance(_fn_parsed, list):
+                        _fn_parsed = _extract_json_array(getattr(_fn_resp, 'raw_text', '') or '')
+                    if isinstance(_fn_parsed, list):
+                        for _fd in _fn_parsed:
+                            if not isinstance(_fd, dict):
+                                continue
+                            _tf = next(
+                                (f for f in _need_fn
+                                 if getattr(f, 'function_term_en', '') == _fd.get('function_term_en', '')),
+                                None,
+                            )
+                            if _tf is None:
+                                continue
+                            for _ff in _fn_fields:
+                                _val = _fd.get(_ff)
+                                if _val is None or is_empty_value(_val):
+                                    continue
+                                try:
+                                    _old = get_field_value(_tf, _ff)
+                                    _st = apply_field_update(
+                                        _tf, _ff, _val,
+                                        overwrite_policy=request.overwrite_policy,
+                                        create_mirror_updates=request.create_mirror_updates,
+                                        run_id=run.id, resolved_model=resolved_model,
+                                    )
+                                    _af = _st and 'applied' in str(getattr(_st, 'value', _st))
+                                    if _af:
+                                        llm_applied += 1
+                                    _it = make_item(
+                                        run.id, 'circuit_function', _tf.id, _ff,
+                                        old_value=_old, status=_st, suggested=_val,
+                                        applied=_val if _af else None,
+                                    )
+                                    session.add(_it)
+                                    items.append(_it)
+                                except Exception as _e:
+                                    logger.warning("Circuit %s: func-completion field %s failed: %s",
+                                                   str(cid)[:12], _ff, _e)
+                except Exception as _fn_exc:
+                    logger.warning("Circuit %s: function completion call failed: %s", str(cid)[:12], _fn_exc)
+
         # circuit_strength: dedicated LLM call (always, since bundle prompt buries this field)
         if request.create_mirror_updates and not request.dry_run:
                 try:
                     _sr = await call_provider(
                         provider_key, model=resolved_model,
-                        system_prompt='Rate this brain circuit impact 0-1. Output ONLY a number.',
+                        system_prompt='Rate this brain circuit impact 0-1. Output ONLY a number between 0 and 1.',
                         user_prompt=f'Circuit: {name}\nType: {_type}\nDesc: {desc}\nFunc: {func}',
                         temperature=0.5, max_tokens=20, response_schema=None,
                     )
                     model_call_count += 1
-                    _raw = getattr(_sr, 'raw_text', '') or ''
-                    _val = float(_raw.strip()) if _raw.strip() else None
+                    _raw = (getattr(_sr, 'raw_text', '') or '').strip()
+                    # Extract the first number from possibly-noisy text (e.g. "0.8 (high)").
+                    _val = None
+                    _m = __import__('re').search(r'-?\d+(?:\.\d+)?', _raw)
+                    if _m:
+                        try:
+                            _val = float(_m.group(0))
+                        except (TypeError, ValueError):
+                            _val = None
                     if _val is not None and 0 <= _val <= 1:
-                        write_to_overlay(circuit, 'circuit_strength', _val,
-                                         run_id=run.id, confidence=0.9,
-                                         source='llm_strength_rating')
-                except Exception:
-                    pass
+                        _old_strength = get_field_value(circuit, 'circuit_strength')
+                        if write_to_overlay(circuit, 'circuit_strength', _val,
+                                             run_id=run.id, confidence=0.9,
+                                             source='llm_strength_rating'):
+                            llm_applied += 1
+                            _s_item = make_item(
+                                run.id, request.target_type.value, cid, 'circuit_strength',
+                                old_value=_old_strength, status=ItemStatus.applied_overlay,
+                                suggested=_val, applied=_val, confidence=0.9,
+                            )
+                            session.add(_s_item)
+                            items.append(_s_item)
+                    else:
+                        logger.warning("Circuit %s: strength rating had no valid 0-1 value in %r",
+                                       str(cid)[:12], _raw[:60])
+                except Exception as _str_exc:
+                    logger.warning("Circuit %s: circuit_strength call failed: %s", str(cid)[:12], _str_exc)
 
         processed += 1
         # Count memberships + regions for this circuit
@@ -953,17 +1261,24 @@ async def execute_circuit_bundle_fields(
         except Exception as _cnt_exc:
             logger.warning("Circuit %s: membership/region count failed: %s", str(cid)[:12], _cnt_exc)
 
-        if processed % 10 == 0 or processed == total:
-            run.summary_json = to_jsonable({
-                **(run.summary_json or {}),
-                "total_packs": total, "processed_packs": processed,
-                "processed_items": len(items),
-                "model_call_count": model_call_count, "llm_applied": llm_applied,
-                "memberships_count": (run.summary_json or {}).get("memberships_count", 0) + _m_count,
-                "regions_count": (run.summary_json or {}).get("regions_count", 0) + _r_count,
-            })
-            flag_modified(run, "summary_json")
+        # Persist this circuit's work. On any DB failure (e.g. a value violating a
+        # CHECK constraint), roll back so the session stays usable and the remaining
+        # circuits still process — instead of the whole run dying with PendingRollbackError.
+        run.summary_json = to_jsonable({
+            **(run.summary_json or {}),
+            "total_packs": total, "processed_packs": processed,
+            "processed_items": len(items),
+            "model_call_count": model_call_count, "llm_applied": llm_applied,
+            "memberships_count": (run.summary_json or {}).get("memberships_count", 0) + _m_count,
+            "regions_count": (run.summary_json or {}).get("regions_count", 0) + _r_count,
+        })
+        flag_modified(run, "summary_json")
+        try:
             await session.commit()
+        except Exception as _commit_exc:
+            logger.warning("Circuit %s: commit failed, rolling back: %s", str(cid)[:12], _commit_exc)
+            errors.append(f"Circuit {str(cid)[:12]}: persist failed - {_commit_exc}")
+            await session.rollback()
 
     return model_call_count, llm_applied
 
@@ -1265,9 +1580,13 @@ async def execute_batched_llm_fields(
 
         # Parse multi-field updates from LLM response
         raw_updates = parsed.get("field_updates", [])
+        if not isinstance(raw_updates, list):
+            raw_updates = []
         validated = validate_field_updates(entry, raw_updates)
         handled_targets: dict[str, set[str]] = {}  # tid -> set of field_names handled
         for upd, err in validated:
+            if not isinstance(upd, dict):
+                continue
             upd_field = upd.get("field_name", "")
             tid_raw = upd.get("target_id")
             tid_key = str(tid_raw) if tid_raw is not None else ""

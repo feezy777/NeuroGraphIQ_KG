@@ -1553,6 +1553,7 @@ async def list_final_objects(
     *,
     target_type: str,
     source_mirror_id: uuid.UUID | None = None,
+    granularity_level: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> FinalObjectListResponse:
@@ -1601,6 +1602,9 @@ async def list_final_objects(
     if source_mirror_id:
         stmt = stmt.where(source_col == source_mirror_id)
         count_stmt = count_stmt.where(source_col == source_mirror_id)
+    if granularity_level:
+        stmt = stmt.where(model.granularity_level == granularity_level)
+        count_stmt = count_stmt.where(model.granularity_level == granularity_level)
 
     total = int((await session.execute(count_stmt)).scalar_one())
     rows = list((await session.execute(stmt.order_by(model.created_at.desc()).limit(limit).offset(offset))).scalars().all())

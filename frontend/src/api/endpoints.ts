@@ -88,6 +88,15 @@ export const validateDatabase = (database: string) =>
 export const switchDatabase = (database: string) =>
   postJson<DatabaseSwitchResponse>('/api/database/switch', { database })
 
+// ── System Admin ────────────────────────────────────────────────────────────
+export interface RestartBackendResponse {
+  status: string
+  pid: number
+  port: number
+  message: string
+}
+export const restartBackend = () => postJson<RestartBackendResponse>('/api/system/restart')
+
 // ── Resources ─────────────────────────────────────────────────────────────────
 export interface AtlasResource {
   id: string
@@ -358,6 +367,7 @@ export interface ImportBatchDetail extends ImportBatch {
 export const fetchImportBatches = (p?: {
   status?: string
   resource_id?: string
+  granularity_level?: string
   parser_key?: string
   limit?: number
   offset?: number
@@ -576,6 +586,7 @@ export interface RuleValidationRun {
 export const fetchRuleValidationRuns = (p?: {
   batch_id?: string
   resource_id?: string
+  granularity_level?: string
   status?: string
   limit?: number
   offset?: number
@@ -629,9 +640,9 @@ export interface PendingCandidate {
   source_atlas: string
   created_at: string
 }
-export const fetchPendingReviews = (p?: { batch_id?: string; resource_id?: string; limit?: number; offset?: number }) =>
+export const fetchPendingReviews = (p?: { batch_id?: string; resource_id?: string; granularity_level?: string; limit?: number; offset?: number }) =>
   getJson<Paginated<PendingCandidate>>('/api/human-review/pending', p)
-export const fetchReviewRecords = (p?: { batch_id?: string; resource_id?: string; action?: string; limit?: number; offset?: number }) =>
+export const fetchReviewRecords = (p?: { batch_id?: string; resource_id?: string; action?: string; granularity_level?: string; limit?: number; offset?: number }) =>
   getJson<Paginated<CandidateReviewRecord>>('/api/human-review/records', p)
 export const fetchHumanReviewOptions = () => getJson<Record<string, unknown>>('/api/human-review/options')
 
@@ -653,6 +664,7 @@ export interface PromotionRecord {
 export const fetchPromotionRecords = (p?: {
   batch_id?: string
   resource_id?: string
+  granularity_level?: string
   status?: string
   limit?: number
   offset?: number
@@ -2847,7 +2859,7 @@ export const listFinalMacroClinicalPromotionRecords = (p?: {
   offset?: number
 }) => getJson<Paginated<FinalMacroClinicalPromotionRecordPreview>>('/api/final-macro-clinical/promotion/records', p)
 
-export const listFinalMacroClinicalObjects = (targetType: string, p?: { source_mirror_id?: string; limit?: number; offset?: number }) =>
+export const listFinalMacroClinicalObjects = (targetType: string, p?: { source_mirror_id?: string; granularity_level?: string; limit?: number; offset?: number }) =>
   getJson<Paginated<FinalMacroClinicalObject>>(`/api/final-macro-clinical/objects/${targetType}`, p)
 
 export const getFinalMacroClinicalObject = (targetType: string, finalId: string) =>
@@ -3359,6 +3371,7 @@ export const listMirrorEvidence = (p?: {
   evidence_target_type?: string
   evidence_target_id?: string
   llm_run_id?: string
+  granularity_level?: string
   limit?: number
   offset?: number
 }) => getJson<Paginated<MirrorEvidenceRecord>>('/api/mirror-kg/evidence', p)

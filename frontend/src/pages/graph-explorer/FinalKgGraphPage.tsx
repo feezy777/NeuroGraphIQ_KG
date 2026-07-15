@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { FinalKgGraphCanvas } from './FinalKgGraphCanvas'
-import { FinalKgGraphSidebar } from './FinalKgGraphSidebar'
+import { FinalKgGraphSidebar, type GraphFilters } from './FinalKgGraphSidebar'
 import { useGraphData } from './useGraphData'
 import { useGlobalGranularity } from '../../hooks/useGlobalGranularity'
 import '@xyflow/react/dist/style.css'
@@ -9,7 +9,7 @@ import './FinalKgGraphPage.css'
 
 export function FinalKgGraphPage() {
   const { granularity: globalGranularity } = useGlobalGranularity()
-  const [filters, setFilters] = useState({ atlas: '', granularity: globalGranularity, type: 'brain_region' })
+  const [filters, setFilters] = useState<GraphFilters>({ atlas: '', granularity: globalGranularity, type: 'brain_region' })
   const [selectedNode, setSelectedNode] = useState<Record<string, unknown> | null>(null)
   const { nodes, edges, loading, error, loadGraph } = useGraphData()
 
@@ -35,9 +35,10 @@ export function FinalKgGraphPage() {
         depth: '1',
         include_functions: 'true',
         limit: '200',
+        granularity_level: filters.granularity || globalGranularity,
       })
     },
-    [loadGraph],
+    [loadGraph, filters.granularity, globalGranularity],
   )
 
   return (

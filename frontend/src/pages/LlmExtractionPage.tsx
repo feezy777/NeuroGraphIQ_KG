@@ -2257,7 +2257,7 @@ function MirrorFilterBar({
 }
 
 function useMirrorFilters() {
-  const { granularity: globalGranularity } = useGlobalGranularity()
+  const { granularity: globalGranularity, setGranularity: setGlobalGranularity } = useGlobalGranularity()
   const [sourceAtlas, setSourceAtlas] = useState('')
   const [mirrorStatus, setMirrorStatus] = useState('')
   const [reviewStatus, setReviewStatus] = useState('')
@@ -2266,6 +2266,8 @@ function useMirrorFilters() {
   const apply = () => setApplied({ sourceAtlas, mirrorStatus, reviewStatus, llmRunId })
   return {
     sourceAtlas, setSourceAtlas,
+    granularity: globalGranularity,
+    setGranularity: (v: string) => setGlobalGranularity(v as Parameters<typeof setGlobalGranularity>[0]),
     mirrorStatus, setMirrorStatus, reviewStatus, setReviewStatus,
     llmRunId, setLlmRunId,
     applied: { ...applied, granularity: globalGranularity },
@@ -3026,6 +3028,20 @@ function MirrorCircuitsTab({ onViewRuns, onViewItems }: {
     { key: 'id', header: 'circuit_id', render: r => <code className="text-mono" style={{ fontSize: 11 }}>{r.id.slice(0, 10)}…</code> },
     { key: 'circuit_name', header: t('mirror.circuitName'), render: r => r.circuit_name },
     { key: 'circuit_type', header: t('mirror.circuitType'), render: r => r.circuit_type },
+    { key: 'name_cn', header: '中文名', render: r => {
+      const ov = (r.normalized_payload_json as any)?.formal_field_overlay
+      return (ov?.name_cn as string) || '—'
+    } },
+    { key: 'description', header: '描述', render: r => {
+      const ov = (r.normalized_payload_json as any)?.formal_field_overlay
+      const d = ((r as any).description as string) || (ov?.description as string) || ''
+      return d ? (d.length > 40 ? d.slice(0, 40) + '…' : d) : '—'
+    } },
+    { key: 'circuit_strength', header: '强度', render: r => {
+      const ov = (r.normalized_payload_json as any)?.formal_field_overlay
+      const v = ov?.circuit_strength
+      return v != null ? String(v) : '—'
+    } },
     { key: 'function_association', header: t('mirror.functionAssociation'), render: r => r.function_association ?? '—' },
     { key: 'confidence', header: t('mirror.confidence'), render: r => <ConfidenceCell value={r.confidence} /> },
     { key: 'regions', header: 'regions', render: r => (
@@ -3426,6 +3442,7 @@ function MirrorTriplesTab() {
 function MirrorValidationTab() {
   const { t } = useI18n()
   const sess = readSessionIds()
+  const { granularity } = useGlobalGranularity()
   const LEGACY_TARGETS = ['connection', 'function', 'circuit', 'triple'] as const
   const MACRO_TARGETS = [
     'projection',
@@ -3451,7 +3468,8 @@ function MirrorValidationTab() {
   const [batchFilter, setBatchFilter] = useState(sess.batch_id ?? '')
   const [resourceFilter, setResourceFilter] = useState(sess.resource_id ?? '')
   const [sourceAtlas, setSourceAtlas] = useState('')
-  const [granularityLevel, setGranularityLevel] = useState('')
+  const [granularityLevel, setGranularityLevel] = useState<string>(granularity)
+  useEffect(() => { setGranularityLevel(granularity) }, [granularity])
   const [granularityFamily, setGranularityFamily] = useState('')
   const [dryRun, setDryRun] = useState(true)
   const [applyStatusUpdate, setApplyStatusUpdate] = useState(false)
@@ -3693,6 +3711,7 @@ function MirrorValidationTab() {
 function MirrorReviewTab() {
   const { t } = useI18n()
   const sess = readSessionIds()
+  const { granularity } = useGlobalGranularity()
   const MACRO_REVIEW_TYPES = [
     'connection', 'function', 'circuit', 'triple', 'projection', 'circuit_step',
     'projection_function', 'circuit_projection_membership',
@@ -3702,7 +3721,8 @@ function MirrorReviewTab() {
   const [batchFilter, setBatchFilter] = useState(sess.batch_id ?? '')
   const [resourceFilter, setResourceFilter] = useState(sess.resource_id ?? '')
   const [sourceAtlas, setSourceAtlas] = useState('')
-  const [granularityLevel, setGranularityLevel] = useState('')
+  const [granularityLevel, setGranularityLevel] = useState<string>(granularity)
+  useEffect(() => { setGranularityLevel(granularity) }, [granularity])
   const [search, setSearch] = useState('')
   const [hasBlocker, setHasBlocker] = useState<boolean | undefined>(undefined)
   const [hasError, setHasError] = useState<boolean | undefined>(undefined)
@@ -4141,11 +4161,13 @@ function FinalGraphTables({ graph }: { graph: FinalGraphResponse | null | undefi
 
 function FinalKgBrowserTab() {
   const { t } = useI18n()
+  const { granularity } = useGlobalGranularity()
   const SEARCH_TYPES = ['circuit', 'circuit_step', 'projection', 'projection_function', 'circuit_projection_membership', 'region_function', 'circuit_function', 'triple', 'evidence'] as const
   const [query, setQuery] = useState('')
   const [targetTypes, setTargetTypes] = useState<Set<string>>(new Set(['circuit', 'projection']))
   const [sourceAtlas, setSourceAtlas] = useState('')
-  const [granularityLevel, setGranularityLevel] = useState('')
+  const [granularityLevel, setGranularityLevel] = useState<string>(granularity)
+  useEffect(() => { setGranularityLevel(granularity) }, [granularity])
   const [finalStatus, setFinalStatus] = useState('')
   const [includeInactive, setIncludeInactive] = useState(false)
   const [limit, setLimit] = useState(100)
@@ -4473,12 +4495,14 @@ function SectionList({
 
 function FinalKgExportTab() {
   const { t } = useI18n()
+  const { granularity } = useGlobalGranularity()
   const EXPORT_TYPES = ['brain_region', 'region_function', 'circuit', 'circuit_step', 'circuit_function', 'projection', 'projection_function', 'circuit_projection_membership', 'triple', 'evidence'] as const
   const [targetTypes, setTargetTypes] = useState<Set<string>>(new Set(['circuit', 'projection', 'brain_region']))
   const [formats, setFormats] = useState<Set<string>>(new Set(['jsonl', 'csv', 'neo4j_csv']))
   const [sourceAtlas, setSourceAtlas] = useState('')
   const [sourceVersion, setSourceVersion] = useState('')
-  const [granularityLevel, setGranularityLevel] = useState('')
+  const [granularityLevel, setGranularityLevel] = useState<string>(granularity)
+  useEffect(() => { setGranularityLevel(granularity) }, [granularity])
   const [granularityFamily, setGranularityFamily] = useState('')
   const [resourceId, setResourceId] = useState('')
   const [batchId, setBatchId] = useState('')
@@ -4699,12 +4723,14 @@ function FinalKgExportTab() {
 function FinalMacroClinicalPromotionTab() {
   const { t } = useI18n()
   const sess = readSessionIds()
+  const { granularity } = useGlobalGranularity()
   const MACRO_TYPES = ['circuit', 'circuit_step', 'projection', 'projection_function', 'circuit_projection_membership', 'region_function', 'triple'] as const
   const [targetTypes, setTargetTypes] = useState<Set<string>>(new Set(['circuit', 'projection']))
   const [batchFilter, setBatchFilter] = useState(sess.batch_id ?? '')
   const [resourceFilter, setResourceFilter] = useState(sess.resource_id ?? '')
   const [sourceAtlas, setSourceAtlas] = useState('')
-  const [granularityLevel, setGranularityLevel] = useState('')
+  const [granularityLevel, setGranularityLevel] = useState<string>(granularity)
+  useEffect(() => { setGranularityLevel(granularity) }, [granularity])
   const [confirmText, setConfirmText] = useState('')
   const [dryRun, setDryRun] = useState(true)
   const [promoteDeps, setPromoteDeps] = useState(true)
@@ -5219,11 +5245,13 @@ function RegionTab({
 function MirrorPromotionTab() {
   const { t } = useI18n()
   const sess = readSessionIds()
+  const { granularity } = useGlobalGranularity()
   const [targetTypes, setTargetTypes] = useState<Set<string>>(new Set(['connection', 'function', 'circuit', 'triple']))
   const [batchFilter, setBatchFilter] = useState(sess.batch_id ?? '')
   const [resourceFilter, setResourceFilter] = useState(sess.resource_id ?? '')
   const [sourceAtlas, setSourceAtlas] = useState('')
-  const [granularityLevel, setGranularityLevel] = useState('')
+  const [granularityLevel, setGranularityLevel] = useState<string>(granularity)
+  useEffect(() => { setGranularityLevel(granularity) }, [granularity])
   const [limit, setLimit] = useState(1000)
   const [operator, setOperator] = useState('operator')
   const [reason, setReason] = useState('')
@@ -5808,12 +5836,13 @@ function CircuitCandidatesTab({
   onSelectionChange: (count: number) => void
   onSelectionIdsChange: (ids: string[]) => void
 }) {
+  const { granularity } = useGlobalGranularity()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_CIRCUIT_PAGE_SIZE)
 
   const { data, loading } = useData(
-    () => listMirrorCircuits({ limit: 9999, offset: 0 }),
-    [],
+    () => listMirrorCircuits({ limit: 9999, offset: 0, granularity_level: granularity || undefined }),
+    [granularity],
   )
   const allCircuits: MirrorRegionCircuit[] = (data as any)?.items ?? []
   const total = allCircuits.length

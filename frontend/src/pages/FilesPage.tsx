@@ -7,6 +7,7 @@ import { Notice, type NoticeState } from '../components/Notice'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { KeyValuePanel } from '../components/KeyValuePanel'
 import { useData } from '../hooks/useData'
+import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
 import {
   deleteFile,
   getFile,
@@ -487,9 +488,10 @@ export function FilesPage() {
     }
   }, [selectedFile?.id, selectedFile?.file_type, selectedFile?.intermediate_status, intermediateStatus?.status, intermediateStatus?.has_active_intermediate, fileMode])
 
+  const { granularity } = useGlobalGranularity()
   const { data: resourcesData, loading: resourcesLoading } = useData(
-    () => listResources({ limit: 200 }),
-    [],
+    () => listResources({ limit: 200, granularity_level: granularity || undefined }),
+    [granularity],
   )
 
   const filteredResources = useMemo(() => {

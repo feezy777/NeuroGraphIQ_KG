@@ -285,6 +285,7 @@ async def same_granularity_connections(
     except UnknownProviderError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    await session.commit()  # Ensure per-pack persisted connections are flushed
     return SameGranularityConnectionExtractionResponse(
         run_id=result.run_id,
         item_id=result.item_id,

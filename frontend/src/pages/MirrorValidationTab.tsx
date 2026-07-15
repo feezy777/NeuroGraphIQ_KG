@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { DataTable, type Column } from '../components/DataTable'
 import { StatusBadge } from '../components/StatusBadge'
 import { ActionButton } from '../components/ActionButton'
@@ -17,6 +17,7 @@ import {
 } from '../api/endpoints'
 import { ApiError } from '../api/client'
 import { useI18n } from '../i18n-context'
+import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
 
 const ALL_TARGET_TYPES: { key: MirrorValidationTargetType; label: string; category: string }[] = [
   { key: 'connection', label: 'Connection', category: 'core' },
@@ -37,6 +38,7 @@ function targetTypeLabel(tt: string): string {
 
 export function MirrorValidationTab() {
   const { t } = useI18n()
+  const { granularity } = useGlobalGranularity()
   const [tick, setTick] = useState(0)
   const [notice, setNotice] = useState<NoticeState | null>(null)
   const onClose = useCallback(() => setNotice(null), [])
@@ -48,7 +50,7 @@ export function MirrorValidationTab() {
   const [resourceId, setResourceId] = useState('')
   const [batchId, setBatchId] = useState('')
   const [sourceAtlas, setSourceAtlas] = useState('')
-  const [granularityLevel, setGranularityLevel] = useState('')
+  const [granularityLevel, setGranularityLevel] = useState<string>(granularity)
   const [dryRun, setDryRun] = useState(false)
   const [applyStatusUpdate, setApplyStatusUpdate] = useState(false)
   const [limit, setLimit] = useState('')
@@ -66,6 +68,11 @@ export function MirrorValidationTab() {
   const [resultStatusFilter, setResultStatusFilter] = useState('')
 
   const hasScope = !!(resourceId.trim() || batchId.trim() || sourceAtlas.trim() || granularityLevel.trim())
+
+  // Keep local granularityLevel in sync with global selector
+  useEffect(() => {
+    setGranularityLevel(granularity)
+  }, [granularity])
 
   function toggleType(tt: MirrorValidationTargetType) {
     setSelectedTypes(prev => {
@@ -132,9 +139,10 @@ export function MirrorValidationTab() {
     () => listMirrorValidationRuns({
       status: statusFilter || undefined,
       target_type: runTypeFilter || undefined,
+      granularity_level: granularityLevel || undefined,
       limit: 50,
     }),
-    [statusFilter, runTypeFilter, tick],
+    [statusFilter, runTypeFilter, granularityLevel, tick],
   )
 
   const runColumns = useMemo<Column<MirrorValidationRun>[]>(() => [

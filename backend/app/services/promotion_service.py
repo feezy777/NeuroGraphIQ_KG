@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.candidate import CandidateBrainRegion
 from app.models.human_review import CandidateReviewRecord
 from app.models.promotion import FinalBrainRegion, PromotionRecord
+from app.models.resource import AtlasResource
 from app.models.rule_validation import CandidateRuleValidationResult
 from app.schemas.candidate import CandidateStatus, validate_candidate_transition
 
@@ -306,6 +307,7 @@ async def list_promotion_records(
     batch_id: uuid.UUID | None = None,
     resource_id: uuid.UUID | None = None,
     status: str | None = None,
+    granularity_level: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[PromotionRecord], int]:
@@ -323,6 +325,13 @@ async def list_promotion_records(
     if status:
         base = base.where(PromotionRecord.status == status)
         count_q = count_q.where(PromotionRecord.status == status)
+    if granularity_level:
+        base = base.join(AtlasResource, PromotionRecord.resource_id == AtlasResource.id).where(
+            AtlasResource.granularity_level == granularity_level
+        )
+        count_q = count_q.join(AtlasResource, PromotionRecord.resource_id == AtlasResource.id).where(
+            AtlasResource.granularity_level == granularity_level
+        )
 
     total = int((await session.execute(count_q)).scalar_one())
     rows = (

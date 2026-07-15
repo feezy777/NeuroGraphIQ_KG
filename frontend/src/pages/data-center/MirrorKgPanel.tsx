@@ -22,7 +22,7 @@ import { FieldCompletionModal } from './FieldCompletionModal'
 import { MultiTargetFieldCompletionModal } from './MultiTargetFieldCompletionModal'
 import { resolveCircuitBundleFromCircuitIds } from './circuitBundleUtils'
 import type { CircuitBundleFieldCompletionGroup } from './circuitBundleTypes'
-import { getFormalFieldMapping } from './formalFieldMappings'
+import { getFormalFieldMapping, type FormalObjectType } from './formalFieldMappings'
 import {
   mergeOverlayPatchIntoRows,
   mergeOverlayPatches,
@@ -44,7 +44,7 @@ interface Props {
 const SUB_TABS: MirrorKgSubTab[] = ['connections', 'functions', 'circuits', 'triples', 'evidence']
 
 // Sub-tabs under each parent tab: { key, label, formalObjectType, listApi }
-const SUB_ITEM_DEFS: Record<MirrorKgSubTab, { key: string; label: string; type: string; listApi: (p: any) => Promise<any> }[]> = {
+const SUB_ITEM_DEFS: Record<MirrorKgSubTab, { key: string; label: string; type: FormalObjectType; listApi: (p: any) => Promise<any> }[]> = {
   connections: [
     { key: 'self', label: '连接自身', type: 'projection', listApi: listMirrorConnections },
     { key: 'projection_functions', label: '投影功能', type: 'projection_function', listApi: listMirrorProjectionFunctions },
@@ -120,11 +120,13 @@ export function MirrorKgPanel({
   }, [mirrorTab])
 
   const handleFetchAll = useCallback(async (): Promise<FormalRow[]> => {
-    const params: Record<string, any> = { limit: 5000 }  // max backend limit, covers all
+    // Preserve the active granularity filter so "select all" covers the SAME filtered
+    // set the user sees (e.g. only molecular) — not all granularities. limit 5000 covers max.
+    const params: Record<string, any> = { granularity_level: granularityLevel || undefined, limit: 5000, offset: 0 }
     const result = await activeSub.listApi(params)
     const items = result?.items ?? []
     return items.map((item: any) => ({ ...item, id: item.id ?? '' }))
-  }, [activeSub])
+  }, [activeSub, granularityLevel])
 
   const handleBulkDelete = useCallback(async (ids: string[]) => {
     const deleteFn = mirrorTab === 'connections' ? deleteMirrorConnection

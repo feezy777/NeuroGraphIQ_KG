@@ -128,6 +128,27 @@ def test_normalize_accepts_valid_connection():
     assert norm[0]["confidence"] == 0.8
 
 
+def test_normalize_reads_strength_score_and_confidence_score():
+    """The LLM prompt emits `strength_score`/`confidence_score` (see llm_prompt_defaults).
+    normalize must read those keys — not only the legacy `strength`/`confidence` — so the
+    values are persisted instead of silently dropped to NULL."""
+    a, b = uuid.uuid4(), uuid.uuid4()
+    parsed = {
+        "connections": [{
+            "source_candidate_id": str(a),
+            "target_candidate_id": str(b),
+            "connection_type": "functional_connectivity",
+            "directionality": "undirected",
+            "strength_score": 0.7,
+            "confidence_score": 0.85,
+        }]
+    }
+    norm, _ = normalize_connection_candidates(parsed, allowed_candidate_ids={a, b})
+    assert len(norm) == 1
+    assert norm[0]["strength"] == 0.7
+    assert norm[0]["confidence"] == 0.85
+
+
 def test_api_too_few_candidates():
     from app.main import app
 

@@ -89,7 +89,7 @@ from app.services.settings_service import get_deepseek_runtime_config, get_kimi_
 # No hard cap on candidate count or pair count — large selections produce warnings only.
 LARGE_PAIR_COUNT_WARNING_THRESHOLD = 200
 DEFAULT_CONCURRENT_PACKS = 1  # sequential — one pack at a time (safe for shared DB session)
-DEFAULT_PAIRS_PER_PACK_OVERRIDE = 30  # Balanced: prompt size vs throughput
+DEFAULT_PAIRS_PER_PACK_OVERRIDE = 60  # Optimized: larger packs for molecular data
 DEFAULT_MAX_CANDIDATE_PAIRS = 200  # retained for request compatibility; not used as a blocker
 CONNECTION_TEMPLATE_KEY = "same_granularity_connection_completion_v1"
 logger = logging.getLogger(__name__)
@@ -443,8 +443,8 @@ def build_connection_completion_prompt(
 
 def _pack_max_tokens(pack_size: int, default_max_tokens: int) -> int:
     """Scale output budget for large packs to reduce truncation parse failures."""
-    estimated = 200 + pack_size * 300
-    return max(default_max_tokens, min(16000, estimated))
+    estimated = 200 + pack_size * 150
+    return max(default_max_tokens, min(8000, estimated))
 
 
 def _clamp_confidence(value: Any) -> float | None:
@@ -454,6 +454,26 @@ def _clamp_confidence(value: Any) -> float | None:
         return max(0.0, min(1.0, float(value)))
     except (TypeError, ValueError):
         return None
+
+
+def _read_strength(conn: dict[str, Any]) -> Any:
+    """The LLM prompt emits `strength_score` (see llm_prompt_defaults); accept the
+    legacy `strength` / `weight` aliases too. Reading the wrong key silently drops the
+    value to NULL, so this must stay in sync with the prompt field name."""
+    for key in ("strength_score", "strength", "weight"):
+        value = conn.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _read_confidence(conn: dict[str, Any]) -> Any:
+    """The LLM prompt emits `confidence_score`; accept the legacy `confidence` alias."""
+    for key in ("confidence_score", "confidence"):
+        value = conn.get(key)
+        if value is not None:
+            return value
+    return None
 
 
 def normalize_connection_candidates(
@@ -502,9 +522,9 @@ def normalize_connection_candidates(
             "target_candidate_id": str(tgt),
             "connection_type": conn_type,
             "directionality": directionality,
-            "strength": conn.get("strength"),
+            "strength": _read_strength(conn),
             "modality": conn.get("modality"),
-            "confidence": _clamp_confidence(conn.get("confidence")),
+            "confidence": _clamp_confidence(_read_confidence(conn)),
             "evidence_text": conn.get("evidence_text"),
             "uncertainty_reason": conn.get("uncertainty_reason"),
             "suggested_triples": conn.get("suggested_triples") or [],
@@ -1085,6 +1105,9 @@ async def run_same_granularity_connection_extraction(
     packs_cancelled = 0
     late_provider_response_ignored = 0
     consecutive_parse_failures = 0
+    session_seen_set: set[tuple[str, str, str, str]] = set()  # Cross-pack dedup
+    candidate_map = {c.id: c for c in candidates}  # For name fill + per-pack persist
+    created_connection_ids: list[uuid.UUID] = []  # accumulated across packs
     fail_fast_triggered = False
     remaining_pack_count_skipped = 0
     max_provider_attempts = 2  # Always allow one retry, even in debug mode
@@ -1470,6 +1493,38 @@ async def run_same_granularity_connection_extraction(
             else:
                 consecutive_parse_failures = 0
             packs_completed_before_cancel += 1
+            # Per-pack persist via the merge-aware mirror service: write-time dedup/merge
+            # (docs/MIRROR_KG_DEDUP_MERGE_PRINCIPLE), correct granularity/atlas from the run,
+            # and strength/confidence from the normalized fields. Persisting per pack keeps
+            # partial results if the run is interrupted mid-way.
+            if create_mirror_records and _pn:
+                try:
+                    _mc, _skip, _tr, _ev, _pw, _cids = await persist_connection_mirror_records(
+                        session,
+                        run=run,
+                        item=item,
+                        connections=_pn,
+                        candidate_map=candidate_map,
+                        create_triples=create_triples,
+                        create_evidence=create_evidence,
+                        session_seen=session_seen_set,
+                        composite_workflow_run_id=composite_workflow_run_id,
+                        workflow_step_key=workflow_step_key,
+                    )
+                    audit.created_projection_count += _mc
+                    audit.skipped_duplicate_count += _skip
+                    result.triple_created_count += _tr
+                    result.evidence_created_count += _ev
+                    created_connection_ids.extend(_cids)
+                    all_warnings.extend(_pw)
+                except Exception as exc:
+                    logger.exception("[connection-extraction] per-pack persist failed run=%s", run.id)
+                    all_warnings.append(f"Persist error: {exc}")
+                try:
+                    await session.commit()
+                except Exception as exc:
+                    logger.exception("[connection-extraction] per-pack commit failed")
+                    all_warnings.append(f"Commit error: {exc}")
 
         if should_trigger_parse_fail_fast(
             consecutive_parse_failures=consecutive_parse_failures,
@@ -1567,9 +1622,8 @@ async def run_same_granularity_connection_extraction(
     result.provider_error_count = audit.provider_error_count
     result.provider_empty_response_count = audit.provider_empty_response_count
 
-    created_connection_ids: list[uuid.UUID] = []
-    mirror_created = 0
-    mirror_updated = 0
+    mirror_created = audit.created_projection_count
+    mirror_updated = audit.updated_projection_count
 
     item.parsed_response_json = {
         "connections": normalized_connections,
@@ -1580,52 +1634,10 @@ async def run_same_granularity_connection_extraction(
     if confidences:
         item.confidence = sum(confidences) / len(confidences)
 
-    candidate_map = {c.id: c for c in candidates}
-    if create_mirror_records and normalized_connections:
-        if composite_workflow_run_id and is_cancelling(composite_workflow_run_id):
-            all_warnings.append("Mirror persist skipped — workflow cancelled")
-            normalized_connections = []
-        try:
-            mc, skip, tr, ev, pw, created_ids = await persist_connection_mirror_records(
-                session,
-                run=run,
-                item=item,
-                connections=normalized_connections,
-                candidate_map=candidate_map,
-                create_triples=create_triples,
-                create_evidence=create_evidence,
-                composite_workflow_run_id=composite_workflow_run_id,
-                workflow_step_key=workflow_step_key,
-            )
-            mirror_created = mc
-            created_connection_ids = created_ids
-            audit.created_projection_count = mc
-            audit.updated_projection_count = mirror_updated
-            audit.merged_projection_count = mirror_updated
-            audit.skipped_duplicate_count = skip
-            audit.no_connection_count = len(all_no_connections)
-            result.mirror_connection_created_count = mc
-            result.mirror_connection_skipped_duplicate_count = skip
-            result.triple_created_count = tr
-            result.evidence_created_count = ev
-            all_warnings.extend(pw)
-            await _log_event(
-                "info",
-                "projections_created",
-                f"Mirror persist: created={mirror_created}, updated={mirror_updated}",
-                {
-                    "created_projection_count": mirror_created,
-                    "updated_projection_count": mirror_updated,
-                },
-            )
-        except Exception as exc:
-            logger.exception(
-                "[connection-extraction] mirror persist failed run=%s connection_count=%s",
-                run.id,
-                len(normalized_connections),
-            )
-            all_warnings.append(str(exc))
-            run.error_message = f"mirror persist failed: {exc}"
+    # Connections already persisted per-pack; only update final counters
+    audit.no_connection_count = len(all_no_connections)
+    result.mirror_connection_created_count = audit.created_projection_count
+    result.mirror_connection_skipped_duplicate_count = audit.skipped_duplicate_count
 
     mirror_output_count = mirror_created + mirror_updated
     run.output_count = mirror_output_count

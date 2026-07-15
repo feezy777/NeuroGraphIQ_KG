@@ -107,15 +107,15 @@ export function useDataCenterCounts(granularity: string, refreshKey = 0) {
         // ── Mirror KG macro clinical ────────────────────────────────
         safeCount(listMirrorCircuitSteps({ limit: 1, granularity_level: granularity || undefined })),
         safeCount(listMirrorProjectionFunctions({ limit: 1, granularity_level: granularity || undefined })),
-        safeCount(listMirrorCircuitProjectionMemberships({ limit: 1 })),
-        safeCount(listCircuitProjectionCrossValidationResults({ limit: 1 })),
-        safeCount(listMirrorDualModelVerificationResults({ limit: 1 })),
+        safeCount(listMirrorCircuitProjectionMemberships({ limit: 1, granularity_level: granularity || undefined })),
+        safeCount(listCircuitProjectionCrossValidationResults({ limit: 1, granularity_level: granularity || undefined })),
+        safeCount(listMirrorDualModelVerificationResults({ limit: 1, granularity_level: granularity || undefined })),
         // ── Final KG ────────────────────────────────────────────────
-        safeCount(listFinalMacroClinicalObjects('circuit', { limit: 1 })),
-        safeCount(listFinalMacroClinicalObjects('projection', { limit: 1 })),
-        safeCount(listFinalMacroClinicalObjects('circuit_step', { limit: 1 })),
-        safeCount(listFinalMacroClinicalObjects('projection_function', { limit: 1 })),
-        safeCount(listFinalMacroClinicalObjects('triple', { limit: 1 })),
+        safeCount(listFinalMacroClinicalObjects('circuit', { limit: 1, granularity_level: granularity || undefined })),
+        safeCount(listFinalMacroClinicalObjects('projection', { limit: 1, granularity_level: granularity || undefined })),
+        safeCount(listFinalMacroClinicalObjects('circuit_step', { limit: 1, granularity_level: granularity || undefined })),
+        safeCount(listFinalMacroClinicalObjects('projection_function', { limit: 1, granularity_level: granularity || undefined })),
+        safeCount(listFinalMacroClinicalObjects('triple', { limit: 1, granularity_level: granularity || undefined })),
         // ── Candidate summary ───────────────────────────────────────
         (async (): Promise<[number, number, boolean]> => {
           try {

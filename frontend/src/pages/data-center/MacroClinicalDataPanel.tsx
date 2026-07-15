@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 import { type Column } from '../../components/DataTable'
 
@@ -262,6 +262,16 @@ export function MacroClinicalDataPanel({
 
   )
 
+  const handleFetchAll = useCallback(async (): Promise<FormalRow[]> => {
+    const params = { ...baseParams, limit: 5000, offset: 0 }
+    let result: { items?: any[] } = { items: [] }
+    if (macroTab === 'circuit_steps') result = await listMirrorCircuitSteps(params)
+    else if (macroTab === 'projection_functions') result = await listMirrorProjectionFunctions(params)
+    else if (macroTab === 'memberships') result = await listMirrorCircuitProjectionMemberships(params)
+    else if (macroTab === 'circuit_functions') result = await listMirrorCircuitFunctions(params)
+    return (result.items ?? []).map((item: any) => ({ ...item, id: item.id ?? '' }))
+  }, [baseParams, macroTab])
+
   const { data: dmData, loading: dmLoading, error: dmError } = useData(
 
     () => listMirrorDualModelVerificationResults(baseParams),
@@ -485,6 +495,7 @@ export function MacroClinicalDataPanel({
           onOpenDetail={setSelected}
 
           onRefresh={handleCompletionDone}
+          onFetchAll={handleFetchAll}
 
         />
 
@@ -511,6 +522,7 @@ export function MacroClinicalDataPanel({
           onOpenDetail={setSelected}
 
           onRefresh={handleCompletionDone}
+          onFetchAll={handleFetchAll}
 
         />
 
@@ -537,6 +549,7 @@ export function MacroClinicalDataPanel({
           onOpenDetail={setSelected}
 
           onRefresh={handleCompletionDone}
+          onFetchAll={handleFetchAll}
 
         />
 
@@ -585,6 +598,7 @@ export function MacroClinicalDataPanel({
           onOpenDetail={setSelected}
 
           onRefresh={handleCompletionDone}
+          onFetchAll={handleFetchAll}
 
         />
 

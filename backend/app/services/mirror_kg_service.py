@@ -1043,6 +1043,7 @@ async def list_mirror_evidence(
     batch_id: uuid.UUID | None = None,
     llm_run_id: uuid.UUID | None = None,
     llm_item_id: uuid.UUID | None = None,
+    granularity_level: str | None = None,
     search: str | None = None,
     limit: int = 50,
     offset: int = 0,
@@ -1060,6 +1061,8 @@ async def list_mirror_evidence(
         base = base.where(MirrorEvidenceRecord.llm_run_id == llm_run_id)
     if llm_item_id:
         base = base.where(MirrorEvidenceRecord.llm_item_id == llm_item_id)
+    if granularity_level:
+        base = base.where(MirrorEvidenceRecord.granularity_level == granularity_level)
     base = _apply_search(base, MirrorEvidenceRecord, search)
     count_q = select(func.count()).select_from(base.subquery())
     total = int((await session.execute(count_q)).scalar_one())

@@ -33,6 +33,7 @@ import {
 } from '../api/endpoints'
 import { ApiError } from '../api/client'
 import { readSessionIds, useSessionIds } from '../hooks/useSessionIds'
+import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
 import { CopyButton } from '../components/CopyButton'
 import { useI18n } from '../i18n-context'
 import {
@@ -908,6 +909,7 @@ function PipelineTab({ batchId, status, parserKey, onReload, setNotice }: Pipeli
 
 export function ImportBatchesPage() {
   const { t } = useI18n()
+  const { granularity } = useGlobalGranularity()
   const { setIds } = useSessionIds()
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState('')
@@ -925,8 +927,9 @@ export function ImportBatchesPage() {
       resource_id: resourceFilter.trim() || undefined,
       parser_key: parserFilter.trim() || undefined,
       limit: 100,
+      granularity_level: granularity || undefined,
     }),
-    [statusFilter, resourceFilter, parserFilter, tick],
+    [statusFilter, resourceFilter, parserFilter, tick, granularity],
   )
 
   const visibleBatches = useMemo(

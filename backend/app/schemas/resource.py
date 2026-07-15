@@ -37,6 +37,7 @@ class GranularityLevel(str, Enum):
     meso = "meso"
     micro = "micro"
     molecular = "molecular"
+    fine_cyto = "fine_cyto"
     term = "term"
 
 
@@ -45,6 +46,7 @@ class GranularityFamily(str, Enum):
     meso_anatomical = "meso_anatomical"
     subregion_connectivity = "subregion_connectivity"
     cytoarchitectonic = "cytoarchitectonic"
+    fine_cyto = "fine_cyto"
     histological = "histological"
     molecular = "molecular"
     terminology = "terminology"

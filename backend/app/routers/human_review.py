@@ -52,6 +52,7 @@ async def list_pending_review(
     resource_id: uuid.UUID | None = None,
     batch_id: uuid.UUID | None = None,
     generation_run_id: uuid.UUID | None = None,
+    granularity_level: str | None = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
@@ -61,6 +62,7 @@ async def list_pending_review(
         resource_id=resource_id,
         batch_id=batch_id,
         generation_run_id=generation_run_id,
+        granularity_level=granularity_level,
         limit=limit,
         offset=offset,
     )
@@ -77,6 +79,7 @@ async def list_review_records(
     batch_id: uuid.UUID | None = None,
     resource_id: uuid.UUID | None = None,
     action: ReviewAction | None = None,
+    granularity_level: str | None = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
@@ -86,6 +89,7 @@ async def list_review_records(
         batch_id=batch_id,
         resource_id=resource_id,
         action=action.value if action else None,
+        granularity_level=granularity_level,
         limit=limit,
         offset=offset,
     )

@@ -75,6 +75,7 @@ async def list_import_batches(
     batch_type: BatchType | None = None,
     status: ImportBatchStatus | None = None,
     parser_key: str | None = None,
+    granularity_level: str | None = None,
     session: AsyncSession = Depends(get_db),
 ):
     items, total = await import_batch_service.list_batches(
@@ -85,6 +86,7 @@ async def list_import_batches(
         batch_type=batch_type.value if batch_type else None,
         status=status.value if status else None,
         parser_key=parser_key,
+        granularity_level=granularity_level,
     )
     return ImportBatchListResponse(
         items=[ImportBatchRead.model_validate(i) for i in items],

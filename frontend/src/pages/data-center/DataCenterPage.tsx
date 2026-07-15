@@ -127,6 +127,7 @@ export function DataCenterPage() {
         return (
           <FinalKgDataPanel
             finalTab={nav.finalTab}
+            granularityLevel={granularity}
             onFinalTabChange={(finalTab: FinalKgSubTab) => updateNav({ tab: 'final', finalTab })}
           />
         )

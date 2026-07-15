@@ -204,6 +204,7 @@ async def list_pending_candidates(
     resource_id: uuid.UUID | None = None,
     batch_id: uuid.UUID | None = None,
     generation_run_id: uuid.UUID | None = None,
+    granularity_level: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[CandidateBrainRegion], int]:
@@ -214,6 +215,7 @@ async def list_pending_candidates(
         batch_id=batch_id,
         generation_run_id=generation_run_id,
         candidate_status=CandidateStatus.manual_review_pending.value,
+        granularity_level=granularity_level,
         limit=limit,
         offset=offset,
     )
@@ -249,6 +251,7 @@ async def list_records(
     batch_id: uuid.UUID | None = None,
     resource_id: uuid.UUID | None = None,
     action: str | None = None,
+    granularity_level: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[CandidateReviewRecord], int]:
@@ -263,6 +266,9 @@ async def list_records(
     if action:
         base = base.where(CandidateReviewRecord.action == action)
         count_q = count_q.where(CandidateReviewRecord.action == action)
+    if granularity_level:
+        base = base.join(CandidateBrainRegion, CandidateReviewRecord.candidate_id == CandidateBrainRegion.id).where(CandidateBrainRegion.granularity_level == granularity_level)
+        count_q = count_q.join(CandidateBrainRegion, CandidateReviewRecord.candidate_id == CandidateBrainRegion.id).where(CandidateBrainRegion.granularity_level == granularity_level)
 
     total = int((await session.execute(count_q)).scalar_one())
     rows = (

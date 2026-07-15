@@ -23,7 +23,7 @@ import {
   mergeOverlayPatches,
   shortId,
 } from './fieldCompletionUtils'
-import { getFormalFieldMapping } from './formalFieldMappings'
+import { getFormalFieldMapping, getFormalMapping } from './formalFieldMappings'
 import type {
   BundleGroupStatus,
   CircuitBundleFieldCompletionGroup,
@@ -518,7 +518,7 @@ export function MultiTargetFieldCompletionModal({
     for (let i = 0; i < groups.length; i++) {
       const group = groups[i]
       if (group.targetIds.length === 0 || group.status === 'unavailable' || group.status === 'no_data') continue
-      const mapping = getFormalFieldMapping(group.targetType)
+      const mapping = getFormalMapping(group.targetType)
       if (!mapping?.implemented) continue
       groups[i] = { ...group, status: 'running', errorMessage: undefined }
       setGroupStates([...groups])
@@ -607,9 +607,9 @@ export function MultiTargetFieldCompletionModal({
     const seen = new Map<string, string>()
     for (const g of groupStates) {
       const m = getFormalFieldMapping(g.targetType)
-      if (m?.enrichableFields) {
-        for (const f of m.enrichableFields) {
-          if (!seen.has(f.key)) seen.set(f.key, f.label)
+      if (m?.columns) {
+        for (const c of m.columns.filter(col => col.enrichable)) {
+          if (!seen.has(c.key)) seen.set(c.key, c.label)
         }
       }
     }

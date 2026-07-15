@@ -16,6 +16,7 @@ import { readSessionIds, useSessionIds } from '../hooks/useSessionIds'
 import { resolvePipelineFilters, pipelineReturnUrl } from '../utils/pipelineNavigation'
 import { useI18n } from '../i18n-context'
 import { MirrorValidationTab } from './MirrorValidationTab'
+import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
 
 type Scope = 'batch' | 'gen_run' | 'candidate'
 type ValidationTab = 'candidate' | 'mirror'
@@ -31,6 +32,7 @@ export function RuleValidationPage() {
   const [tick, setTick] = useState(0)
   const [notice, setNotice] = useState<NoticeState | null>(null)
   const onClose = useCallback(() => setNotice(null), [])
+  const { granularity } = useGlobalGranularity()
 
   const sess = readSessionIds()
   const { setIds } = useSessionIds()
@@ -61,9 +63,10 @@ export function RuleValidationPage() {
     () => fetchRuleValidationRuns({
       status: statusFilter || undefined,
       batch_id: queryBatchId || undefined,
+      granularity_level: granularity || undefined,
       limit: 100,
     }),
-    [statusFilter, queryBatchId, tick],
+    [statusFilter, queryBatchId, granularity, tick],
   )
 
   useEffect(() => {

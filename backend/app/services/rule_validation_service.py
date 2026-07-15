@@ -23,6 +23,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.candidate import CandidateBrainRegion
+from app.models.resource import AtlasResource
 from app.models.rule_validation import CandidateRuleValidationResult, RuleValidationRun
 from app.schemas.candidate import CandidateStatus, validate_candidate_transition
 from app.schemas.import_batch import BatchEventType
@@ -547,6 +548,7 @@ async def list_validation_runs(
     batch_id: uuid.UUID | None = None,
     resource_id: uuid.UUID | None = None,
     status: str | None = None,
+    granularity_level: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[RuleValidationRun], int]:
@@ -561,6 +563,13 @@ async def list_validation_runs(
     if status:
         base = base.where(RuleValidationRun.status == status)
         count_q = count_q.where(RuleValidationRun.status == status)
+    if granularity_level:
+        base = base.join(AtlasResource, RuleValidationRun.resource_id == AtlasResource.id).where(
+            AtlasResource.granularity_level == granularity_level
+        )
+        count_q = count_q.join(
+            AtlasResource, RuleValidationRun.resource_id == AtlasResource.id
+        ).where(AtlasResource.granularity_level == granularity_level)
 
     total = int((await session.execute(count_q)).scalar_one())
     rows = (

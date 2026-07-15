@@ -235,6 +235,24 @@ def _clamp_score(value: Any) -> float | None:
         return None
 
 
+def _read_conn_strength(conn: dict[str, Any]) -> Any:
+    """LLM emits `strength_score` (see llm_prompt_defaults); accept legacy `strength`/`weight`."""
+    for key in ("strength_score", "strength", "weight"):
+        value = conn.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _read_conn_confidence(conn: dict[str, Any]) -> Any:
+    """LLM emits `confidence_score`; accept legacy `confidence`."""
+    for key in ("confidence_score", "confidence"):
+        value = conn.get(key)
+        if value is not None:
+            return value
+    return None
+
+
 def _projection_record_to_connection(
     proj: dict[str, Any],
     *,
@@ -493,9 +511,9 @@ def normalize_projection_extraction_response(
             "target_candidate_id": str(tgt),
             "connection_type": str(conn.get("connection_type") or ConnectionType.unknown),
             "directionality": _normalize_directionality(conn.get("directionality")),
-            "strength": conn.get("strength"),
+            "strength": _read_conn_strength(conn),
             "modality": conn.get("modality"),
-            "confidence": _clamp_score(conn.get("confidence")),
+            "confidence": _clamp_score(_read_conn_confidence(conn)),
             "evidence_text": conn.get("evidence_text"),
             "uncertainty_reason": conn.get("uncertainty_reason"),
             "raw": conn,

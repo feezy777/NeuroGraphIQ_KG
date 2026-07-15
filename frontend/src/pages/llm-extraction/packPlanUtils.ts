@@ -94,7 +94,7 @@ export function buildPackPlanPreview(input: PackPlanInput): PackPlanPreview {
   // ── Pair pack from region pool (connection extraction) ───────────────────
   if (strategy === 'pair_pack' || preset?.target === 'connection') {
     const pairCount = candidateCount * (candidateCount - 1) / 2
-    const ppk = input.pairsPerPack ?? 30
+    const ppk = input.pairsPerPack ?? 60
     const packCount = Math.ceil(pairCount / ppk)
     return {
       input_count: candidateCount,

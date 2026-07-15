@@ -16,6 +16,7 @@ import type { FinalKgSubTab } from './dataCenterTypes'
 interface Props {
   finalTab: FinalKgSubTab
   onFinalTabChange: (tab: FinalKgSubTab) => void
+  granularityLevel?: string
 }
 
 const SUB_TABS: FinalKgSubTab[] = [
@@ -54,7 +55,7 @@ const TAB_LABELS: Record<FinalKgSubTab, string> = {
   evidence: 'Final Evidence',
 }
 
-export function FinalKgDataPanel({ finalTab, onFinalTabChange }: Props) {
+export function FinalKgDataPanel({ finalTab, onFinalTabChange, granularityLevel }: Props) {
   const { t } = useI18n()
   const [tick, setTick] = useState(0)
   const [selected, setSelected] = useState<FinalMacroClinicalObject | null>(null)
@@ -64,8 +65,8 @@ export function FinalKgDataPanel({ finalTab, onFinalTabChange }: Props) {
   const targetType = TAB_TO_TARGET[finalTab]
 
   const { data, loading, error } = useData(
-    () => listFinalMacroClinicalObjects(targetType, { limit: 100 }),
-    [targetType, tick],
+    () => listFinalMacroClinicalObjects(targetType, { limit: 100, granularity_level: granularityLevel || undefined }),
+    [targetType, granularityLevel, tick],
   )
 
   const columns = useMemo<Column<FinalMacroClinicalObject>[]>(() => [

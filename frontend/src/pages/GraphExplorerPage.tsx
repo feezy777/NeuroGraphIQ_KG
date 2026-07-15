@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as d3 from 'd3'
+import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -52,12 +53,22 @@ export function GraphExplorerPage() {
   const [fType, setFType] = useState('all')
   const [minConf, setMinConf] = useState(0)
   const [focusNode, setFocusNode] = useState<string | null>(null)
+  const [reloadTick, setReloadTick] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
+  const initialLoadRef = useRef(true)
+  const { granularity } = useGlobalGranularity()
 
   useEffect(() => {
-    fetch('/api/kg/graph/data?limit_connections=5000&include_circuits=true')
-      .then(r => r.json()).then(d => { setRaw(d); setLoading(false) })
-      .catch(e => { setErr(e.message); setLoading(false) })
-  }, [])
+    let cancelled = false
+    if (initialLoadRef.current) setLoading(true)
+    else setRefreshing(true)
+    setErr(null)
+    fetch(`/api/kg/graph/data?limit_connections=5000&include_circuits=true&granularity_level=${granularity}`)
+      .then(r => r.json())
+      .then(d => { if (cancelled) return; setRaw(d); setLoading(false); setRefreshing(false); initialLoadRef.current = false })
+      .catch(e => { if (cancelled) return; setErr(e.message); setLoading(false); setRefreshing(false); initialLoadRef.current = false })
+    return () => { cancelled = true }
+  }, [granularity, reloadTick])
 
   const graph = useMemo(() => {
     if (!raw) return null
@@ -96,10 +107,13 @@ export function GraphExplorerPage() {
         <div>
           <h2 style={{ margin: 0, fontSize: 18 }}>🧠 图谱探索</h2>
           <p style={{ color: '#888', fontSize: 12, margin: '2px 0 0' }}>
-            {raw ? `${raw.stats.regions||0} 脑区 · ${raw.stats.connections||0} 连接 · ${raw.stats.circuits||0} 回路 · ${raw.stats.memberships||0} 映射` : ''}
+            {raw ? `粒度: ${granularity} · ${raw.stats.regions||0} 脑区 · ${raw.stats.connections||0} 连接 · ${raw.stats.circuits||0} 回路 · ${raw.stats.memberships||0} 映射` : ''}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
+          <button className="btn btn-sm" onClick={() => setReloadTick(t => t + 1)} disabled={refreshing} title="重新拉取最新数据">
+            {refreshing ? '⏳ 刷新中' : '🔄 刷新'}
+          </button>
           {(['focus','global','data'] as const).map(t => (
             <button key={t} className={`btn btn-sm${tab===t?' btn-primary':''}`} onClick={()=>setTab(t)}>
               {t==='focus'?'🔍 聚焦':t==='global'?'🌐 全局':'📊 数据'}

@@ -13,6 +13,7 @@ import {
   getDatabaseStatus,
   listDatabases,
   listResources,
+  restartBackend,
   switchDatabase,
   type DatabaseListItem,
   type DatabaseSchemaStatus,
@@ -41,6 +42,8 @@ export function DashboardPage() {
   const [selectedDb, setSelectedDb] = useState('')
   const [switchConfirm, setSwitchConfirm] = useState<string | null>(null)
   const [switching, setSwitching] = useState(false)
+  const [restartConfirm, setRestartConfirm] = useState(false)
+  const [restarting, setRestarting] = useState(false)
   const [notice, setNotice] = useState<NoticeState | null>(null)
   const [sessionOpen, setSessionOpen] = useState(false)
   const [stats, setStats] = useState({
@@ -116,6 +119,43 @@ export function DashboardPage() {
     }
   }
 
+  async function handleRestartConfirm() {
+    setRestartConfirm(false)
+    setRestarting(true)
+    setNotice({ type: 'warning', message: t('dashboard.restartInProgress') })
+    try {
+      await restartBackend()
+    } catch {
+      // The server may drop the connection as it exits — expected; continue to poll health.
+    }
+
+    // Wait for the old process to exit + port to free, then poll until the new server answers.
+    const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
+    await sleep(2500)
+    const deadline = Date.now() + 40000
+    let back = false
+    while (Date.now() < deadline) {
+      try {
+        const h = await fetchHealth()
+        if (h?.status) {
+          back = true
+          break
+        }
+      } catch {
+        // still restarting — keep polling
+      }
+      await sleep(1500)
+    }
+
+    setRestarting(false)
+    if (back) {
+      setNotice({ type: 'success', message: t('dashboard.restartSuccess') })
+      await loadDashboard()
+    } else {
+      setNotice({ type: 'error', message: t('dashboard.restartTimeout') })
+    }
+  }
+
   const selectedDbItem = dbList.find(d => d.name === selectedDb)
   const canSwitch = selectedDbItem?.schema_status === 'mvp1_ready' && selectedDb !== currentDb
 
@@ -153,6 +193,15 @@ export function DashboardPage() {
           ) : (
             <div className="dash-meta">{t('common.connecting')}</div>
           )}
+          <div style={{ marginTop: 10 }}>
+            <ActionButton
+              label={t('dashboard.restartBackend')}
+              variant="danger"
+              loading={restarting}
+              disabled={restarting}
+              onClick={() => setRestartConfirm(true)}
+            />
+          </div>
         </div>
 
         <div className="card">
@@ -253,6 +302,16 @@ export function DashboardPage() {
         loading={switching}
         onConfirm={() => void handleSwitchConfirm()}
         onCancel={() => setSwitchConfirm(null)}
+      />
+
+      <ConfirmDialog
+        open={restartConfirm}
+        title={t('dashboard.restartConfirmTitle')}
+        message={t('dashboard.restartConfirmMessage')}
+        confirmLabel={t('dashboard.restartBackend')}
+        loading={restarting}
+        onConfirm={() => void handleRestartConfirm()}
+        onCancel={() => setRestartConfirm(false)}
       />
     </div>
   )

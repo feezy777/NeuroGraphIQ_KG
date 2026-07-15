@@ -80,6 +80,7 @@ async def list_rule_validation_runs(
     batch_id: uuid.UUID | None = None,
     resource_id: uuid.UUID | None = None,
     status: RuleValidationRunStatus | None = None,
+    granularity_level: str | None = Query(None, description="Filter by granularity level"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
@@ -89,6 +90,7 @@ async def list_rule_validation_runs(
         batch_id=batch_id,
         resource_id=resource_id,
         status=status.value if status else None,
+        granularity_level=granularity_level,
         limit=limit,
         offset=offset,
     )

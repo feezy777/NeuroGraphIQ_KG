@@ -236,6 +236,7 @@ async def list_batches(
     batch_type: str | None = None,
     status: str | None = None,
     parser_key: str | None = None,
+    granularity_level: str | None = None,
 ) -> tuple[list[ImportBatch], int]:
     base = select(ImportBatch)
     count_q = select(func.count()).select_from(ImportBatch)
@@ -252,6 +253,13 @@ async def list_batches(
     if parser_key:
         base = base.where(ImportBatch.parser_key == parser_key)
         count_q = count_q.where(ImportBatch.parser_key == parser_key)
+    if granularity_level:
+        base = base.join(AtlasResource, ImportBatch.resource_id == AtlasResource.id).where(
+            AtlasResource.granularity_level == granularity_level
+        )
+        count_q = count_q.join(AtlasResource, ImportBatch.resource_id == AtlasResource.id).where(
+            AtlasResource.granularity_level == granularity_level
+        )
 
     total = int((await session.execute(count_q)).scalar_one())
     rows = (

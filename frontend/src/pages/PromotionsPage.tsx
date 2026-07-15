@@ -9,10 +9,12 @@ import { useData } from '../hooks/useData'
 import { fetchPromotionRecords, promoteCandidate, type PromotionRecord, type PromoteResult } from '../api/endpoints'
 import { ApiError } from '../api/client'
 import { readSessionIds, useSessionIds } from '../hooks/useSessionIds'
+import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
 import { useI18n } from '../i18n-context'
 
 export function PromotionsPage() {
   const { t } = useI18n()
+  const { granularity } = useGlobalGranularity()
   const [statusFilter, setStatusFilter] = useState('')
   const [notice, setNotice] = useState<NoticeState | null>(null)
   const onClose = useCallback(() => setNotice(null), [])
@@ -28,8 +30,8 @@ export function PromotionsPage() {
   const [promoteResult, setPromoteResult] = useState<PromoteResult | null>(null)
 
   const { data, loading, error } = useData(
-    () => fetchPromotionRecords({ status: statusFilter || undefined, limit: 100 }),
-    [statusFilter, tick],
+    () => fetchPromotionRecords({ status: statusFilter || undefined, limit: 100, granularity_level: granularity || undefined }),
+    [statusFilter, tick, granularity],
   )
 
   const columns: Column<PromotionRecord>[] = useMemo(() => [

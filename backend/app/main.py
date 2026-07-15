@@ -49,6 +49,7 @@ from app.routers import (
     rule_validation,
     settings,
     symptom_query,
+    system_admin,
     workbench_pipeline,
     workspace_files,
 )
@@ -288,4 +289,7 @@ app.include_router(
 )
 app.include_router(
     symptom_query.router, prefix="/api/symptom-query", tags=["Symptom Query"]
+)
+app.include_router(
+    system_admin.router, prefix="/api/system", tags=["System Admin"]
 )

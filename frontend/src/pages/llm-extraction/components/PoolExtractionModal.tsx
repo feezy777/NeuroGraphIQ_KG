@@ -188,10 +188,10 @@ function computePairCount(n: number): number {
   return (n * (n - 1)) / 2
 }
 
-/** Matches backend DEFAULT_PAIRS_PER_PACK_OVERRIDE (30). */
-function estimatePackCount(pairCount: number): number {
+/** Matches backend DEFAULT_PAIRS_PER_PACK_OVERRIDE (60). */
+function estimatePackCount(pairCount: number, perPack: number = 60): number {
   if (pairCount <= 0) return 0
-  return Math.ceil(pairCount / 30)
+  return Math.ceil(pairCount / Math.max(1, perPack))
 }
 
 function sortedIdsKey(ids: string[]): string {
@@ -500,10 +500,18 @@ export function PoolExtractionModal({
     [selectedMemberCandidateIds],
   )
   const selectedPairCount = computePairCount(selectedExtractionIds.length)
-  const selectedPackEstimate = estimatePackCount(selectedPairCount)
+  const selectedPackEstimate = useMemo(() => {
+    const isConnPool = preset?.input_pool_type === 'connection_pool'
+    const ppk = isConnPool ? candidatesPerPack : 60
+    return estimatePackCount(selectedPairCount, ppk)
+  }, [selectedPairCount, candidatesPerPack, preset?.input_pool_type])
 
   const selectedCount = selectedCandidateIds.length
-  const externalPackEstimate = estimatePackCount(computePairCount(selectedCount))
+  const externalPackEstimate = useMemo(() => {
+    const isConnPool = preset?.input_pool_type === 'connection_pool'
+    const ppk = isConnPool ? candidatesPerPack : 60
+    return estimatePackCount(computePairCount(selectedCount), ppk)
+  }, [selectedCount, candidatesPerPack, preset?.input_pool_type])
   const poolMatchesExternal = totalPooledCount === selectedCount
     && selectedCount > 0
     && selectedCandidateIds.every(id => allMemberIds.has(id))

@@ -10,7 +10,7 @@ interface Props { embedded?: boolean }
 
 export function RawAal3Page({ embedded }: Props) {
   const { granularity } = useGlobalGranularity()
-  const { data, loading, error, reload } = useData(() => fetchRawAal3Labels({ limit: 500, granularity_level: granularity || undefined }), [])
+  const { data, loading, error, reload } = useData(() => fetchRawAal3Labels({ limit: 500, granularity_level: granularity || undefined }), [granularity])
   const [page, setPage] = useState(0)
   const pageSize = 50
 

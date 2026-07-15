@@ -12,6 +12,8 @@ export interface PipelineIds {
   rollback_record_id?: string
   candidate_id?: string
   final_region_id?: string
+  source_atlas?: string
+  granularity_family?: string
 }
 
 export function readSessionIds(): PipelineIds {

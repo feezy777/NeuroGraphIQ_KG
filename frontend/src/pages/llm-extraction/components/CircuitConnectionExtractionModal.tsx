@@ -10,6 +10,7 @@ import {
   getCircuitConnectionExtractionRun,
   cancelCircuitConnectionExtractionRun,
   type MirrorRegionCircuit,
+  type CircuitConnectionExtractionRun,
   type CircuitConnectionExtractionRunDetail,
 } from '../../../api/endpoints'
 import { useData } from '../../../hooks/useData'
@@ -44,7 +45,7 @@ export function CircuitConnectionExtractionModal({ open, mode, preSelectedIds = 
   const [cancelling, setCancelling] = useState(false)
   const [execDone, setExecDone] = useState(false)
   const [execElapsed, setExecElapsed] = useState(0)
-  const [execDetail, setExecDetail] = useState<CircuitConnectionExtractionRunDetail | null>(null)
+  const [execDetail, setExecDetail] = useState<CircuitConnectionExtractionRunDetail | CircuitConnectionExtractionRun | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)

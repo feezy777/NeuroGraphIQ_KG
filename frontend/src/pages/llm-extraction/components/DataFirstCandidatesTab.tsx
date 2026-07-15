@@ -116,7 +116,7 @@ export function DataFirstCandidatesTab({
   )
 
   const { data: countProbeData } = useData(
-    () => fetchCandidates({ limit: 5000 }),
+    () => fetchCandidates({ batch_id: appliedBatchId || undefined, granularity_level: granularity || undefined, limit: 5000 }),
     [batchTick, tick],
   )
 

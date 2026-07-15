@@ -77,6 +77,7 @@ async def list_records(
 async def list_objects(
     target_type: str,
     source_mirror_id: uuid.UUID | None = None,
+    granularity_level: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_db),
@@ -86,6 +87,7 @@ async def list_objects(
             session,
             target_type=target_type,
             source_mirror_id=source_mirror_id,
+            granularity_level=granularity_level,
             limit=limit,
             offset=offset,
         )
