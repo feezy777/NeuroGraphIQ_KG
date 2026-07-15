@@ -393,6 +393,14 @@ async def conversation_endpoint(body: ConversationRequest):
 
 # ── Graph — circuit IDs → region nodes + connection edges ──────────────────
 
+def _is_uuid(s: str) -> bool:
+    try:
+        uuid.UUID(s)
+        return True
+    except (ValueError, AttributeError):
+        return False
+
+
 class GraphDataRequest(BaseModel):
     circuit_ids: list[str]
     granularity_level: str = "macro"
@@ -440,7 +448,8 @@ async def get_circuit_graph(
               "circuit_ids": sorted(region_circuits[rid])} for rid in region_circuits]
 
     # ── Connections between these brain regions ─────────────────────────────
-    rids = list(region_circuits.keys())
+    # Only real UUIDs (region_candidate_id), skip synthetic fallback keys like "cid:Step 1"
+    rids = [k for k in region_circuits if _is_uuid(k)]
     if len(rids) < 2:
         return GraphDataResponse(nodes=nodes, edges=[])
 
