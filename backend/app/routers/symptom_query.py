@@ -289,6 +289,92 @@ Output ONLY a JSON array of strings (all expanded terms combined, no duplicates)
     return ExpandResponse(expanded=list(expanded))
 
 
+# ── Conversation — LLM-powered symptom triage ──────────────────────────────
+
+class ConversationRequest(BaseModel):
+    messages: list[dict[str, str]]
+    granularity_level: str = "macro"
+
+
+class ConversationResponse(BaseModel):
+    stage: str
+    content: str | None = None
+    summary: str | None = None
+
+
+CONVERSATION_PROMPT = """You are a clinical neuroscientist conducting a symptom triage interview. Your goal is to narrow down the patient's symptoms by asking one clarifying question at a time.
+
+Conversation so far:
+{messages}
+
+Based on the conversation, decide if you need more information or if you can summarize the symptoms.
+
+If you need more information, respond with:
+{{"stage": "asking", "content": "Your single clarifying question here...", "summary": null}}
+
+If you have enough information to form a clinical summary (typically after 2-4 exchanges), respond with:
+{{"stage": "summarizing", "content": null, "summary": "Clinical summary of the symptoms..."}}
+
+Reply ONLY with the JSON object, nothing else."""
+
+
+@router.post("/conversation", response_model=ConversationResponse)
+async def conversation_endpoint(body: ConversationRequest):
+    """LLM-powered symptom triage conversation — asks clarifying questions or summarizes."""
+    if not body.messages:
+        return ConversationResponse(stage="asking", content="Please describe your symptoms.")
+
+    try:
+        cfg = get_deepseek_runtime_config()
+        provider = get_llm_provider("deepseek")
+
+        formatted = "\n".join(
+            f"{m['role']}: {m['content']}" for m in body.messages
+        )
+        prompt = CONVERSATION_PROMPT.format(messages=formatted)
+
+        resp = await provider.complete_json(
+            model=cfg.default_model,
+            system_prompt="You are a clinical neuroscientist. Reply ONLY a JSON object with stage, content, and summary fields.",
+            user_prompt=prompt,
+            temperature=0.3,
+        )
+
+        import ast as _ast, json as _json
+        parsed = resp.parsed_json
+        # DeepSeek JSON mode wraps arrays in {"_array": [...]}; also handle string-wrapped
+        if isinstance(parsed, dict) and "_array" in parsed:
+            parsed = parsed["_array"]
+        if isinstance(parsed, str):
+            for parser in (_json.loads, _ast.literal_eval):
+                try:
+                    parsed = parser(parsed)
+                    break
+                except Exception:
+                    continue
+
+        if isinstance(parsed, dict):
+            stage = str(parsed.get("stage", "asking"))
+            content = parsed.get("content")
+            summary = parsed.get("summary")
+            if stage not in ("asking", "summarizing"):
+                stage = "asking"
+            return ConversationResponse(
+                stage=stage,
+                content=str(content) if content is not None else None,
+                summary=str(summary) if summary is not None else None,
+            )
+
+        # Fallback: use raw user messages as summary
+        raw_summary = " ".join(m["content"] for m in body.messages)
+        return ConversationResponse(stage="summarizing", summary=raw_summary)
+
+    except Exception:
+        logger.exception("Conversation endpoint failed")
+        raw_summary = " ".join(m["content"] for m in body.messages)
+        return ConversationResponse(stage="summarizing", summary=raw_summary)
+
+
 # ── Graph — circuit IDs → region nodes + connection edges ──────────────────
 
 class GraphDataRequest(BaseModel):
