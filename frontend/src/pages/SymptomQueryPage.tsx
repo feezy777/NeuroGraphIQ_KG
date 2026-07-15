@@ -156,6 +156,13 @@ export function SymptomQueryPage() {
                 </div>
               </div>
             )}
+            {(phase === 'idle' || phase === 'chatting') && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 12, color: '#888', lineHeight: '24px' }}>模式：</span>
+                <button className={`btn btn-sm ${mode === 'focused' ? 'btn-primary' : ''}`} onClick={() => setMode('focused')}>🎯 聚焦</button>
+                <button className={`btn btn-sm ${mode === 'exploratory' ? 'btn-primary' : ''}`} onClick={() => setMode('exploratory')}>🔍 探索</button>
+              </div>
+            )}
             {phase !== 'summarizing' && (
               <div style={{ display: 'flex', gap: 8 }}>
                 <input className="form-input" style={{ flex: 1 }}
