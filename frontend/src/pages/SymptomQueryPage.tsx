@@ -42,7 +42,7 @@ const SYMPTOM_LEGEND: LegendItem[] = [
 
 export function SymptomQueryPage() {
   const { t } = useI18n(); const { granularity } = useGlobalGranularity()
-  const [mode, setMode] = useState<'single' | 'multi'>('multi')
+  const [mode, setMode] = useState<'focused' | 'exploratory'>('focused')
   const [error, setError] = useState<string | null>(null)
   const [stdFunctions, setStdFunctions] = useState<string[]>([]); const [circuits, setCircuits] = useState<CircuitResult[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -90,7 +90,7 @@ export function SymptomQueryPage() {
       // Combine expanded terms + original functions for maximum coverage
       const allFuncs = [...new Set([...(er.expanded || []), ...funcs])]
       const sr = await postJson<{circuits:CircuitResult[]}>('/api/symptom-query/search', {
-        functions: allFuncs, categories: cats, granularity_level: granularity,
+        functions: allFuncs, categories: cats, mode, granularity_level: granularity,
       })
       const found = sr.circuits || []; setCircuits(found)
       if (found.length > 0) {
@@ -116,7 +116,10 @@ export function SymptomQueryPage() {
 
   const gEdges: GEdge[] = useMemo(() => {
     if (!graph) return []
-    return graph.edges.map(e => ({ ...e, id: e.id, source: e.source, target: e.target, type: e.type || 'unknown', label: e.label || '', circuit_ids: (e as any).circuit_ids || [], confidence: (e as any).confidence }))
+    // Only show edges that belong to at least one matched circuit (relevant connections)
+    return graph.edges
+      .filter(e => ((e as any).circuit_ids || []).length > 0)
+      .map(e => ({ ...e, id: e.id, source: e.source, target: e.target, type: e.type || 'unknown', label: e.label || '', circuit_ids: (e as any).circuit_ids || [], confidence: (e as any).confidence }))
   }, [graph])
 
   // Compute highlight sets when a circuit is selected
@@ -189,8 +192,8 @@ export function SymptomQueryPage() {
           <details style={{ fontSize: 12, color: '#888' }}>
             <summary>重新查询</summary>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-              <button className={`btn btn-sm ${mode === 'single' ? 'btn-primary' : ''}`} onClick={() => setMode('single')}>单功能</button>
-              <button className={`btn btn-sm ${mode === 'multi' ? 'btn-primary' : ''}`} onClick={() => setMode('multi')}>多功能</button>
+              <button className={`btn btn-sm ${mode === 'focused' ? 'btn-primary' : ''}`} onClick={() => setMode('focused')}>🎯 聚焦</button>
+              <button className={`btn btn-sm ${mode === 'exploratory' ? 'btn-primary' : ''}`} onClick={() => setMode('exploratory')}>🔍 探索</button>
               <button className="btn btn-sm" onClick={handleClear}>新查询</button>
             </div>
           </details>

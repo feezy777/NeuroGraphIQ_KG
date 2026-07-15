@@ -26,19 +26,20 @@ logger = logging.getLogger(__name__)
 
 class SymptomAnalyzeRequest(BaseModel):
     symptom: str
-    mode: str = Field(default="multi", description="single | multi")
+    mode: str = Field(default="exploratory", description="focused | exploratory")
+
+
+class SymptomSearchRequest(BaseModel):
+    functions: list[str]
+    categories: list[str] = []
+    mode: str = "exploratory"
+    granularity_level: str = "macro"
 
 
 class SymptomAnalyzeResponse(BaseModel):
     functions: list[str]
     categories: list[str] = []
     primary_category: str = "other"
-
-
-class SymptomSearchRequest(BaseModel):
-    functions: list[str]
-    categories: list[str] = []
-    granularity_level: str = "macro"
 
 
 class CircuitResult(BaseModel):
@@ -64,12 +65,10 @@ class SymptomSearchResponse(BaseModel):
 
 ANALYZE_PROMPT = """You are a clinical neuroscientist. Convert the patient's symptom description into standardized brain function terms with categories.
 
-Categories (pick ONE per function): motor, sensory, cognitive, emotional, autonomic, memory, language, attention, other
+Categories: motor, sensory, cognitive, emotional, autonomic, memory, language, attention, other
 
-Rules:
-- 'multi' mode: return 2-5 function terms + categories
-- 'single' mode: return 1 function term + category
-- Use standard neuroanatomical terminology
+FOCUSED mode: return 1-2 most specific, high-confidence function terms. Be conservative.
+EXPLORATORY mode: return 3-5 function terms covering different possibilities. Be comprehensive.
 
 Output ONLY this JSON object:
 {{"functions":["term1","term2"],"categories":["motor","sensory"],"primary_category":"motor"}}
@@ -219,8 +218,9 @@ async def search_circuits(
         d["func_count"] = func_count
         scored.append(d)
 
-    # Filter relevance >= 5 (lenient enough for circuits with sparse function_domain data)
-    scored = [d for d in scored if d["relevance"] >= 5]
+    # Mode-based threshold: focused is stricter, exploratory is broader
+    threshold = 20 if body.mode == "focused" else 3
+    scored = [d for d in scored if d["relevance"] >= threshold]
     scored.sort(key=lambda d: d["relevance"], reverse=True)
     scored = scored[:50]
 
