@@ -8,25 +8,34 @@ import { ForceGraph, type GNode, type GEdge, type LegendItem } from '../componen
 interface CircuitResult {
   id: string; circuit_name: string; circuit_type: string | null
   step_count: number; function_count: number; matched_functions: string[]; match_score: number
+  relevance: number; matched_categories: string[]
   steps: { id: string; step_order: number; step_name: string; step_type: string; role: string }[]
 }
-interface GraphData { nodes: { id: string; label: string; type: string }[]; edges: { id: string; source: string; target: string; label?: string }[] }
+interface GraphNode { id: string; label: string; type: string; circuit_ids?: string[]; [key: string]: any }
+interface GraphEdge { id: string; source: string; target: string; type: string; label?: string; circuit_ids?: string[]; confidence?: number }
+interface GraphData { nodes: GraphNode[]; edges: GraphEdge[] }
 
-// ── Custom color/dash/legend maps for symptom query ──────────────────────────
+// ── Match GraphExplorerPage legend — connection types only ───────────────────
 const SYMPTOM_EDGE_COLOR: Record<string, string> = {
-  step_flow: '#10b981', belongs_to: '#d1d5db', co_occurs: '#8b5cf6',
+  structural_connection: '#3b82f6', functional_connectivity: '#f59e0b', projection: '#10b981',
+  association: '#8b5cf6', coactivation: '#ec4899', effective_connectivity: '#ef4444',
+  uncertain_connection: '#9ca3af', unknown: '#d1d5db',
 }
 const SYMPTOM_EDGE_DASH: Record<string, string> = {
-  step_flow: '2,2', belongs_to: '', co_occurs: '6,3',
+  structural_connection: '', functional_connectivity: '6,3', projection: '2,2',
+  association: '', coactivation: '', effective_connectivity: '', uncertain_connection: '',
 }
-const SYMPTOM_NODE_COLOR: Record<string, string> = { brain_region: '#3b82f6', circuit: '#f59e0b' }
-const SYMPTOM_NODE_R: Record<string, number> = { brain_region: 7, circuit: 7 }
+const SYMPTOM_NODE_COLOR: Record<string, string> = { brain_region: '#3b82f6' }
+const SYMPTOM_NODE_R: Record<string, number> = { brain_region: 7 }
 const SYMPTOM_LEGEND: LegendItem[] = [
-  { color: '#3b82f6', dash: '', label: '● 脑区 (Brain Region)' },
-  { color: '#f59e0b', dash: '', label: '● 回路 (Circuit)' },
-  { color: '#10b981', dash: '2,2', label: '┈ step_flow (步骤流向)' },
-  { color: '#8b5cf6', dash: '6,3', label: '╌ co_occurs (共享脑区)' },
-  { color: '#d1d5db', dash: '', label: '━ belongs_to (回路归属)' },
+  { color: '#3b82f6', dash: '', label: '● 脑区(Region)' },
+  { color: '#3b82f6', dash: '', label: '结构连接' },
+  { color: '#f59e0b', dash: '6,3', label: '功能连接' },
+  { color: '#10b981', dash: '2,2', label: '投射' },
+  { color: '#8b5cf6', dash: '', label: '关联' },
+  { color: '#ec4899', dash: '', label: '共激活' },
+  { color: '#ef4444', dash: '', label: '有效连接' },
+  { color: '#9ca3af', dash: '', label: '不确定' },
 ]
 
 // ── Page ─────────────────────────────────────────────────────────────────────
@@ -74,11 +83,12 @@ export function SymptomQueryPage() {
     if (!summary.trim()) return
     setPhase('analyzing'); setError(null)
     try {
-      const ar = await postJson<{functions:string[]}>('/api/symptom-query/analyze', { symptom: summary.trim(), mode })
-      const funcs = ar.functions || []; setStdFunctions(funcs)
+      const ar = await postJson<{functions:string[];categories:string[];primary_category:string}>('/api/symptom-query/analyze', { symptom: summary.trim(), mode })
+      const funcs = ar.functions || []; const cats = ar.categories || []
+      setStdFunctions(funcs)
       const er = await postJson<{expanded:string[]}>('/api/symptom-query/expand', { functions: funcs })
       const sr = await postJson<{circuits:CircuitResult[]}>('/api/symptom-query/search', {
-        functions: er.expanded || funcs, granularity_level: granularity,
+        functions: er.expanded || funcs, categories: cats, granularity_level: granularity,
       })
       const found = sr.circuits || []; setCircuits(found)
       if (found.length > 0) {
@@ -99,13 +109,23 @@ export function SymptomQueryPage() {
 
   const gNodes: GNode[] = useMemo(() => {
     if (!graph) return []
-    return graph.nodes.map(n => ({ id: n.id, type: n.type, label: n.label }))
+    return graph.nodes.map(n => ({ ...n, id: n.id, type: n.type, label: n.label, circuit_ids: (n as any).circuit_ids || [] }))
   }, [graph])
 
   const gEdges: GEdge[] = useMemo(() => {
     if (!graph) return []
-    return graph.edges.map(e => ({ id: e.id, source: e.source, target: e.target, type: e.label || 'connected_to', label: e.label || '' }))
+    return graph.edges.map(e => ({ ...e, id: e.id, source: e.source, target: e.target, type: e.type || 'unknown', label: e.label || '', circuit_ids: (e as any).circuit_ids || [], confidence: (e as any).confidence }))
   }, [graph])
+
+  // Highlight nodes/edges belonging to selected circuit
+  const visNodes = useMemo(() => {
+    if (!selectedId) return gNodes
+    return gNodes.map(n => ({ ...n, isHighlighted: ((n as any).circuit_ids || []).includes(selectedId) }))
+  }, [gNodes, selectedId])
+  const visEdges = useMemo(() => {
+    if (!selectedId) return gEdges
+    return gEdges.map(e => ({ ...e, isHighlighted: ((e as any).circuit_ids || []).includes(selectedId) }))
+  }, [gEdges, selectedId])
 
   const selectedCircuit = useMemo(() => circuits.find(c => c.id === selectedId), [circuits, selectedId])
 
@@ -194,8 +214,13 @@ export function SymptomQueryPage() {
                   background: selectedId === c.id ? '#fef3c7' : '#fff',
                   boxShadow: selectedId === c.id ? '0 0 0 2px #f59e0b' : '0 1px 3px rgba(0,0,0,0.06)' }}>
                 <div style={{ fontWeight: 600, fontSize: 13 }}>{c.circuit_name}</div>
-                <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{c.circuit_type || 'Unknown'} · {c.step_count} 步骤 · {c.function_count} 功能</div>
-                <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 4 }}>匹配 {(c.match_score * 100).toFixed(0)}%</div>
+                <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{c.circuit_type || 'Unknown'} · {c.step_count}步 · {c.function_count}功能</div>
+                <div style={{ fontSize: 11, marginTop: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ color: '#f59e0b', fontWeight: 600 }}>{(c.relevance || c.match_score * 100).toFixed(0)}分</span>
+                  {(c.matched_categories || []).slice(0, 2).map(cat => (
+                    <span key={cat} style={{ fontSize: 10, padding: '1px 6px', background: '#eef4ff', color: '#2563eb', borderRadius: 3 }}>{cat}</span>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
@@ -205,7 +230,7 @@ export function SymptomQueryPage() {
             <div style={{ flex: 1, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: '#f8fafc', minWidth: 0 }}>
               {graph ? (
                 <ForceGraph
-                  nodes={gNodes} edges={gEdges}
+                  nodes={visNodes} edges={visEdges}
                   focusNode={selectedId}
                   onNodeClick={(id) => setSelectedId(selectedId === id ? null : id)}
                   edgeColors={SYMPTOM_EDGE_COLOR} edgeDashes={SYMPTOM_EDGE_DASH}

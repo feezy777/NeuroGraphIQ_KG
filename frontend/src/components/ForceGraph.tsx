@@ -336,7 +336,7 @@ export function drawGraph(
     .attr('stroke-width', 1.5)
 
   ng.append('text')
-    .text((d: any) => (d.label || '').slice(0, 10))
+    .text((d: any) => { const s = (d.label || ''); return s.length > 24 ? s.slice(0, 22) + '…' : s })
     .attr('dx', 9)
     .attr('dy', 4)
     .style('font-size', '7px')

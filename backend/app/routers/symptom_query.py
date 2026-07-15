@@ -31,10 +31,13 @@ class SymptomAnalyzeRequest(BaseModel):
 
 class SymptomAnalyzeResponse(BaseModel):
     functions: list[str]
+    categories: list[str] = []
+    primary_category: str = "other"
 
 
 class SymptomSearchRequest(BaseModel):
     functions: list[str]
+    categories: list[str] = []
     granularity_level: str = "macro"
 
 
@@ -46,6 +49,8 @@ class CircuitResult(BaseModel):
     function_count: int = 0
     matched_functions: list[str]
     match_score: float
+    relevance: float = 0.0
+    matched_categories: list[str] = []
     steps: list[dict[str, Any]] = []
 
     model_config = {"from_attributes": True}
@@ -57,18 +62,20 @@ class SymptomSearchResponse(BaseModel):
 
 # ── Analyze — LLM symptom → functions ──────────────────────────────────────
 
-ANALYZE_PROMPT = """You are a clinical neuroscientist. Convert the patient's symptom description into standardized brain function terms.
+ANALYZE_PROMPT = """You are a clinical neuroscientist. Convert the patient's symptom description into standardized brain function terms with categories.
+
+Categories (pick ONE per function): motor, sensory, cognitive, emotional, autonomic, memory, language, attention, other
 
 Rules:
-- For 'multi' mode: return 2-5 distinct function terms that could explain the symptoms
-- For 'single' mode: return 1 best-matching function term
-- Use standard neuroanatomical function terminology (e.g., "vestibular dysfunction", "proprioceptive processing", "motor coordination")
-- Reply ONLY a JSON array of strings, nothing else.
+- 'multi' mode: return 2-5 function terms + categories
+- 'single' mode: return 1 function term + category
+- Use standard neuroanatomical terminology
 
-Patient symptoms: {symptom}
-Mode: {mode}
+Output ONLY this JSON object:
+{{"functions":["term1","term2"],"categories":["motor","sensory"],"primary_category":"motor"}}
 
-Output format: ["function1", "function2", ...]"""
+Patient: {symptom}
+Mode: {mode}"""
 
 
 @router.post("/analyze", response_model=SymptomAnalyzeResponse)
@@ -99,18 +106,31 @@ async def analyze_symptom(body: SymptomAnalyzeRequest):
                     continue
         if isinstance(parsed, list):
             functions = [str(f) for f in parsed[:5]]
+            categories = ["other"] * len(functions)
+            primary = "other"
         elif isinstance(parsed, dict):
-            vals = parsed.get("functions") or list(parsed.values())
-            functions = [str(v) for v in vals][:5] if vals else [body.symptom]
+            functions = [str(f) for f in (parsed.get("functions") or [])][:5]
+            categories = [str(c) for c in (parsed.get("categories") or [])][:len(functions)]
+            primary = str(parsed.get("primary_category", categories[0] if categories else "other"))
         else:
             functions = [body.symptom]
-        return SymptomAnalyzeResponse(functions=functions)
+            categories = ["other"]
+            primary = "other"
+        # Ensure categories match function count
+        while len(categories) < len(functions):
+            categories.append("other")
+        return SymptomAnalyzeResponse(functions=functions, categories=categories, primary_category=primary)
     except Exception:
         logger.exception("Symptom analyze failed")
-        return SymptomAnalyzeResponse(functions=[body.symptom])
+        return SymptomAnalyzeResponse(functions=[body.symptom], categories=["other"], primary_category="other")
 
 
-# ── Search — functions → circuits ──────────────────────────────────────────
+# ── Search — functions + categories → circuits (weighted relevance) ────────
+
+_VALID_CATEGORIES = frozenset({
+    "motor", "sensory", "cognitive", "emotional", "autonomic",
+    "memory", "language", "attention", "other",
+})
 
 @router.post("/search", response_model=SymptomSearchResponse)
 async def search_circuits(
@@ -120,116 +140,112 @@ async def search_circuits(
     if not body.functions:
         return SymptomSearchResponse(circuits=[])
 
-    # Build expanded terms: for each function, also include trigram-similar matches
+    symptom_cats = set(c for c in body.categories if c in _VALID_CATEGORIES)
+    if not symptom_cats:
+        symptom_cats = {"other"}
+
+    # Broad candidate fetch — all circuits whose functions match any term
     where_parts = []
     params: dict[str, Any] = {}
     for i, fn in enumerate(body.functions):
         key = f"fn{i}"
-        # Exact ILIKE match gets priority
         where_parts.append(f"(cf.function_domain ILIKE :{key} OR cf.function_term_en ILIKE :{key})")
         params[key] = f"%{fn}%"
-        # Also add trigram similarity scoring (fallback for fuzzy match)
-        tkey = f"tfn{i}"
-        where_parts.append(f"similarity(cf.function_domain, :{tkey}) > 0.15")
-        where_parts.append(f"similarity(cf.function_term_en, :{tkey}) > 0.15")
-        params[tkey] = fn
-
     where_clause = " OR ".join(f"({p})" for p in where_parts)
 
-    # Query circuits with similarity scoring
     query = text(f"""
-        SELECT DISTINCT ON (c.id)
-            c.id, c.circuit_name, c.circuit_type,
-            cf.function_domain, cf.function_term_en,
-            cf.function_role, cf.confidence_score,
-            GREATEST(similarity(cf.function_domain, :sim_q), similarity(cf.function_term_en, :sim_q)) as sim
+        SELECT DISTINCT c.id, c.circuit_name, c.circuit_type,
+               cf.function_domain, cf.function_term_en, cf.function_role,
+               GREATEST(similarity(cf.function_domain, :sim_q), similarity(cf.function_term_en, :sim_q)) as sim
         FROM mirror_circuit_functions cf
         JOIN mirror_region_circuits c ON c.id = cf.circuit_id
         WHERE ({where_clause})
           AND c.granularity_level = :granularity
-        ORDER BY c.id, sim DESC, cf.confidence_score DESC NULLS LAST
-        LIMIT 50
+        LIMIT 200
     """)
     params["granularity"] = body.granularity_level
     params["sim_q"] = " ".join(body.functions)
 
-    result = await session.execute(query, params)
-    rows = result.fetchall()
-
+    rows = (await session.execute(query, params)).fetchall()
     if not rows:
         return SymptomSearchResponse(circuits=[])
 
-    # Group by circuit
+    # Group by circuit, compute relevance
     circuit_data: dict[str, dict] = {}
     for row in rows:
         cid = str(row[0])
-        fn_term = row[4] or row[3] or ""
+        fn_domain = (row[3] or "").strip().lower()
+        fn_term = (row[4] or "").strip().lower()
+        sim = float(row[6] or 0)
         if cid not in circuit_data:
             circuit_data[cid] = {
                 "id": cid,
                 "circuit_name": row[1] or "Unknown",
                 "circuit_type": row[2],
+                "sim": sim,
+                "fn_domains": set(),
                 "matched_functions": [],
+                "matched_categories": set(),
             }
-        if fn_term and fn_term not in circuit_data[cid]["matched_functions"]:
-            circuit_data[cid]["matched_functions"].append(fn_term)
+        d = circuit_data[cid]
+        d["sim"] = max(d["sim"], sim)
+        if fn_domain:
+            d["fn_domains"].add(fn_domain)
+        if fn_term and fn_term not in d["matched_functions"]:
+            d["matched_functions"].append(fn_term)
 
-    # Get step counts & function counts per circuit
-    circuit_ids = list(circuit_data.keys())
-    circuits = []
-
-    for cid in circuit_ids:
-        data = circuit_data[cid]
+    # Weighted relevance scoring per circuit
+    scored = []
+    for cid, d in circuit_data.items():
         uid = uuid.UUID(cid)
+        # Count total functions for density
+        func_count = await session.scalar(
+            select(func.count()).select_from(MirrorCircuitFunction).where(
+                MirrorCircuitFunction.circuit_id == uid
+            )
+        ) or 1
+        # Category match: how many of this circuit's function domains match symptom categories
+        circuit_cats = set()
+        for fd in d["fn_domains"]:
+            for sc in symptom_cats:
+                if sc in fd or fd in sc:
+                    circuit_cats.add(sc)
+        d["matched_categories"] = list(circuit_cats)
+        cat_bonus = min(30, len(circuit_cats) * 10)  # 0-30
+        sim_score = min(50, d["sim"] * 50)            # 0-50
+        density = min(20, len(d["matched_functions"]) / max(func_count, 1) * 20)  # 0-20
+        relevance = cat_bonus + sim_score + density
+        d["relevance"] = round(relevance, 1)
+        d["func_count"] = func_count
+        scored.append(d)
 
-        # Count steps
+    # Filter relevance >= 15, sort DESC, top 50
+    scored = [d for d in scored if d["relevance"] >= 15]
+    scored.sort(key=lambda d: d["relevance"], reverse=True)
+    scored = scored[:50]
+
+    # Build CircuitResult list
+    circuits = []
+    for d in scored:
+        uid = uuid.UUID(d["id"])
         step_count = await session.scalar(
             select(func.count()).select_from(MirrorCircuitStep).where(
                 MirrorCircuitStep.circuit_id == uid
             )
         ) or 0
-
-        # Count total functions
-        func_count = await session.scalar(
-            select(func.count()).select_from(MirrorCircuitFunction).where(
-                MirrorCircuitFunction.circuit_id == uid
-            )
-        ) or 0
-
-        # Match score = matched / total functions
-        total_fn = max(func_count, 1)
-        match_score = min(1.0, len(data["matched_functions"]) / total_fn)
-
-        # Get steps detail
         steps_result = await session.execute(
-            select(MirrorCircuitStep)
-            .where(MirrorCircuitStep.circuit_id == uid)
-            .order_by(MirrorCircuitStep.step_order)
+            select(MirrorCircuitStep).where(MirrorCircuitStep.circuit_id == uid).order_by(MirrorCircuitStep.step_order)
         )
-        steps = [
-            {
-                "id": str(s.id),
-                "step_order": s.step_order,
-                "step_name": s.step_name,
-                "step_type": s.step_type,
-                "role": s.role,
-            }
-            for s in steps_result.scalars().all()
-        ]
-
+        steps = [{"id": str(s.id), "step_order": s.step_order, "step_name": s.step_name, "step_type": s.step_type, "role": s.role}
+                 for s in steps_result.scalars().all()]
         circuits.append(CircuitResult(
-            id=cid,
-            circuit_name=data["circuit_name"],
-            circuit_type=data["circuit_type"],
-            step_count=step_count,
-            function_count=func_count,
-            matched_functions=data["matched_functions"],
-            match_score=round(match_score, 2),
+            id=d["id"], circuit_name=d["circuit_name"], circuit_type=d["circuit_type"],
+            step_count=step_count, function_count=d["func_count"],
+            matched_functions=d["matched_functions"][:10],
+            match_score=round(min(1.0, len(d["matched_functions"]) / max(d["func_count"], 1)), 2),
+            relevance=d["relevance"], matched_categories=d.get("matched_categories", []),
             steps=steps,
         ))
-
-    # Sort by match_score desc
-    circuits.sort(key=lambda c: c.match_score, reverse=True)
 
     return SymptomSearchResponse(circuits=circuits)
 
@@ -392,151 +408,63 @@ async def get_circuit_graph(
     body: GraphDataRequest,
     session: AsyncSession = Depends(get_db),
 ):
+    """Unified brain-region + connection graph. Each node/edge carries `circuit_ids`
+    so the frontend can highlight one circuit's path through the network."""
     cids = [uuid.UUID(c) for c in body.circuit_ids if c]
     if not cids:
         return GraphDataResponse(nodes=[], edges=[])
 
-    from app.models.mirror_kg import MirrorRegionCircuit
-    circ_result = await session.execute(
-        select(MirrorRegionCircuit).where(MirrorRegionCircuit.id.in_(cids))
-    )
-    all_circs = circ_result.scalars().all()
-
-    nodes: list[dict] = []
-    edges: list[dict] = []
-    edge_set: set[str] = set()
-
-    # Circuit nodes
-    for circ in all_circs:
-        cid = str(circ.id)
-        nodes.append({
-            "id": cid,
-            "label": circ.circuit_name or cid[:12],
-            "type": "circuit",
-        })
-
-    if not all_circs:
-        return GraphDataResponse(nodes=nodes, edges=edges)
-
-    steps_query = text("""
-        SELECT
-            s.id,
-            s.circuit_id::text,
-            s.step_order,
-            s.step_name,
-            s.role,
-            s.region_candidate_id::text,
-            COALESCE(c.en_name, c.std_name, c.raw_name, s.step_name) as region_label
+    # ── Step → region mapping per circuit ──────────────────────────────────
+    steps_sql = text("""
+        SELECT s.circuit_id::text, s.region_candidate_id::text,
+               COALESCE(cbr.en_name, cbr.std_name, cbr.raw_name, s.step_name) as label
         FROM mirror_circuit_steps s
-        LEFT JOIN candidate_brain_regions c ON c.id = s.region_candidate_id
-        WHERE s.circuit_id = ANY(:cids)
-        ORDER BY s.circuit_id, s.step_order
+        LEFT JOIN candidate_brain_regions cbr ON cbr.id = s.region_candidate_id
+        WHERE s.circuit_id = ANY(:cids) AND s.region_candidate_id IS NOT NULL
     """)
-    steps_result = await session.execute(steps_query, {"cids": cids})
-    step_rows = steps_result.fetchall()
+    rows = (await session.execute(steps_sql, {"cids": cids})).fetchall()
+    if not rows:
+        return GraphDataResponse(nodes=[], edges=[])
 
-    # Group steps by circuit
-    steps_by_circuit: dict[str, list[dict]] = {}
+    # Dedup by region_candidate_id — one node per unique brain region
+    region_circuits: dict[str, set[str]] = {}
+    region_labels: dict[str, str] = {}
+    for row in rows:
+        cid = str(row[0]); rid = str(row[1]); label = row[2] or "?"
+        region_circuits.setdefault(rid, set()).add(cid)
+        region_labels[rid] = label
 
-    for row in step_rows:
-        sid = str(row[0])
-        scid = str(row[1])
-        step_order = row[2]
-        step_name = row[3] or "Unknown"
-        role = row[4] or "unknown"
-        region_candidate_id = row[5] if row[5] and row[5] != "None" else None
-        region_label = row[6] or step_name
+    nodes = [{"id": rid, "type": "brain_region", "label": region_labels[rid],
+              "circuit_ids": sorted(region_circuits[rid])} for rid in region_circuits]
 
-        if scid not in steps_by_circuit:
-            steps_by_circuit[scid] = []
+    # ── Connections between these brain regions ─────────────────────────────
+    rids = list(region_circuits.keys())
+    if len(rids) < 2:
+        return GraphDataResponse(nodes=nodes, edges=[])
 
-        # One node per step (no dedup — enables co_occurs edges across circuits)
-        node_id = f"step_{sid[:12]}"
+    conn_sql = text("""
+        SELECT id::text, source_region_candidate_id::text, target_region_candidate_id::text,
+               connection_type, confidence, strength,
+               COALESCE(source_region_name_en,'') sname, COALESCE(target_region_name_en,'') tname
+        FROM mirror_region_connections
+        WHERE source_region_candidate_id = ANY(:rids)
+          AND target_region_candidate_id = ANY(:rids)
+          AND granularity_level = :gran
+        LIMIT 5000
+    """)
+    cr = (await session.execute(conn_sql, {"rids": rids, "gran": body.granularity_level})).fetchall()
 
-        info = {
-            "id": sid,
-            "node_id": node_id,
-            "circuit_id": scid,
-            "step_order": step_order,
-            "step_name": step_name,
-            "role": role,
-            "region_label": region_label,
-            "region_candidate_id": region_candidate_id,
-        }
-        steps_by_circuit[scid].append(info)
-
-        # Add brain_region node
-        region_node: dict[str, object] = {
-            "id": node_id,
-            "type": "brain_region",
-            "label": region_label,
-            "circuit_id": scid,
-            "step_order": step_order,
-            "role": role,
-            "step_name": step_name,
-        }
-        if region_candidate_id:
-            region_node["region_candidate_id"] = region_candidate_id
-        nodes.append(region_node)
-
-        # belongs_to edge: brain_region node -> circuit
-        belongs_key = f"belongs_{node_id}_{scid}"
-        if belongs_key not in edge_set:
-            edge_set.add(belongs_key)
-            edges.append({
-                "id": belongs_key,
-                "source": node_id,
-                "target": scid,
-                "label": "belongs_to",
-            })
-
-    # step_flow edges: consecutive steps within same circuit
-    for scid, steps in steps_by_circuit.items():
-        for i in range(len(steps) - 1):
-            source_id = steps[i]["node_id"]
-            target_id = steps[i + 1]["node_id"]
-            flow_key = f"flow_{source_id}_{target_id}"
-            if flow_key not in edge_set:
-                edge_set.add(flow_key)
-                edges.append({
-                    "id": flow_key,
-                    "source": source_id,
-                    "target": target_id,
-                    "label": "step_flow",
-                })
-
-    # co_occurs edges: connect brain_region nodes from DIFFERENT circuits
-    # sharing the same region_candidate_id
-    region_to_nodes: dict[str, list[dict]] = {}
-    for scid, steps in steps_by_circuit.items():
-        for step in steps:
-            rc_id = step.get("region_candidate_id")
-            if rc_id:
-                if rc_id not in region_to_nodes:
-                    region_to_nodes[rc_id] = []
-                region_to_nodes[rc_id].append(step)
-
-    for rc_id, steps in region_to_nodes.items():
-        if len(steps) < 2:
-            continue
-        # Only connect steps from different circuits
-        circuit_ids_set = set(s["circuit_id"] for s in steps)
-        if len(circuit_ids_set) < 2:
-            continue
-        for i in range(len(steps)):
-            for j in range(i + 1, len(steps)):
-                if steps[i]["circuit_id"] != steps[j]["circuit_id"]:
-                    si = steps[i]["node_id"]
-                    sj = steps[j]["node_id"]
-                    co_key = f"co_{si}_{sj}"
-                    if co_key not in edge_set:
-                        edge_set.add(co_key)
-                        edges.append({
-                            "id": co_key,
-                            "source": si,
-                            "target": sj,
-                            "label": "co_occurs",
-                        })
+    cid_set = set(str(c) for c in cids)
+    edges = []
+    for row in cr:
+        eid = str(row[0]); src = str(row[1]); tgt = str(row[2])
+        ecids = sorted((region_circuits.get(src, set()) | region_circuits.get(tgt, set())) & cid_set)
+        edges.append({
+            "id": eid, "source": src, "target": tgt,
+            "type": row[3] or "unknown", "confidence": float(row[4] or 0),
+            "strength": float(row[5] or 0), "source_name": row[6] or "", "target_name": row[7] or "",
+            "circuit_ids": ecids,
+        })
 
     return GraphDataResponse(nodes=nodes, edges=edges)
 
