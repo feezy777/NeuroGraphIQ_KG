@@ -136,7 +136,7 @@ export function SymptomQueryPage() {
         {phase !== 'results' && (
           <>
             {messages.length > 0 && (
-              <div style={{ maxHeight: 280, overflow: 'auto', marginBottom: 12 }}>
+              <div style={{ maxHeight: 420, overflow: 'auto', marginBottom: 16 }}>
                 {messages.map((m, i) => (
                   <div key={i} style={{
                     display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 8,
