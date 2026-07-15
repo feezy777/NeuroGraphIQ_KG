@@ -181,6 +181,26 @@ export function ForceGraph({
       .attr('stroke-opacity', (d: any) => confOpacity ? Math.min(0.6, 0.08 + (d.confidence || 0.3)) : 0.4)
   }, [confOpacity])
 
+  // Highlight update — when selected circuit changes, update nodes+edges in-place
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const svg = d3.select(el)
+    // Nodes: circle radius, fill, stroke
+    svg.selectAll('circle')
+      .transition().duration(200)
+      .attr('r', function(this: any) { const d = d3.select(this).datum() as any; return (highlightedNodeIds?.has(d.id) ? 12 : (nodeRadii[d.type] || 6)) })
+      .attr('fill', function(this: any) { const d = d3.select(this).datum() as any; return (highlightedNodeIds?.has(d.id) ? '#ef4444' : (nodeColors[d.type] || '#999')) })
+      .attr('stroke', function(this: any) { const d = d3.select(this).datum() as any; return (highlightedNodeIds?.has(d.id) ? '#ef4444' : '#fff') })
+      .attr('stroke-width', function(this: any) { const d = d3.select(this).datum() as any; return (highlightedNodeIds?.has(d.id) ? 3 : 1.5) })
+    // Edges: stroke, width, opacity
+    svg.selectAll('line')
+      .transition().duration(200)
+      .attr('stroke', function(this: any) { const d = d3.select(this).datum() as any; return (highlightedEdgeIds?.has(d.id) ? '#ef4444' : (edgeColors[d.type] || '#d1d5db')) })
+      .attr('stroke-width', function(this: any) { const d = d3.select(this).datum() as any; return (highlightedEdgeIds?.has(d.id) ? 3 : Math.max(0.3, (d.confidence || 0.3) * 1.5)) })
+      .attr('stroke-opacity', function(this: any) { const d = d3.select(this).datum() as any; return (highlightedEdgeIds?.has(d.id) ? 0.85 : (confOpacity ? Math.min(0.6, 0.08 + (d.confidence || 0.3)) : 0.4)) })
+  }, [highlightedNodeIds, highlightedEdgeIds])
+
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div ref={ref} style={{ flex: 1, minHeight: 0 }} />
