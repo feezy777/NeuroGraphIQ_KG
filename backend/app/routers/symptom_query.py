@@ -475,13 +475,17 @@ async def get_circuit_graph(
             "step_name": row[4] or "",
         })
         if not rid:
-            continue
+            # Fallback: steps without resolved region use synthetic ID so the circuit
+            # still has visible nodes (otherwise circuits like cortical_thalamic_sensory
+            # show "no nodes" even though they have steps).
+            rid = f"{cid}:{step_id}"
         region_circuits.setdefault(rid, set()).add(cid)
-        region_metadata[rid] = {
-            "label": row[5] or row[4] or "?",
-            "name_en": row[6] or "",
-            "name_cn": row[7] or "",
-        }
+        if rid not in region_metadata:
+            region_metadata[rid] = {
+                "label": row[5] or row[4] or "?",
+                "name_en": row[6] or "",
+                "name_cn": row[7] or "",
+            }
 
     nodes = [
         {
