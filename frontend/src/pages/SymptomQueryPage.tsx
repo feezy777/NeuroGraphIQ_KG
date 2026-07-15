@@ -3,7 +3,9 @@ import { PageHeader } from '../components/PageHeader'
 import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
 import { useI18n } from '../i18n-context'
 import { postJson } from '../api/client'
-import { ForceGraph, type GNode, type GEdge, type LegendItem } from '../components/ForceGraph'
+import { SymptomCircuitGraph } from './symptom-query/SymptomCircuitGraph'
+import { normalizeSymptomGraph } from './symptom-query/normalizeSymptomGraph'
+import type { NormalizedEdge, RawGraphData } from './symptom-query/symptomGraphTypes'
 
 interface CircuitResult {
   id: string; circuit_name: string; circuit_type: string | null
@@ -11,33 +13,6 @@ interface CircuitResult {
   relevance: number; matched_categories: string[]
   steps: { id: string; step_order: number; step_name: string; step_type: string; role: string }[]
 }
-interface GraphNode { id: string; label: string; type: string; circuit_ids?: string[]; [key: string]: any }
-interface GraphEdge { id: string; source: string; target: string; type: string; label?: string; circuit_ids?: string[]; confidence?: number }
-interface GraphData { nodes: GraphNode[]; edges: GraphEdge[] }
-
-// ── Match GraphExplorerPage legend — connection types only ───────────────────
-const SYMPTOM_EDGE_COLOR: Record<string, string> = {
-  structural_connection: '#3b82f6', functional_connectivity: '#f59e0b', projection: '#10b981',
-  association: '#8b5cf6', coactivation: '#ec4899', effective_connectivity: '#ef4444',
-  uncertain_connection: '#9ca3af', step_flow: '#10b981', unknown: '#d1d5db',
-}
-const SYMPTOM_EDGE_DASH: Record<string, string> = {
-  structural_connection: '', functional_connectivity: '6,3', projection: '2,2',
-  association: '', coactivation: '', effective_connectivity: '', uncertain_connection: '', step_flow: '2,2',
-}
-const SYMPTOM_NODE_COLOR: Record<string, string> = { brain_region: '#3b82f6' }
-const SYMPTOM_NODE_R: Record<string, number> = { brain_region: 7 }
-const SYMPTOM_LEGEND: LegendItem[] = [
-  { color: '#3b82f6', dash: '', label: '● 脑区(Region)' },
-  { color: '#3b82f6', dash: '', label: '结构连接' },
-  { color: '#f59e0b', dash: '6,3', label: '功能连接' },
-  { color: '#10b981', dash: '2,2', label: '投射' },
-  { color: '#8b5cf6', dash: '', label: '关联' },
-  { color: '#ec4899', dash: '', label: '共激活' },
-  { color: '#ef4444', dash: '', label: '有效连接' },
-  { color: '#9ca3af', dash: '', label: '不确定' },
-  { color: '#10b981', dash: '2,2', label: '步骤推断连接' },
-]
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
@@ -47,8 +22,9 @@ export function SymptomQueryPage() {
   const [error, setError] = useState<string | null>(null)
   const [stdFunctions, setStdFunctions] = useState<string[]>([]); const [circuits, setCircuits] = useState<CircuitResult[]>([])
   const [selectedCircuitId, setSelectedCircuitId] = useState<string | null>(null)
-  const [graph, setGraph] = useState<GraphData | null>(null)
-  const [graphMode, setGraphMode] = useState<'all' | 'step'>('all')
+  const [graph, setGraph] = useState<RawGraphData | null>(null)
+  const [selectedStepIndex, setSelectedStepIndex] = useState<number | null>(null)
+  const [selectedGraphEdge, setSelectedGraphEdge] = useState<NormalizedEdge | null>(null)
 
   const [phase, setPhase] = useState<'idle'|'chatting'|'summarizing'|'analyzing'|'results'>('idle')
   const [messages, setMessages] = useState<{role:string;content:string}[]>([])
@@ -90,7 +66,7 @@ export function SymptomQueryPage() {
     if (!summary.trim()) return
     const runId = analysisRunRef.current + 1
     analysisRunRef.current = runId
-    setPhase('analyzing'); setError(null); setGraph(null); setSelectedCircuitId(null)
+    setPhase('analyzing'); setError(null); setGraph(null); setSelectedCircuitId(null); setSelectedStepIndex(null); setSelectedGraphEdge(null)
     setCircuits([]); setStdFunctions([])
     try {
       const ar = await postJson<{functions:string[];categories:string[];primary_category:string}>('/api/symptom-query/analyze', { symptom: summary.trim(), mode })
@@ -107,11 +83,14 @@ export function SymptomQueryPage() {
       if (analysisRunRef.current !== runId) return
       const found = sr.circuits || []; setCircuits(found)
       if (found.length > 0) {
-        const gr = await postJson<GraphData>('/api/symptom-query/graph', {
+        const gr = await postJson<RawGraphData>('/api/symptom-query/graph', {
           circuit_ids: found.map(c => c.id), granularity_level: granularity,
         })
         if (analysisRunRef.current !== runId) return
         setGraph(gr)
+        // Default to a single matched circuit so the first render remains
+        // bounded instead of showing every query-related relationship.
+        setSelectedCircuitId(found[0].id)
       } else {
         setGraph(null)
       }
@@ -126,73 +105,17 @@ export function SymptomQueryPage() {
   const handleClear = useCallback(() => {
     analysisRunRef.current += 1
     setPhase('idle'); setMessages([]); setSummary(''); setChatInput('')
-    setStdFunctions([]); setCircuits([]); setError(null); setGraph(null); setSelectedCircuitId(null)
+    setStdFunctions([]); setCircuits([]); setError(null); setGraph(null); setSelectedCircuitId(null); setSelectedStepIndex(null); setSelectedGraphEdge(null)
   }, [])
 
   const matchedCircuitIds = useMemo(
     () => new Set(circuits.map(circuit => circuit.id)),
     [circuits],
   )
-  const scopedNodeIds = useMemo(() => {
-    if (!graph) return new Set<string>()
-    return new Set(
-      graph.nodes
-        .filter(node => (node.circuit_ids || []).some(id => matchedCircuitIds.has(id)))
-        .map(node => node.id),
-    )
-  }, [graph, matchedCircuitIds])
-
-  const gNodes: GNode[] = useMemo(() => {
-    if (!graph) return []
-    return graph.nodes
-      .filter(node => scopedNodeIds.has(node.id))
-      .map(node => ({ ...node, circuit_ids: node.circuit_ids || [] }))
-  }, [graph, scopedNodeIds])
-
-  const gEdges: GEdge[] = useMemo(() => {
-    if (!graph) return []
-    // Defense in depth: never render edges outside the function-matched circuits,
-    // even if an old or malformed backend response contains global graph data.
-    return graph.edges
-      .filter(edge =>
-        (edge.circuit_ids || []).some(id => matchedCircuitIds.has(id))
-        && scopedNodeIds.has(edge.source)
-        && scopedNodeIds.has(edge.target),
-      )
-      .map(e => ({
-        ...e,
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        type: e.type || 'unknown',
-        label: e.label || `${(e as any).source_name || e.source} → ${(e as any).target_name || e.target}`,
-        circuit_ids: e.circuit_ids || [],
-        confidence: e.confidence,
-      }))
-  }, [graph, matchedCircuitIds, scopedNodeIds])
-
-  // Compute highlight sets when a circuit is selected
-  const hlNodeIds = useMemo(() => {
-    if (!selectedCircuitId) return undefined
-    return new Set(gNodes.filter(n => ((n as any).circuit_ids || []).includes(selectedCircuitId)).map(n => n.id))
-  }, [gNodes, selectedCircuitId])
-  const hlEdgeIds = useMemo(() => {
-    if (!selectedCircuitId) return undefined
-    return new Set(gEdges.filter(e => ((e as any).circuit_ids || []).includes(selectedCircuitId)).map(e => e.id))
-  }, [gEdges, selectedCircuitId])
-
-  // Step-mode: only show nodes/edges belonging to the selected circuit
-  const stepNodes = useMemo(() => {
-    if (!selectedCircuitId) return gNodes
-    return gNodes.filter(n => ((n as any).circuit_ids || []).includes(selectedCircuitId))
-  }, [gNodes, selectedCircuitId])
-  const stepEdges = useMemo(() => {
-    if (!selectedCircuitId) return gEdges
-    return gEdges.filter(e => ((e as any).circuit_ids || []).includes(selectedCircuitId))
-  }, [gEdges, selectedCircuitId])
-
-  const displayNodes = graphMode === 'step' ? stepNodes : gNodes
-  const displayEdges = graphMode === 'step' ? stepEdges : gEdges
+  const graphModel = useMemo(
+    () => normalizeSymptomGraph(graph, matchedCircuitIds),
+    [graph, matchedCircuitIds],
+  )
 
   const selectedCircuit = useMemo(
     () => circuits.find(c => c.id === selectedCircuitId),
@@ -273,13 +196,17 @@ export function SymptomQueryPage() {
         </div>
       )}
       {phase === 'results' && circuits.length > 0 && (
-        <div style={{ display: 'flex', gap: 16, height: 'calc(100vh - 280px)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 260px) minmax(420px, 1fr) minmax(220px, 250px)', gap: 12, height: 'calc(100vh - 250px)', minHeight: 560 }}>
           {/* Left: circuit list */}
-          <div style={{ width: 320, overflow: 'auto', flexShrink: 0 }}>
+          <div style={{ overflow: 'auto', minWidth: 0 }}>
             <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>匹配回路 ({circuits.length})</div>
             {circuits.map(c => (
               <button type="button" key={c.id} aria-pressed={selectedCircuitId === c.id}
-                onClick={() => setSelectedCircuitId(selectedCircuitId === c.id ? null : c.id)}
+                onClick={() => {
+                  setSelectedCircuitId(selectedCircuitId === c.id ? null : c.id)
+                  setSelectedStepIndex(null)
+                  setSelectedGraphEdge(null)
+                }}
                 style={{ display: 'block', width: '100%', textAlign: 'left', font: 'inherit', padding: 10, marginBottom: 8, cursor: 'pointer', border: 0, borderRadius: 6,
                   borderLeft: `3px solid hsl(${Math.round(c.match_score * 240)},70%,${Math.round(30 + c.match_score * 40)}%)`,
                   background: selectedCircuitId === c.id ? '#fef3c7' : '#fff',
@@ -296,50 +223,27 @@ export function SymptomQueryPage() {
             ))}
           </div>
 
-          {/* Right: graph + detail sidebar */}
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 12 }}>
-            <div style={{ flex: 1, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: '#f8fafc', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', fontSize: 11, color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
-                <span>脑区 {displayNodes.length} · 连接 {displayEdges.length}</span>
-                <button className={`btn btn-sm ${graphMode === 'all' ? 'btn-primary' : ''}`} onClick={() => setGraphMode('all')}>全部相关</button>
-                <button className={`btn btn-sm ${graphMode === 'step' ? 'btn-primary' : ''}`} onClick={() => setGraphMode('step')} disabled={!selectedCircuitId}>步骤聚焦</button>
-                {selectedCircuit && <span>已高亮：{selectedCircuit.circuit_name}</span>}
-              </div>
-              {graph && gNodes.length > 0 ? (
-                <>
-                  <div style={{ flex: 1, minHeight: 0 }}>
-                    <ForceGraph
-                      nodes={displayNodes} edges={displayEdges}
-                      focusNode={null}
-                      highlightedNodeIds={hlNodeIds}
-                      highlightedEdgeIds={hlEdgeIds}
-                      edgeColors={SYMPTOM_EDGE_COLOR} edgeDashes={SYMPTOM_EDGE_DASH}
-                      nodeColors={SYMPTOM_NODE_COLOR} nodeRadii={SYMPTOM_NODE_R}
-                      legendItems={SYMPTOM_LEGEND}
-                    />
-                  </div>
-                  {selectedCircuit && (hlEdgeIds?.size || 0) === 0 && (
-                    <div style={{ padding: '6px 12px', color: '#92400e', background: '#fffbeb', fontSize: 11 }}>
-                      该回路暂无可连接的已解析步骤，仅高亮相关脑区。
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: '#94a3b8', fontSize: 13 }}>
-                  匹配回路暂无已解析的脑区图数据
-                </div>
-              )}
-            </div>
+          <div style={{ minWidth: 0, minHeight: 0 }}>
+            <SymptomCircuitGraph
+              model={graphModel}
+              selectedCircuit={selectedCircuit || null}
+              selectedCircuitId={selectedCircuitId}
+              selectedStepIndex={selectedStepIndex}
+              onSelectedStepIndexChange={setSelectedStepIndex}
+              onEdgeSelect={setSelectedGraphEdge}
+            />
+          </div>
 
-            {/* Circuit detail sidebar */}
-            {selectedCircuit && (
-              <div style={{ width: 280, flexShrink: 0, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 14, background: '#fff' }}>
+          {/* Circuit detail sidebar */}
+          <div style={{ minWidth: 0, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 10, padding: 14, background: '#fff' }}>
+            {selectedCircuit ? (
+              <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 14, color: '#1f2937' }}>{selectedCircuit.circuit_name}</div>
                     <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{selectedCircuit.circuit_type || 'Unknown'} · 匹配 {(selectedCircuit.match_score * 100).toFixed(0)}%</div>
                   </div>
-                  <button className="btn btn-sm" onClick={() => setSelectedCircuitId(null)} style={{ fontSize: 11 }}>✕</button>
+                  <button className="btn btn-sm" onClick={() => { setSelectedCircuitId(null); setSelectedStepIndex(null) }} style={{ fontSize: 11 }}>✕</button>
                 </div>
 
                 <div style={{ marginBottom: 12 }}>
@@ -354,10 +258,11 @@ export function SymptomQueryPage() {
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>步骤 ({selectedCircuit.step_count})</div>
                   {selectedCircuit.steps.map((s, i) => (
-                    <div key={s.id} style={{ fontSize: 11, padding: '3px 0', borderBottom: i < selectedCircuit.steps.length - 1 ? '1px solid #f3f4f6' : 'none', display: 'flex', justifyContent: 'space-between' }}>
+                    <button type="button" key={s.id} onClick={() => setSelectedStepIndex(i)}
+                      style={{ width: '100%', border: 0, background: selectedStepIndex === i ? '#fff7ed' : 'transparent', color: 'inherit', cursor: 'pointer', textAlign: 'left', fontSize: 11, padding: '5px 3px', borderBottom: i < selectedCircuit.steps.length - 1 ? '1px solid #f3f4f6' : 'none', display: 'flex', justifyContent: 'space-between' }}>
                       <span>{s.step_order}. {s.step_name}</span>
                       <span style={{ color: '#888', fontSize: 10, textTransform: 'uppercase' }}>{s.role}</span>
-                    </div>
+                    </button>
                   ))}
                 </div>
 
@@ -369,7 +274,20 @@ export function SymptomQueryPage() {
                     </div>
                   </div>
                 )}
-              </div>
+                {selectedGraphEdge && (
+                  <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 5 }}>当前连接</div>
+                    <div style={{ fontSize: 11, color: '#334155', lineHeight: 1.7, wordBreak: 'break-word' }}>
+                      <div>{selectedGraphEdge.label}</div>
+                      <div>类型：{selectedGraphEdge.type} · 方向：{selectedGraphEdge.source} → {selectedGraphEdge.target}</div>
+                      <div>置信度：{(selectedGraphEdge.confidence * 100).toFixed(0)}%{selectedGraphEdge.strength ? ` · 强度：${selectedGraphEdge.strength}` : ''}</div>
+                      {selectedGraphEdge.evidenceText && <div>证据：{selectedGraphEdge.evidenceText}</div>}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ color: '#94a3b8', fontSize: 13, paddingTop: 24, textAlign: 'center' }}>选择左侧回路后查看步骤、功能和统计信息</div>
             )}
           </div>
         </div>

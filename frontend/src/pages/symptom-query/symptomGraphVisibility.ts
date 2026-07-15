@@ -150,17 +150,12 @@ export function computeSymptomGraphVisibility(
     opts.stepRegionIds[opts.selectedStepIndex]
   ) {
     const rid = opts.stepRegionIds[opts.selectedStepIndex]
-    for (const e of visibleEdges) {
-      if (e.source === rid || e.target === rid) {
-        if (opts.selectedCircuitId && e.circuitIds.includes(opts.selectedCircuitId)) {
-          activeStepEdgeIds.add(e.id)
-        }
-      }
-    }
     const prevRid = opts.stepRegionIds[opts.selectedStepIndex - 1]
-    if (prevRid) {
-      for (const e of visibleEdges) {
-        if (e.source === prevRid && e.target === rid) activeStepEdgeIds.add(e.id)
+    const nextRid = opts.stepRegionIds[opts.selectedStepIndex + 1]
+    for (const e of visibleEdges) {
+      if (!opts.selectedCircuitId || !e.circuitIds.includes(opts.selectedCircuitId)) continue
+      if ((prevRid && e.source === prevRid && e.target === rid) || (nextRid && e.source === rid && e.target === nextRid)) {
+        activeStepEdgeIds.add(e.id)
       }
     }
   }
@@ -182,6 +177,9 @@ export function computeSymptomGraphVisibility(
     edgeNodeIds.add(e.source)
     edgeNodeIds.add(e.target)
   })
+  // Keep every region in the selected circuit visible even if its adjacent
+  // edge has no resolved endpoint or is filtered by the confidence control.
+  coreNodeIds.forEach(id => edgeNodeIds.add(id))
 
   return {
     nodes: allNodes.filter(n => visibleNodeIds.has(n.id) && edgeNodeIds.has(n.id)),

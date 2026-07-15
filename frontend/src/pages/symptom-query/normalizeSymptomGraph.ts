@@ -11,6 +11,10 @@ import type {
 
 const UNKNOWN_LABELS = new Set(['', '?', 'unknown', 'unknown_region', 'Unknown', 'UNKNOWN'])
 
+function isAmbiguousRegionId(id: string): boolean {
+  return UNKNOWN_LABELS.has(id.trim())
+}
+
 function endpointId(raw: unknown): string {
   if (raw == null) return ''
   if (typeof raw === 'object') {
@@ -138,7 +142,9 @@ export function normalizeSymptomGraph(
   const nodeMap = new Map<string, NormalizedNode>()
   for (const rawNode of raw.nodes) {
     const id = endpointId(rawNode.id)
-    if (!id) continue
+    // A shared placeholder such as unknown_region cannot safely represent
+    // multiple missing regions. Exclude it instead of silently merging them.
+    if (!id || isAmbiguousRegionId(id)) continue
     const names = displayName(rawNode)
     if (names.nameMissing) stats.missingNameCount += 1
     const circuitIds = (rawNode.circuit_ids || [])
@@ -166,7 +172,7 @@ export function normalizeSymptomGraph(
   for (const rawEdge of raw.edges) {
     const source = pickEndpoint(rawEdge, 'source')
     const target = pickEndpoint(rawEdge, 'target')
-    if (!source || !target) {
+    if (!source || !target || isAmbiguousRegionId(source) || isAmbiguousRegionId(target)) {
       stats.invalidEndpointCount += 1
       continue
     }
@@ -200,6 +206,8 @@ export function normalizeSymptomGraph(
       type,
       label: String(rawEdge.label || `${srcName} → ${tgtName}`),
       confidence: Number(rawEdge.confidence ?? 0.3),
+      strength: String(rawEdge.strength ?? ''),
+      evidenceText: String(rawEdge.evidence_text ?? rawEdge.evidence ?? ''),
       circuitIds: [...new Set(circuitIds)],
       isStepFlow: type === 'step_flow' || String(rawEdge.id).startsWith('step-flow:'),
       isInvalid: type === 'invalid' || type === 'model_conflict',

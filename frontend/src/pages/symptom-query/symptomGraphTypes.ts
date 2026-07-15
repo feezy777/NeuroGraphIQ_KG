@@ -54,6 +54,8 @@ export interface NormalizedEdge {
   type: string
   label: string
   confidence: number
+  strength: string
+  evidenceText: string
   circuitIds: string[]
   isStepFlow: boolean
   isInvalid: boolean
