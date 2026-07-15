@@ -396,56 +396,151 @@ async def get_circuit_graph(
     if not cids:
         return GraphDataResponse(nodes=[], edges=[])
 
-    cid_list = ",".join(f"'{c}'" for c in body.circuit_ids if c)
-
     from app.models.mirror_kg import MirrorRegionCircuit
     circ_result = await session.execute(
         select(MirrorRegionCircuit).where(MirrorRegionCircuit.id.in_(cids))
     )
     all_circs = circ_result.scalars().all()
+
     nodes: list[dict] = []
-    edge_set: set[str] = set()
     edges: list[dict] = []
-    circ_map: dict[str, str] = {}
+    edge_set: set[str] = set()
 
+    # Circuit nodes
     for circ in all_circs:
         cid = str(circ.id)
-        name = circ.circuit_name or cid[:12]
-        circ_map[name] = cid
-        nodes.append({"id": cid, "label": name, "type": "circuit"})
+        nodes.append({
+            "id": cid,
+            "label": circ.circuit_name or cid[:12],
+            "type": "circuit",
+        })
 
-    import re
-    region_nodes: dict[str, str] = {}
-    for circ_name in circ_map:
-        parts = re.split(r'\s*[→\-]+\s*|\s+circuit\s*|\s+pathway\s*|\s+connection\s*', circ_name, flags=re.IGNORECASE)
-        for part in parts:
-            part = part.strip().lower()
-            if len(part) < 3 or part in ('left','right','the','and','or','to','from','unknown'):
-                continue
-            if part not in region_nodes:
-                rid = f"region_{len(region_nodes)}"
-                region_nodes[part] = rid
-                nodes.append({"id": rid, "label": part.title(), "type": "brain_region"})
+    if not all_circs:
+        return GraphDataResponse(nodes=nodes, edges=edges)
 
-    for circ in all_circs:
-        cid = str(circ.id)
-        circ_parts = re.split(r'\s*[→\-]+\s*|\s+circuit\s*|\s+pathway\s*', circ.circuit_name or '', flags=re.IGNORECASE)
-        circ_regions = []
-        for part in circ_parts:
-            part = part.strip().lower()
-            if part in region_nodes:
-                rid = region_nodes[part]
-                circ_regions.append(rid)
-                key = f"{cid}-{rid}"
-                if key not in edge_set:
-                    edge_set.add(key)
-                    edges.append({"id": key, "source": cid, "target": rid, "label": "belongs_to"})
-        for i in range(len(circ_regions)):
-            for j in range(i+1, len(circ_regions)):
-                key = f"{circ_regions[i]}-{circ_regions[j]}"
-                if key not in edge_set:
-                    edge_set.add(key)
-                    edges.append({"id": key, "source": circ_regions[i], "target": circ_regions[j], "label": "co_occurs"})
+    # Load steps with region labels via raw SQL
+    cid_list = ",".join(f"'{c}'" for c in body.circuit_ids if c)
+
+    steps_query = text(f"""
+        SELECT
+            s.id,
+            s.circuit_id::text,
+            s.step_order,
+            s.step_name,
+            s.role,
+            s.region_candidate_id::text,
+            COALESCE(c.en_name, c.std_name, c.raw_name, s.step_name) as region_label
+        FROM mirror_circuit_steps s
+        LEFT JOIN candidate_brain_regions c ON c.id = s.region_candidate_id
+        WHERE s.circuit_id IN ({cid_list})
+        ORDER BY s.circuit_id, s.step_order
+    """)
+
+    steps_result = await session.execute(steps_query)
+    step_rows = steps_result.fetchall()
+
+    # Group steps by circuit
+    steps_by_circuit: dict[str, list[dict]] = {}
+
+    for row in step_rows:
+        sid = str(row[0])
+        scid = str(row[1])
+        step_order = row[2]
+        step_name = row[3] or "Unknown"
+        role = row[4] or "unknown"
+        region_candidate_id = row[5] if row[5] and row[5] != "None" else None
+        region_label = row[6] or step_name
+
+        if scid not in steps_by_circuit:
+            steps_by_circuit[scid] = []
+
+        # One node per step (no dedup — enables co_occurs edges across circuits)
+        node_id = f"step_{sid[:12]}"
+
+        info = {
+            "id": sid,
+            "node_id": node_id,
+            "circuit_id": scid,
+            "step_order": step_order,
+            "step_name": step_name,
+            "role": role,
+            "region_label": region_label,
+            "region_candidate_id": region_candidate_id,
+        }
+        steps_by_circuit[scid].append(info)
+
+        # Add brain_region node
+        region_node: dict[str, object] = {
+            "id": node_id,
+            "type": "brain_region",
+            "label": region_label,
+            "circuit_id": scid,
+            "step_order": step_order,
+            "role": role,
+            "step_name": step_name,
+        }
+        if region_candidate_id:
+            region_node["region_candidate_id"] = region_candidate_id
+        nodes.append(region_node)
+
+        # belongs_to edge: brain_region node -> circuit
+        belongs_key = f"belongs_{node_id}_{scid}"
+        if belongs_key not in edge_set:
+            edge_set.add(belongs_key)
+            edges.append({
+                "id": belongs_key,
+                "source": node_id,
+                "target": scid,
+                "label": "belongs_to",
+            })
+
+    # step_flow edges: consecutive steps within same circuit
+    for scid, steps in steps_by_circuit.items():
+        for i in range(len(steps) - 1):
+            source_id = steps[i]["node_id"]
+            target_id = steps[i + 1]["node_id"]
+            flow_key = f"flow_{source_id}_{target_id}"
+            if flow_key not in edge_set:
+                edge_set.add(flow_key)
+                edges.append({
+                    "id": flow_key,
+                    "source": source_id,
+                    "target": target_id,
+                    "label": "step_flow",
+                })
+
+    # co_occurs edges: connect brain_region nodes from DIFFERENT circuits
+    # sharing the same region_candidate_id
+    region_to_nodes: dict[str, list[dict]] = {}
+    for scid, steps in steps_by_circuit.items():
+        for step in steps:
+            rc_id = step.get("region_candidate_id")
+            if rc_id:
+                if rc_id not in region_to_nodes:
+                    region_to_nodes[rc_id] = []
+                region_to_nodes[rc_id].append(step)
+
+    for rc_id, steps in region_to_nodes.items():
+        if len(steps) < 2:
+            continue
+        # Only connect steps from different circuits
+        circuit_ids_set = set(s["circuit_id"] for s in steps)
+        if len(circuit_ids_set) < 2:
+            continue
+        for i in range(len(steps)):
+            for j in range(i + 1, len(steps)):
+                if steps[i]["circuit_id"] != steps[j]["circuit_id"]:
+                    si = steps[i]["node_id"]
+                    sj = steps[j]["node_id"]
+                    co_key = f"co_{si}_{sj}"
+                    if co_key not in edge_set:
+                        edge_set.add(co_key)
+                        edges.append({
+                            "id": co_key,
+                            "source": si,
+                            "target": sj,
+                            "label": "co_occurs",
+                        })
 
     return GraphDataResponse(nodes=nodes, edges=edges)
 
