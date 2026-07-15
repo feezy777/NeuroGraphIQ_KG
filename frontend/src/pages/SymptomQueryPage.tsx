@@ -235,7 +235,9 @@ export function SymptomQueryPage() {
           <div style={{ minWidth: 0, minHeight: 0 }}>
             {summary && (
               <div style={{ marginBottom: 8, padding: '8px 12px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 6, fontSize: 12, color: '#0c4a6e', lineHeight: 1.5 }}>
-                <span style={{ fontWeight: 600 }}>AI 初步诊断：</span>{summary}
+                <span style={{ fontWeight: 600 }}>AI 初步诊断</span>
+                <span style={{ marginLeft: 8, fontSize: 10, color: '#888' }}>（{granularity}）</span>
+                ：{summary}
               </div>
             )}
             <SymptomCircuitGraph
