@@ -117,27 +117,69 @@ function drawGraph(
 
 export function SymptomQueryPage() {
   const { t } = useI18n(); const { granularity } = useGlobalGranularity()
-  const [symptom, setSymptom] = useState(''); const [mode, setMode] = useState<'single' | 'multi'>('multi')
-  const [loading, setLoading] = useState(false); const [error, setError] = useState<string | null>(null)
+  const [mode, setMode] = useState<'single' | 'multi'>('multi')
+  const [error, setError] = useState<string | null>(null)
   const [stdFunctions, setStdFunctions] = useState<string[]>([]); const [circuits, setCircuits] = useState<CircuitResult[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [graph, setGraph] = useState<GraphData | null>(null)
 
-  const handleQuery = useCallback(async () => {
-    if (!symptom.trim()) return
-    setLoading(true); setError(null); setStdFunctions([]); setCircuits([]); setSelectedId(null); setGraph(null)
+  const [phase, setPhase] = useState<'idle'|'chatting'|'summarizing'|'analyzing'|'results'>('idle')
+  const [messages, setMessages] = useState<{role:string;content:string}[]>([])
+  const [summary, setSummary] = useState('')
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
+  const handleSend = useCallback(async () => {
+    const text = chatInput.trim(); if (!text) return
+    setChatInput('')
+    const newMessages = [...messages, { role: 'user', content: text }]
+    setMessages(newMessages)
+    if (phase === 'idle') setPhase('chatting')
+    setChatLoading(true)
     try {
-      const ar = await postJson<{ functions: string[] }>('/api/symptom-query/analyze', { symptom: symptom.trim(), mode })
+      const resp = await postJson<{stage:string;content:string|null;summary:string|null}>(
+        '/api/symptom-query/conversation',
+        { messages: newMessages, granularity_level: granularity },
+      )
+      if (resp.stage === 'asking' && resp.content) {
+        setMessages([...newMessages, { role: 'assistant', content: resp.content }])
+      } else if (resp.stage === 'summarizing' && resp.summary) {
+        setMessages([...newMessages, { role: 'assistant', content: '我已收集足够信息。请查看下方的症状总结，确认后开始分析。' }])
+        setSummary(resp.summary)
+        setPhase('summarizing')
+      }
+    } catch { /* keep chatLoading visible briefly */ }
+    finally { setChatLoading(false) }
+    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+  }, [chatInput, messages, phase, granularity])
+
+  const handleConfirm = useCallback(async () => {
+    if (!summary.trim()) return
+    setPhase('analyzing'); setError(null)
+    try {
+      const ar = await postJson<{functions:string[]}>('/api/symptom-query/analyze', { symptom: summary.trim(), mode })
       const funcs = ar.functions || []; setStdFunctions(funcs)
-      const er = await postJson<{ expanded: string[] }>('/api/symptom-query/expand', { functions: funcs })
-      const sr = await postJson<{ circuits: CircuitResult[] }>('/api/symptom-query/search', { functions: er.expanded || funcs, granularity_level: granularity })
+      const er = await postJson<{expanded:string[]}>('/api/symptom-query/expand', { functions: funcs })
+      const sr = await postJson<{circuits:CircuitResult[]}>('/api/symptom-query/search', {
+        functions: er.expanded || funcs, granularity_level: granularity,
+      })
       const found = sr.circuits || []; setCircuits(found)
       if (found.length > 0) {
-        const gr = await postJson<GraphData>('/api/symptom-query/graph', { circuit_ids: found.map(c => c.id), granularity_level: granularity })
+        const gr = await postJson<GraphData>('/api/symptom-query/graph', {
+          circuit_ids: found.map(c => c.id), granularity_level: granularity,
+        })
         setGraph(gr)
       }
-    } catch (e: any) { setError(e?.message || String(e)) } finally { setLoading(false) }
-  }, [symptom, mode, granularity])
+      setPhase('results')
+    } catch (e: any) { setError(e?.message || String(e)); setPhase('idle') }
+  }, [summary, mode, granularity])
+
+  const handleContinueChat = useCallback(() => { setPhase('chatting'); setSummary('') }, [])
+  const handleClear = useCallback(() => {
+    setPhase('idle'); setMessages([]); setSummary(''); setChatInput('')
+    setStdFunctions([]); setCircuits([]); setError(null); setGraph(null); setSelectedId(null)
+  }, [])
 
   const gNodes: GNode[] = useMemo(() => {
     if (!graph) return []
@@ -155,15 +197,66 @@ export function SymptomQueryPage() {
     <div className="page">
       <PageHeader title="症状回路查询" description="输入症状，AI 转化为标准功能并检索关联回路" readonly />
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <button className={`btn btn-sm ${mode === 'single' ? 'btn-primary' : ''}`} onClick={() => setMode('single')}>单功能</button>
-          <button className={`btn btn-sm ${mode === 'multi' ? 'btn-primary' : ''}`} onClick={() => setMode('multi')}>多功能</button>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input className="form-input" style={{ flex: 1 }} placeholder="描述症状，如：头晕眼花走路不稳" value={symptom} onChange={e => setSymptom(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleQuery()} />
-          <button className="btn btn-primary" onClick={handleQuery} disabled={loading || !symptom.trim()}>{loading ? '分析中...' : '查询'}</button>
-          <button className="btn" onClick={() => { setSymptom(''); setCircuits([]); setStdFunctions([]); setError(null); setGraph(null); setSelectedId(null) }}>清空</button>
-        </div>
+        {phase !== 'results' && (
+          <>
+            {messages.length > 0 && (
+              <div style={{ maxHeight: 280, overflow: 'auto', marginBottom: 12 }}>
+                {messages.map((m, i) => (
+                  <div key={i} style={{
+                    display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 8,
+                  }}>
+                    <div style={{
+                      maxWidth: '75%', padding: '8px 12px', borderRadius: 12, fontSize: 13,
+                      background: m.role === 'user' ? '#eef4ff' : '#f3f4f6',
+                      color: m.role === 'user' ? '#1e40af' : '#374151',
+                      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    }}>{m.content}</div>
+                  </div>
+                ))}
+                <div ref={chatEndRef} />
+              </div>
+            )}
+            {phase === 'summarizing' && (
+              <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6, color: '#92400e' }}>AI 症状分析总结</div>
+                <textarea className="form-input" value={summary} onChange={e => setSummary(e.target.value)}
+                  style={{ width: '100%', minHeight: 80, fontSize: 12, marginBottom: 8 }} />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-primary btn-sm" onClick={handleConfirm}>确认并开始分析</button>
+                  <button className="btn btn-sm" onClick={handleContinueChat}>继续对话</button>
+                </div>
+              </div>
+            )}
+            {phase !== 'summarizing' && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input className="form-input" style={{ flex: 1 }}
+                  placeholder={messages.length === 0 ? '描述你的症状，如：头晕眼花走路不稳…' : '输入回复…'}
+                  value={chatInput} onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSend()}
+                  disabled={chatLoading || phase === 'analyzing'} />
+                <button className="btn btn-primary" onClick={handleSend} disabled={chatLoading || !chatInput.trim()}>
+                  {chatLoading ? '…' : '发送'}
+                </button>
+                {messages.length > 0 && <button className="btn" onClick={handleClear}>清空</button>}
+              </div>
+            )}
+          </>
+        )}
+        {phase === 'analyzing' && (
+          <div style={{ textAlign: 'center', padding: 20, color: '#888', fontSize: 14 }}>
+            正在分析症状并检索回路…
+          </div>
+        )}
+        {phase === 'results' && (
+          <details style={{ fontSize: 12, color: '#888' }}>
+            <summary>重新查询</summary>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button className={`btn btn-sm ${mode === 'single' ? 'btn-primary' : ''}`} onClick={() => setMode('single')}>单功能</button>
+              <button className={`btn btn-sm ${mode === 'multi' ? 'btn-primary' : ''}`} onClick={() => setMode('multi')}>多功能</button>
+              <button className="btn btn-sm" onClick={handleClear}>新查询</button>
+            </div>
+          </details>
+        )}
         {error && <div style={{ color: '#cf1322', marginTop: 8, fontSize: 13 }}>{error}</div>}
       </div>
       {stdFunctions.length > 0 && (
@@ -173,7 +266,7 @@ export function SymptomQueryPage() {
           ))}
         </div>
       )}
-      {circuits.length > 0 && (
+      {phase === 'results' && circuits.length > 0 && (
         <div style={{ display: 'flex', gap: 16, height: 'calc(100vh - 280px)' }}>
           {/* Left: circuit list */}
           <div style={{ width: 320, overflow: 'auto', flexShrink: 0 }}>
@@ -240,7 +333,7 @@ export function SymptomQueryPage() {
           </div>
         </div>
       )}
-      {!loading && circuits.length === 0 && stdFunctions.length > 0 && <div style={{ color: '#94a3b8', fontSize: 14, textAlign: 'center', padding: 40 }}>未找到匹配回路</div>}
+      {phase === 'results' && circuits.length === 0 && stdFunctions.length > 0 && <div style={{ color: '#94a3b8', fontSize: 14, textAlign: 'center', padding: 40 }}>未找到匹配回路</div>}
     </div>
   )
 }
