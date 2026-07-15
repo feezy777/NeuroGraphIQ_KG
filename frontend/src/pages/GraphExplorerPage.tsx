@@ -71,7 +71,7 @@ export function GraphExplorerPage() {
     if (initialLoadRef.current) setLoading(true)
     else setRefreshing(true)
     setErr(null)
-    fetch(`/api/kg/graph/data?limit_connections=5000&granularity_level=${granularity}`)
+    fetch(`/api/kg/graph/data?limit_connections=100000&granularity_level=${granularity}`)
       .then(r => r.json())
       .then(d => { if (cancelled) return; setRaw(d); setLoading(false); setRefreshing(false); initialLoadRef.current = false })
       .catch(e => { if (cancelled) return; setErr(e.message); setLoading(false); setRefreshing(false); initialLoadRef.current = false })

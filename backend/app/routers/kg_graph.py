@@ -14,8 +14,8 @@ router = APIRouter()
 @router.get("/data")
 async def get_graph_data(
     session: AsyncSession = Depends(get_db),
-    limit_connections: int = Query(default=500, ge=1, le=5000),
-    limit_regions: int = Query(default=1000, ge=1, le=5000),
+    limit_connections: int = Query(default=100000, ge=1, le=200000),
+    limit_regions: int = Query(default=10000, ge=1, le=50000),
     granularity_level: str | None = Query(default=None),
 ):
     """Return nodes + edges for graph visualization, scoped by granularity.

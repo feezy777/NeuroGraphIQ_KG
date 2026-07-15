@@ -130,8 +130,9 @@ export function ForceGraph({
     const H = el.clientHeight || 700
     d3.select(el).html('')
 
-    // Limit rendering for large datasets (D3 force sim handles ~10k edges fine)
-    const maxRender = 10000
+    // Soft render ceiling — D3 handles ~20k edges before simulation gets slow.
+    // For 100k+ datasets, consider WebGL or canvas-based rendering.
+    const maxRender = 50000
     const renderNodes = nodes.slice(0, maxRender)
     // Sort rare edge types LAST so they render on top of common types (e.g. functional
     // edges visible above the dense structural_connection layer in macro graphs).
@@ -165,7 +166,16 @@ export function ForceGraph({
 
     return () => {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length, edges.length, focusNode, edgeColors, edgeDashes, nodeColors, nodeRadii, confOpacity])
+  }, [nodes.length, edges.length, focusNode, edgeColors, edgeDashes, nodeColors, nodeRadii])
+
+  // Lightweight opacity-only update — avoids expensive force-sim rebuild on toggle
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    d3.select(el).selectAll('line')
+      .transition().duration(200)
+      .attr('stroke-opacity', (d: any) => confOpacity ? Math.min(0.6, 0.08 + (d.confidence || 0.3)) : 0.4)
+  }, [confOpacity])
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
