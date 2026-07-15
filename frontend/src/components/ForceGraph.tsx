@@ -132,7 +132,7 @@ export function ForceGraph({
 
     // Soft render ceiling — D3 handles ~20k edges before simulation gets slow.
     // For 100k+ datasets, consider WebGL or canvas-based rendering.
-    const maxRender = 50000
+    const maxRender = 200000
     const renderNodes = nodes.slice(0, maxRender)
     // Sort rare edge types LAST so they render on top of common types (e.g. functional
     // edges visible above the dense structural_connection layer in macro graphs).
