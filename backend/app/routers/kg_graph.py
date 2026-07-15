@@ -16,7 +16,6 @@ async def get_graph_data(
     session: AsyncSession = Depends(get_db),
     limit_connections: int = Query(default=500, ge=1, le=5000),
     limit_regions: int = Query(default=1000, ge=1, le=5000),
-    include_circuits: bool = Query(default=True),
     granularity_level: str | None = Query(default=None),
 ):
     """Return nodes + edges for graph visualization, scoped by granularity.
@@ -68,58 +67,10 @@ async def get_graph_data(
                 "source_name": sname or "", "target_name": tname or "",
             })
 
-    # ── Circuits ─────────────────────────────────────────────────────────────
-    circuits = []
-    if include_circuits:
-        circ_sql = (
-            "SELECT id, circuit_name, circuit_type, confidence, "
-            "normalized_payload_json->'formal_field_overlay'->>'canonical_start_region_id' as sid, "
-            "normalized_payload_json->'formal_field_overlay'->>'canonical_end_region_id' as eid "
-            "FROM mirror_region_circuits WHERE circuit_name IS NOT NULL"
-        )
-        circ_params: dict = {}
-        if granularity_level:
-            circ_sql += " AND granularity_level = :gran"
-            circ_params["gran"] = granularity_level
-        circ_sql += " LIMIT 200"
-        circs = await session.execute(text(circ_sql), circ_params)
-        for row in circs.fetchall():
-            cid, name, ctype, conf, sid, eid = row
-            cnode = {"id": str(cid), "type": "circuit", "label": name[:40] if name else "?",
-                     "group": "circuit", "circuit_class": ctype or ""}
-            nodes.append(cnode)
-            if sid and str(sid) in region_ids:
-                edges.append({"id": f"cstart_{cid}", "source": str(cid), "target": str(sid),
-                              "type": "STARTS_AT", "confidence": 1.0, "strength": 0})
-            if eid and str(eid) in region_ids:
-                edges.append({"id": f"cend_{cid}", "source": str(cid), "target": str(eid),
-                              "type": "ENDS_AT", "confidence": 1.0, "strength": 0})
-
-        # Membership edges
-        mem_sql = (
-            "SELECT circuit_id, projection_id, verification_status, confidence "
-            "FROM mirror_circuit_projection_memberships"
-        )
-        mem_params: dict = {}
-        if granularity_level:
-            mem_sql += " WHERE granularity_level = :gran"
-            mem_params["gran"] = granularity_level
-        mem_sql += " LIMIT 500"
-        mems = await session.execute(text(mem_sql), mem_params)
-        for row in mems.fetchall():
-            mcid, mpid, vstatus, mconf = row
-            edges.append({
-                "id": f"mem_{mcid}_{mpid}", "source": str(mcid), "target": str(mpid),
-                "type": "INCLUDES", "confidence": float(mconf or 0),
-                "verification": vstatus or "circuit_supported",
-            })
-
     return {
         "nodes": nodes,
         "edges": edges,
         "granularity_level": granularity_level,
-        "stats": {"regions": len([n for n in nodes if n["type"] == "region"]),
-                  "connections": len([e for e in edges if e["type"] not in ("STARTS_AT", "ENDS_AT", "INCLUDES")]),
-                  "circuits": len([n for n in nodes if n["type"] == "circuit"]),
-                  "memberships": len([e for e in edges if e["type"] == "INCLUDES"])},
+        "stats": {"regions": len(nodes),
+                  "connections": len(edges)},
     }

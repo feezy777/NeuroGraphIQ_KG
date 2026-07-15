@@ -13,26 +13,22 @@ const EDGE_COLOR: Record<string, string> = {
   structural_connection: '#3b82f6', functional_connectivity: '#f59e0b', projection: '#10b981',
   association: '#8b5cf6', coactivation: '#ec4899', effective_connectivity: '#ef4444',
   uncertain_connection: '#9ca3af', unknown: '#d1d5db',
-  STARTS_AT: '#fcd34d', ENDS_AT: '#f87171', INCLUDES: '#c4b5fd',
 }
 const EDGE_DASH: Record<string, string> = {
   structural_connection: '', functional_connectivity: '6,3', projection: '2,2',
-  STARTS_AT: '4,2', ENDS_AT: '4,2', INCLUDES: '6,3',
+  association: '', coactivation: '', effective_connectivity: '', uncertain_connection: '',
 }
 
 /** Legend items describing the node & edge color scheme. */
 const LEGEND_ITEMS: LegendItem[] = [
-  { color: '#3b82f6', dash: '', label: '脑区(Region)' },
-  { color: '#f59e0b', dash: '', label: '回路(Circuit)' },
-  { color: '#10b981', dash: '', label: '连接(Connection)' },
-  { color: '#3b82f6', dash: '', label: '结构连接' },
-  { color: '#f59e0b', dash: '6,3', label: '功能连接' },
-  { color: '#10b981', dash: '2,2', label: '投射' },
-  { color: '#8b5cf6', dash: '', label: '关联' },
-  { color: '#ec4899', dash: '', label: '共激活' },
-  { color: '#fcd34d', dash: '', label: '回路起止' },
-  { color: '#c4b5fd', dash: '6,3', label: '回路包含' },
-  { color: '#9ca3af', dash: '', label: '不确定' },
+  { color: '#3b82f6', dash: '', label: '● 脑区 (Brain Region)' },
+  { color: '#3b82f6', dash: '', label: '━━ 结构连接 (structural)' },
+  { color: '#f59e0b', dash: '6,3', label: '╌╌╌ 功能连接 (functional)' },
+  { color: '#10b981', dash: '2,2', label: '┈┈┈ 投射 (projection)' },
+  { color: '#8b5cf6', dash: '', label: '━━ 关联 (association)' },
+  { color: '#ec4899', dash: '', label: '━━ 共激活 (coactivation)' },
+  { color: '#ef4444', dash: '', label: '━━ 有效连接 (effective)' },
+  { color: '#9ca3af', dash: '', label: '━━ 不确定 (uncertain)' },
 ]
 
 // ── Normalize ───────────────────────────────────────────────────────────────
@@ -49,9 +45,6 @@ function normalize(raw: RawGraph): { nodes: GNode[]; edges: GEdge[] } {
     const ct = e.type || 'unknown'
     const sn = (e as any).source_name || ''; const tn = (e as any).target_name || ''
     edges.push({ id: e.id, source: s, target: t, type: ct, confidence: e.confidence || 0.3, label: sn && tn ? `${sn}→${tn}` : `${s.slice(0,8)}→${t.slice(0,8)}` })
-    if (!nm.has(e.id) && ct !== 'STARTS_AT' && ct !== 'ENDS_AT' && ct !== 'INCLUDES') {
-      nm.set(e.id, { id: e.id, type: 'connection', group: 'connection', label: `${sn.slice(0,15)||'?'}→${tn.slice(0,15)||'?'}`, name_en: '', name_cn: '', atlas: 'Macro96' })
-    }
   }
   return { nodes: [...nm.values()], edges }
 }
@@ -77,7 +70,7 @@ export function GraphExplorerPage() {
     if (initialLoadRef.current) setLoading(true)
     else setRefreshing(true)
     setErr(null)
-    fetch(`/api/kg/graph/data?limit_connections=5000&include_circuits=true&granularity_level=${granularity}`)
+    fetch(`/api/kg/graph/data?limit_connections=5000&granularity_level=${granularity}`)
       .then(r => r.json())
       .then(d => { if (cancelled) return; setRaw(d); setLoading(false); setRefreshing(false); initialLoadRef.current = false })
       .catch(e => { if (cancelled) return; setErr(e.message); setLoading(false); setRefreshing(false); initialLoadRef.current = false })
@@ -121,7 +114,7 @@ export function GraphExplorerPage() {
         <div>
           <h2 style={{ margin: 0, fontSize: 18 }}>🧠 图谱探索</h2>
           <p style={{ color: '#888', fontSize: 12, margin: '2px 0 0' }}>
-            {raw ? `粒度: ${granularity} · ${raw.stats.regions||0} 脑区 · ${raw.stats.connections||0} 连接 · ${raw.stats.circuits||0} 回路 · ${raw.stats.memberships||0} 映射` : ''}
+            {raw ? `粒度: ${granularity} · ${raw.stats.regions||0} 脑区 · ${raw.stats.connections||0} 连接` : ''}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
@@ -151,9 +144,10 @@ export function GraphExplorerPage() {
           <option value="structural_connection">结构连接</option>
           <option value="functional_connectivity">功能连接</option>
           <option value="projection">投射</option>
-          <option value="STARTS_AT">回路起点</option>
-          <option value="ENDS_AT">回路终点</option>
-          <option value="INCLUDES">回路包含</option>
+          <option value="association">关联</option>
+          <option value="coactivation">共激活</option>
+          <option value="effective_connectivity">有效连接</option>
+          <option value="uncertain_connection">不确定</option>
         </select>
         <label style={{fontSize:11,display:'flex',alignItems:'center',gap:4}}>
           置信度≥{minConf.toFixed(1)}

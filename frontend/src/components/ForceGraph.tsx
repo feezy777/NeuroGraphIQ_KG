@@ -128,8 +128,8 @@ export function ForceGraph({
     const H = el.clientHeight || 700
     d3.select(el).html('')
 
-    // Limit rendering for large datasets
-    const maxRender = 2000
+    // Limit rendering for large datasets (D3 force sim handles ~10k edges fine)
+    const maxRender = 10000
     const renderNodes = nodes.slice(0, maxRender)
     const renderEdges = edges
       .filter(
@@ -145,7 +145,7 @@ export function ForceGraph({
         .style('padding', '20px')
         .style('color', '#888')
         .style('textAlign', 'center')
-        .text(`大数据集：${nodes.length} 节点, ${edges.length} 边。渲染前 ${maxRender} 条。`)
+        .text(`大数据集：${nodes.length} 节点, ${edges.length} 边。仅渲染前 ${maxRender} 条边。`)
     }
 
     setTimeout(() => {
