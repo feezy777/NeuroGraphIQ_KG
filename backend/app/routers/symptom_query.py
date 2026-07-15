@@ -271,13 +271,15 @@ async def expand_functions(body: ExpandRequest):
     try:
         cfg = get_deepseek_runtime_config()
         provider = get_llm_provider("deepseek")
-        prompt = f"""Given these brain function terms: {", ".join(body.functions)}
+        prompt = f"""Given these clinical/neuroscientific terms: {", ".join(body.functions)}
 
-For each term, provide 3-5 related/synonym terms that would appear in a neuroscientific database.
-These are used to search a circuit functions table. Focus on related concepts, broader/narrower terms, and synonyms.
+For each term, provide BOTH broader category-level terms AND specific related terms that would appear
+in a brain circuit functions database. Include the broader functional domain (e.g. "language", "motor",
+"memory", "sensory", "cognitive") even if not explicitly mentioned.
 
-Example: "motor coordination" → ["motor control", "movement regulation", "cerebellar motor", "motor execution", "voluntary movement"]
-Example: "vestibular dysfunction" → ["balance disorder", "equilibrium", "vertigo", "vestibulo-ocular", "postural control"]
+Example: "expressive aphasia" → ["language", "language production", "speech", "communication", "verbal expression", "Broca", "linguistic"]
+Example: "resting tremor" → ["motor", "motor control", "movement disorder", "basal ganglia", "tremor", "bradykinesia", "parkinsonism"]
+Example: "memory loss" → ["memory", "episodic memory", "cognitive", "hippocampal", "amnesia", "consolidation", "recall"]
 
 Output ONLY a JSON array of strings (all expanded terms combined, no duplicates): ["term1", "term2", ...]"""
 

@@ -87,8 +87,10 @@ export function SymptomQueryPage() {
       const funcs = ar.functions || []; const cats = ar.categories || []
       setStdFunctions(funcs)
       const er = await postJson<{expanded:string[]}>('/api/symptom-query/expand', { functions: funcs })
+      // Combine expanded terms + original functions for maximum coverage
+      const allFuncs = [...new Set([...(er.expanded || []), ...funcs])]
       const sr = await postJson<{circuits:CircuitResult[]}>('/api/symptom-query/search', {
-        functions: er.expanded || funcs, categories: cats, granularity_level: granularity,
+        functions: allFuncs, categories: cats, granularity_level: granularity,
       })
       const found = sr.circuits || []; setCircuits(found)
       if (found.length > 0) {
