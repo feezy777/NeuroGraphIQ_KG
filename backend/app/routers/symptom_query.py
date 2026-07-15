@@ -302,7 +302,7 @@ class ConversationResponse(BaseModel):
     summary: str | None = None
 
 
-CONVERSATION_PROMPT = """You are a clinical neuroscientist conducting a symptom triage interview. Your goal is to narrow down the patient's symptoms by asking one clarifying question at a time.
+CONVERSATION_PROMPT = """You are a clinical neuroscientist conducting a symptom triage interview. Your goal is to narrow down the patient's symptoms by asking one clarifying question at a time. The user is searching at the {granularity} granularity level. Adapt your terminology accordingly.
 
 Conversation so far:
 {messages}
@@ -331,7 +331,7 @@ async def conversation_endpoint(body: ConversationRequest):
         formatted = "\n".join(
             f"{m['role']}: {m['content']}" for m in body.messages
         )
-        prompt = CONVERSATION_PROMPT.format(messages=formatted)
+        prompt = CONVERSATION_PROMPT.format(messages=formatted, granularity=body.granularity_level)
 
         resp = await provider.complete_json(
             model=cfg.default_model,

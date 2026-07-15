@@ -55,6 +55,43 @@ def test_conversation_asking_stage(monkeypatch):
     assert data["summary"] is None
 
 
+def test_conversation_empty_messages_returns_asking():
+    """Empty messages list triggers early return with an asking response."""
+    client = TestClient(app)
+    resp = client.post("/api/symptom-query/conversation", json={
+        "messages": [],
+        "granularity_level": "macro",
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["stage"] == "asking"
+    assert data["content"] is not None
+
+
+def test_conversation_llm_failure_fallback(monkeypatch):
+    """LLM failure triggers graceful fallback using raw user messages as summary."""
+    mock_provider = AsyncMock()
+    mock_provider.complete_json = AsyncMock(side_effect=Exception("LLM down"))
+    monkeypatch.setattr(
+        "app.routers.symptom_query.get_llm_provider",
+        lambda name: mock_provider,
+    )
+    monkeypatch.setattr(
+        "app.routers.symptom_query.get_deepseek_runtime_config",
+        lambda: type("C", (), {"api_key": "sk-test", "default_model": "deepseek-chat"})(),
+    )
+
+    client = TestClient(app)
+    resp = client.post("/api/symptom-query/conversation", json={
+        "messages": [{"role": "user", "content": "I feel dizzy"}],
+        "granularity_level": "macro",
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["stage"] == "summarizing"
+    assert "dizzy" in (data["summary"] or "").lower()
+
+
 def test_conversation_summarizing_stage(monkeypatch):
     """LLM returns summarizing stage — endpoint responds with a clinical summary."""
     mock_provider = _mock_provider({
