@@ -6,7 +6,7 @@ import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -394,12 +394,11 @@ async def conversation_endpoint(body: ConversationRequest):
 
 # ── Graph — circuit IDs → region nodes + connection edges ──────────────────
 
-def _is_uuid(s: str) -> bool:
+def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
-        uuid.UUID(s)
-        return True
-    except (ValueError, AttributeError):
-        return False
+        return float(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
 
 
 class GraphDataRequest(BaseModel):
@@ -419,64 +418,232 @@ async def get_circuit_graph(
 ):
     """Unified brain-region + connection graph. Each node/edge carries `circuit_ids`
     so the frontend can highlight one circuit's path through the network."""
-    cids = [uuid.UUID(c) for c in body.circuit_ids if c]
+    try:
+        cids = list(dict.fromkeys(uuid.UUID(c) for c in body.circuit_ids if c))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(status_code=422, detail="circuit_ids must contain valid UUIDs") from exc
     if not cids:
         return GraphDataResponse(nodes=[], edges=[])
 
     # ── Step → region mapping per circuit ──────────────────────────────────
     steps_sql = text("""
-        SELECT s.circuit_id::text, s.region_candidate_id::text,
-               COALESCE(cbr.en_name, cbr.std_name, cbr.raw_name, s.step_name) as label,
-               s.step_name
+        SELECT s.id::text, s.circuit_id::text, s.region_candidate_id::text,
+               s.step_order, s.step_name,
+               COALESCE(cbr.en_name, cbr.std_name, cbr.cn_name, cbr.raw_name, s.step_name) as label,
+               COALESCE(cbr.en_name, '') as name_en,
+               COALESCE(cbr.cn_name, '') as name_cn
         FROM mirror_circuit_steps s
         LEFT JOIN candidate_brain_regions cbr ON cbr.id = s.region_candidate_id
         WHERE s.circuit_id = ANY(:cids)
+          AND s.review_status <> 'rejected'
+          AND s.mirror_status NOT IN ('human_rejected', 'superseded')
+        ORDER BY s.circuit_id, s.step_order
     """)
     rows = (await session.execute(steps_sql, {"cids": cids})).fetchall()
     if not rows:
         return GraphDataResponse(nodes=[], edges=[])
 
-    # Dedup: use region_candidate_id if present, else fallback to step_name per circuit
+    # Only real candidate regions become graph nodes. Steps without a resolved
+    # region remain visible in the circuit detail list but cannot form graph edges.
     region_circuits: dict[str, set[str]] = {}
-    region_labels: dict[str, str] = {}
+    region_metadata: dict[str, dict[str, str]] = {}
+    steps_by_circuit: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        cid = str(row[0]); rid_raw = row[1]; label = row[2] or row[3] or "?"
-        rid = str(rid_raw) if rid_raw else f"{cid}:{label}"
-        region_circuits.setdefault(rid, set()).add(cid)
-        region_labels[rid] = label
-
-    nodes = [{"id": rid, "type": "brain_region", "label": region_labels[rid],
-              "circuit_ids": sorted(region_circuits[rid])} for rid in region_circuits]
-
-    # ── Connections between these brain regions ─────────────────────────────
-    # Only real UUIDs (region_candidate_id), skip synthetic fallback keys like "cid:Step 1"
-    rids = [k for k in region_circuits if _is_uuid(k)]
-    if len(rids) < 2:
-        return GraphDataResponse(nodes=nodes, edges=[])
-
-    conn_sql = text("""
-        SELECT id::text, source_region_candidate_id::text, target_region_candidate_id::text,
-               connection_type, confidence, strength,
-               COALESCE(source_region_name_en,'') sname, COALESCE(target_region_name_en,'') tname
-        FROM mirror_region_connections
-        WHERE source_region_candidate_id = ANY(:rids)
-          AND target_region_candidate_id = ANY(:rids)
-          AND granularity_level = :gran
-        LIMIT 5000
-    """)
-    cr = (await session.execute(conn_sql, {"rids": rids, "gran": body.granularity_level})).fetchall()
-
-    cid_set = set(str(c) for c in cids)
-    edges = []
-    for row in cr:
-        eid = str(row[0]); src = str(row[1]); tgt = str(row[2])
-        ecids = sorted((region_circuits.get(src, set()) | region_circuits.get(tgt, set())) & cid_set)
-        edges.append({
-            "id": eid, "source": src, "target": tgt,
-            "type": row[3] or "unknown", "confidence": float(row[4] or 0),
-            "strength": float(row[5] or 0), "source_name": row[6] or "", "target_name": row[7] or "",
-            "circuit_ids": ecids,
+        step_id = str(row[0])
+        cid = str(row[1])
+        rid = str(row[2]) if row[2] else None
+        steps_by_circuit.setdefault(cid, []).append({
+            "id": step_id,
+            "region_id": rid,
+            "step_order": row[3],
+            "step_name": row[4] or "",
         })
+        if not rid:
+            continue
+        region_circuits.setdefault(rid, set()).add(cid)
+        region_metadata[rid] = {
+            "label": row[5] or row[4] or "?",
+            "name_en": row[6] or "",
+            "name_cn": row[7] or "",
+        }
 
+    nodes = [
+        {
+            "id": rid,
+            "type": "brain_region",
+            **region_metadata[rid],
+            "circuit_ids": sorted(region_circuits[rid]),
+        }
+        for rid in region_circuits
+    ]
+    if not nodes:
+        return GraphDataResponse(nodes=[], edges=[])
+
+    # ── Authoritative circuit → projection memberships ──────────────────────
+    membership_sql = text("""
+        SELECT m.circuit_id::text, r.id::text,
+               r.source_region_candidate_id::text, r.target_region_candidate_id::text,
+               r.connection_type, r.confidence, r.strength,
+               COALESCE(r.source_region_name_en, '') AS sname,
+               COALESCE(r.target_region_name_en, '') AS tname
+        FROM mirror_circuit_projection_memberships m
+        JOIN mirror_region_connections r ON r.id = m.projection_id
+        WHERE m.circuit_id = ANY(:cids)
+          AND m.granularity_level = :gran
+          AND r.granularity_level = :gran
+          AND m.review_status <> 'rejected'
+          AND m.verification_status NOT IN ('human_rejected', 'model_conflict')
+          AND m.mirror_status NOT IN ('human_rejected', 'superseded')
+          AND r.review_status <> 'rejected'
+          AND r.mirror_status NOT IN ('human_rejected', 'superseded')
+    """)
+    membership_rows = (
+        await session.execute(membership_sql, {"cids": cids, "gran": body.granularity_level})
+    ).fetchall()
+
+    edge_map: dict[str, dict[str, Any]] = {}
+    covered_pairs: set[tuple[str, str, str]] = set()
+
+    def add_edge(
+        *,
+        edge_id: str,
+        circuit_id: str,
+        source: str,
+        target: str,
+        edge_type: str,
+        confidence: Any,
+        strength: Any,
+        source_name: str,
+        target_name: str,
+    ) -> None:
+        if source not in region_circuits or target not in region_circuits:
+            return
+        if (
+            circuit_id not in region_circuits[source]
+            or circuit_id not in region_circuits[target]
+        ):
+            return
+        existing = edge_map.get(edge_id)
+        if existing:
+            existing["_circuit_ids"].add(circuit_id)
+            return
+        edge_map[edge_id] = {
+            "id": edge_id,
+            "source": source,
+            "target": target,
+            "type": edge_type or "unknown",
+            "confidence": _safe_float(confidence),
+            "strength": strength if strength is not None else "",
+            "source_name": source_name or region_metadata[source]["label"],
+            "target_name": target_name or region_metadata[target]["label"],
+            "_circuit_ids": {circuit_id},
+        }
+
+    # The visible circuit path is defined strictly by consecutive ordered steps.
+    # Memberships may annotate those pairs, but must not expand the graph with
+    # unrelated connections incident to one of the circuit's regions.
+    adjacent_pairs: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    valid_pair_keys: set[tuple[str, str, str]] = set()
+    for cid, circuit_steps in steps_by_circuit.items():
+        for source_step, target_step in zip(circuit_steps, circuit_steps[1:]):
+            src = source_step["region_id"]
+            tgt = target_step["region_id"]
+            if not src or not tgt or src == tgt:
+                continue
+            adjacent_pairs.append((cid, source_step, target_step))
+            valid_pair_keys.add((cid, src, tgt))
+
+    for row in membership_rows:
+        cid, edge_id, src, tgt = map(str, row[:4])
+        pair_key = (cid, src, tgt)
+        if pair_key not in valid_pair_keys:
+            continue
+        add_edge(
+            edge_id=edge_id,
+            circuit_id=cid,
+            source=src,
+            target=tgt,
+            edge_type=row[4] or "unknown",
+            confidence=row[5],
+            strength=row[6],
+            source_name=row[7] or "",
+            target_name=row[8] or "",
+        )
+        covered_pairs.add(pair_key)
+
+    # ── Consecutive-step fallback ───────────────────────────────────────────
+    # Fetch candidate real connections once, then only use exact directed pairs
+    # that are consecutive in a requested circuit.
+    fallback_pairs = [
+        pair
+        for pair in adjacent_pairs
+        if (
+            pair[0],
+            pair[1]["region_id"],
+            pair[2]["region_id"],
+        ) not in covered_pairs
+    ]
+
+    real_connections: dict[tuple[str, str], Any] = {}
+    if fallback_pairs:
+        rids = list({
+            uuid.UUID(step["region_id"])
+            for circuit_steps in steps_by_circuit.values()
+            for step in circuit_steps
+            if step["region_id"]
+        })
+        fallback_sql = text("""
+            SELECT id::text, source_region_candidate_id::text, target_region_candidate_id::text,
+                   connection_type, confidence, strength,
+                   COALESCE(source_region_name_en, '') AS sname,
+                   COALESCE(target_region_name_en, '') AS tname
+            FROM mirror_region_connections
+            WHERE source_region_candidate_id = ANY(:rids)
+              AND target_region_candidate_id = ANY(:rids)
+              AND granularity_level = :gran
+              AND review_status <> 'rejected'
+              AND mirror_status NOT IN ('human_rejected', 'superseded')
+            ORDER BY confidence DESC NULLS LAST, id
+            LIMIT 5000
+        """)
+        fallback_rows = (
+            await session.execute(fallback_sql, {"rids": rids, "gran": body.granularity_level})
+        ).fetchall()
+        for row in fallback_rows:
+            real_connections.setdefault((str(row[1]), str(row[2])), row)
+
+    for cid, source_step, target_step in fallback_pairs:
+        src = source_step["region_id"]
+        tgt = target_step["region_id"]
+        real = real_connections.get((src, tgt))
+        if real:
+            add_edge(
+                edge_id=str(real[0]),
+                circuit_id=cid,
+                source=src,
+                target=tgt,
+                edge_type=real[3] or "unknown",
+                confidence=real[4],
+                strength=real[5],
+                source_name=real[6] or "",
+                target_name=real[7] or "",
+            )
+            continue
+        add_edge(
+            edge_id=f"step-flow:{cid}:{source_step['id']}:{target_step['id']}",
+            circuit_id=cid,
+            source=src,
+            target=tgt,
+            edge_type="step_flow",
+            confidence=0.5,
+            strength="inferred",
+            source_name=region_metadata[src]["label"],
+            target_name=region_metadata[tgt]["label"],
+        )
+
+    edges = []
+    for edge in edge_map.values():
+        circuit_ids = sorted(edge.pop("_circuit_ids"))
+        edges.append({**edge, "circuit_ids": circuit_ids})
     return GraphDataResponse(nodes=nodes, edges=edges)
 

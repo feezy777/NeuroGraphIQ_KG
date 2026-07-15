@@ -27,6 +27,24 @@ export interface LegendItem {
   label: string
 }
 
+function endpointId(endpoint: unknown): string {
+  if (typeof endpoint === 'object' && endpoint !== null) {
+    const value = endpoint as { id?: unknown; name?: unknown }
+    return String(value.id || value.name || '')
+  }
+  return String(endpoint || '')
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[char] || char)
+}
+
 // ── Default Color / Dash / Radius Maps ──────────────────────────────────────
 // (Copied from GraphExplorerPage so callers can override by passing props)
 
@@ -129,15 +147,18 @@ export function ForceGraph({
 
   useEffect(() => {
     const el = ref.current
-    if (!el || nodes.length === 0) return
+    if (!el) return
+    d3.select(el).html('')
+    if (nodes.length === 0) return
     const W = el.clientWidth || 1000
     const H = el.clientHeight || 700
-    d3.select(el).html('')
 
     // Soft render ceiling — D3 handles ~20k edges before simulation gets slow.
     // For 100k+ datasets, consider WebGL or canvas-based rendering.
     const maxRender = 200000
-    const renderNodes = nodes.slice(0, maxRender)
+    // D3 mutates node/link objects, so render clones instead of the React props.
+    const renderNodes = nodes.slice(0, maxRender).map(node => ({ ...node }))
+    const renderNodeIds = new Set(renderNodes.map(node => node.id))
     // Sort rare edge types LAST so they render on top of common types (e.g. functional
     // edges visible above the dense structural_connection layer in macro graphs).
     const EDGE_TYPE_PRIORITY: Record<string, number> = {
@@ -146,13 +167,10 @@ export function ForceGraph({
       uncertain_connection: 3, unknown: 3, step_flow: 2, co_occurs: 2, belongs_to: 0,
     }
     const renderEdges = edges
-      .filter(
-        e =>
-          renderNodes.some(n => n.id === e.source) &&
-          renderNodes.some(n => n.id === e.target),
-      )
+      .filter(e => renderNodeIds.has(endpointId(e.source)) && renderNodeIds.has(endpointId(e.target)))
       .sort((a, b) => (EDGE_TYPE_PRIORITY[a.type] ?? 0) - (EDGE_TYPE_PRIORITY[b.type] ?? 0))
       .slice(0, maxRender)
+      .map(edge => ({ ...edge, source: endpointId(edge.source), target: endpointId(edge.target) }))
 
     if (nodes.length > maxRender) {
       d3.select(el)
@@ -163,43 +181,43 @@ export function ForceGraph({
         .text(`大数据集：${nodes.length} 节点, ${edges.length} 边。仅渲染前 ${maxRender} 条边。`)
     }
 
-    setTimeout(() => {
+    const timer = window.setTimeout(() => {
       d3.select(el).html('')
       drawGraph(el, renderNodes, renderEdges, W, H, focusNode, onNodeClick, edgeColors, edgeDashes, nodeColors, nodeRadii, undefined, confOpacity, highlightedNodeIds, highlightedEdgeIds)
     }, 10)
 
-    return () => {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length, edges.length, focusNode, edgeColors, edgeDashes, nodeColors, nodeRadii])
-
-  // Lightweight opacity-only update — avoids expensive force-sim rebuild on toggle
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    d3.select(el).selectAll('line')
-      .transition().duration(200)
-      .attr('stroke-opacity', (d: any) => confOpacity ? Math.min(0.6, 0.08 + (d.confidence || 0.3)) : 0.4)
-  }, [confOpacity])
+    return () => window.clearTimeout(timer)
+    // Highlight sets deliberately use the lightweight effect below.
+  }, [nodes, edges, focusNode, onNodeClick, edgeColors, edgeDashes, nodeColors, nodeRadii, confOpacity])
 
   // Highlight update — when selected circuit changes, update nodes+edges in-place
   useEffect(() => {
     const el = ref.current
     if (!el) return
     const svg = d3.select(el)
+    const hasNodeHighlight = Boolean(highlightedNodeIds && highlightedNodeIds.size > 0)
+    const hasEdgeHighlight = Boolean(highlightedEdgeIds && highlightedEdgeIds.size > 0)
     // Nodes: circle radius, fill, stroke
-    svg.selectAll('circle')
+    svg.selectAll<SVGGElement, GNode>('g.graph-node')
       .transition().duration(200)
-      .attr('r', function(this: any) { const d = d3.select(this).datum() as any; return (highlightedNodeIds?.has(d.id) ? 12 : (nodeRadii[d.type] || 6)) })
-      .attr('fill', function(this: any) { const d = d3.select(this).datum() as any; return (highlightedNodeIds?.has(d.id) ? '#ef4444' : (nodeColors[d.type] || '#999')) })
-      .attr('stroke', function(this: any) { const d = d3.select(this).datum() as any; return (highlightedNodeIds?.has(d.id) ? '#ef4444' : '#fff') })
-      .attr('stroke-width', function(this: any) { const d = d3.select(this).datum() as any; return (highlightedNodeIds?.has(d.id) ? 3 : 1.5) })
+      .attr('opacity', d => !hasNodeHighlight || highlightedNodeIds?.has(d.id) ? 1 : 0.18)
+    svg.selectAll<SVGCircleElement, GNode>('g.graph-node circle')
+      .transition().duration(200)
+      .attr('r', d => highlightedNodeIds?.has(d.id) ? 12 : (nodeRadii[d.type] || 6))
+      .attr('fill', d => highlightedNodeIds?.has(d.id) ? '#ef4444' : (nodeColors[d.type] || '#999'))
+      .attr('stroke', d => highlightedNodeIds?.has(d.id) ? '#ef4444' : '#fff')
+      .attr('stroke-width', d => highlightedNodeIds?.has(d.id) ? 3 : 1.5)
     // Edges: stroke, width, opacity
-    svg.selectAll('line')
+    svg.selectAll<SVGLineElement, GEdge>('line.graph-edge')
       .transition().duration(200)
-      .attr('stroke', function(this: any) { const d = d3.select(this).datum() as any; return (highlightedEdgeIds?.has(d.id) ? '#ef4444' : (edgeColors[d.type] || '#d1d5db')) })
-      .attr('stroke-width', function(this: any) { const d = d3.select(this).datum() as any; return (highlightedEdgeIds?.has(d.id) ? 3 : Math.max(0.3, (d.confidence || 0.3) * 1.5)) })
-      .attr('stroke-opacity', function(this: any) { const d = d3.select(this).datum() as any; return (highlightedEdgeIds?.has(d.id) ? 0.85 : (confOpacity ? Math.min(0.6, 0.08 + (d.confidence || 0.3)) : 0.4)) })
-  }, [highlightedNodeIds, highlightedEdgeIds])
+      .attr('stroke', d => highlightedEdgeIds?.has(d.id) ? '#ef4444' : (edgeColors[d.type] || '#d1d5db'))
+      .attr('stroke-width', d => highlightedEdgeIds?.has(d.id) ? 3 : Math.max(0.3, (d.confidence || 0.3) * 1.5))
+      .attr('stroke-opacity', d => {
+        if (highlightedEdgeIds?.has(d.id)) return 0.85
+        if (hasEdgeHighlight) return 0.06
+        return confOpacity ? Math.min(0.6, 0.08 + (d.confidence || 0.3)) : 0.4
+      })
+  }, [highlightedNodeIds, highlightedEdgeIds, nodeRadii, nodeColors, edgeColors, confOpacity])
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -303,9 +321,14 @@ export function drawGraph(
     .selectAll('line')
     .data(edges)
     .join('line')
+    .attr('class', 'graph-edge')
     .attr('stroke', (d: any) => highlightedEdgeIds?.has(d.id) ? '#ef4444' : (ec[d.type] || '#d1d5db'))
     .attr('stroke-width', (d: any) => highlightedEdgeIds?.has(d.id) ? 3 : Math.max(0.3, (d.confidence || 0.3) * 1.5))
-    .attr('stroke-opacity', (d: any) => highlightedEdgeIds?.has(d.id) ? 0.85 : (confOpacity ? Math.min(0.6, 0.08 + (d.confidence || 0.3)) : 0.4))
+    .attr('stroke-opacity', (d: any) => {
+      if (highlightedEdgeIds?.has(d.id)) return 0.85
+      if (highlightedEdgeIds && highlightedEdgeIds.size > 0) return 0.06
+      return confOpacity ? Math.min(0.6, 0.08 + (d.confidence || 0.3)) : 0.4
+    })
     .attr('stroke-dasharray', (d: any) => ed[d.type] || '')
     .attr('style', 'cursor:pointer')
     .on('mouseenter', (ev: any, d: any) => {
@@ -323,7 +346,7 @@ export function drawGraph(
       tip
         .style('opacity', '1')
         .html(
-          `<strong>${typeNames[d.type] || d.type}</strong> 置信度:${((d.confidence || 0) * 100).toFixed(0)}%<br/>${d.label}`,
+          `<strong>${escapeHtml(typeNames[d.type] || d.type)}</strong> 置信度:${((d.confidence || 0) * 100).toFixed(0)}%<br/>${escapeHtml(d.label)}`,
         )
     })
     .on('mousemove', (ev: any) => {
@@ -338,6 +361,8 @@ export function drawGraph(
     .selectAll('g')
     .data(nodes)
     .join('g')
+    .attr('class', 'graph-node')
+    .attr('opacity', (d: any) => !highlightedNodeIds || highlightedNodeIds.size === 0 || highlightedNodeIds.has(d.id) ? 1 : 0.18)
     .attr('cursor', 'pointer')
     .on('click', (ev: any, d: any) => {
       ev.stopPropagation()
@@ -346,7 +371,7 @@ export function drawGraph(
     .on('mouseenter', (ev: any, d: any) => {
       tip
         .style('opacity', '1')
-        .html(`<strong>${d.type}</strong>: ${d.label}<br/>${d.name_en || ''} ${d.name_cn || ''}`.trim())
+        .html(`<strong>${escapeHtml(d.type)}</strong>: ${escapeHtml(d.label)}<br/>${escapeHtml(d.name_en)} ${escapeHtml(d.name_cn)}`.trim())
     })
     .on('mousemove', (ev: any) => {
       tip.style('left', ev.offsetX + 12 + 'px').style('top', ev.offsetY - 10 + 'px')

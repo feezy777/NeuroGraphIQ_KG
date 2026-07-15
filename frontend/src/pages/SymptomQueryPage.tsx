@@ -19,11 +19,11 @@ interface GraphData { nodes: GraphNode[]; edges: GraphEdge[] }
 const SYMPTOM_EDGE_COLOR: Record<string, string> = {
   structural_connection: '#3b82f6', functional_connectivity: '#f59e0b', projection: '#10b981',
   association: '#8b5cf6', coactivation: '#ec4899', effective_connectivity: '#ef4444',
-  uncertain_connection: '#9ca3af', unknown: '#d1d5db',
+  uncertain_connection: '#9ca3af', step_flow: '#10b981', unknown: '#d1d5db',
 }
 const SYMPTOM_EDGE_DASH: Record<string, string> = {
   structural_connection: '', functional_connectivity: '6,3', projection: '2,2',
-  association: '', coactivation: '', effective_connectivity: '', uncertain_connection: '',
+  association: '', coactivation: '', effective_connectivity: '', uncertain_connection: '', step_flow: '2,2',
 }
 const SYMPTOM_NODE_COLOR: Record<string, string> = { brain_region: '#3b82f6' }
 const SYMPTOM_NODE_R: Record<string, number> = { brain_region: 7 }
@@ -36,6 +36,7 @@ const SYMPTOM_LEGEND: LegendItem[] = [
   { color: '#ec4899', dash: '', label: '共激活' },
   { color: '#ef4444', dash: '', label: '有效连接' },
   { color: '#9ca3af', dash: '', label: '不确定' },
+  { color: '#10b981', dash: '2,2', label: '步骤推断连接' },
 ]
 
 // ── Page ─────────────────────────────────────────────────────────────────────
@@ -45,8 +46,9 @@ export function SymptomQueryPage() {
   const [mode, setMode] = useState<'focused' | 'exploratory'>('focused')
   const [error, setError] = useState<string | null>(null)
   const [stdFunctions, setStdFunctions] = useState<string[]>([]); const [circuits, setCircuits] = useState<CircuitResult[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedCircuitId, setSelectedCircuitId] = useState<string | null>(null)
   const [graph, setGraph] = useState<GraphData | null>(null)
+  const [graphMode, setGraphMode] = useState<'all' | 'step'>('all')
 
   const [phase, setPhase] = useState<'idle'|'chatting'|'summarizing'|'analyzing'|'results'>('idle')
   const [messages, setMessages] = useState<{role:string;content:string}[]>([])
@@ -54,6 +56,9 @@ export function SymptomQueryPage() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const analysisRunRef = useRef(0)
+
+  useEffect(() => () => { analysisRunRef.current += 1 }, [])
 
   const handleSend = useCallback(async () => {
     const text = chatInput.trim(); if (!text) return
@@ -74,65 +79,125 @@ export function SymptomQueryPage() {
         setSummary(resp.summary)
         setPhase('summarizing')
       }
-    } catch { /* keep chatLoading visible briefly */ }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '发送失败，请重试')
+    }
     finally { setChatLoading(false) }
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
   }, [chatInput, messages, phase, granularity])
 
   const handleConfirm = useCallback(async () => {
     if (!summary.trim()) return
-    setPhase('analyzing'); setError(null)
+    const runId = analysisRunRef.current + 1
+    analysisRunRef.current = runId
+    setPhase('analyzing'); setError(null); setGraph(null); setSelectedCircuitId(null)
+    setCircuits([]); setStdFunctions([])
     try {
       const ar = await postJson<{functions:string[];categories:string[];primary_category:string}>('/api/symptom-query/analyze', { symptom: summary.trim(), mode })
+      if (analysisRunRef.current !== runId) return
       const funcs = ar.functions || []; const cats = ar.categories || []
       setStdFunctions(funcs)
       const er = await postJson<{expanded:string[]}>('/api/symptom-query/expand', { functions: funcs })
+      if (analysisRunRef.current !== runId) return
       // Combine expanded terms + original functions for maximum coverage
       const allFuncs = [...new Set([...(er.expanded || []), ...funcs])]
       const sr = await postJson<{circuits:CircuitResult[]}>('/api/symptom-query/search', {
         functions: allFuncs, categories: cats, mode, granularity_level: granularity,
       })
+      if (analysisRunRef.current !== runId) return
       const found = sr.circuits || []; setCircuits(found)
       if (found.length > 0) {
         const gr = await postJson<GraphData>('/api/symptom-query/graph', {
           circuit_ids: found.map(c => c.id), granularity_level: granularity,
         })
+        if (analysisRunRef.current !== runId) return
         setGraph(gr)
+      } else {
+        setGraph(null)
       }
       setPhase('results')
-    } catch (e: any) { setError(e?.message || String(e)); setPhase('idle') }
+    } catch (e: any) {
+      if (analysisRunRef.current !== runId) return
+      setError(e?.message || String(e)); setPhase('idle')
+    }
   }, [summary, mode, granularity])
 
   const handleContinueChat = useCallback(() => { setPhase('chatting'); setSummary('') }, [])
   const handleClear = useCallback(() => {
+    analysisRunRef.current += 1
     setPhase('idle'); setMessages([]); setSummary(''); setChatInput('')
-    setStdFunctions([]); setCircuits([]); setError(null); setGraph(null); setSelectedId(null)
+    setStdFunctions([]); setCircuits([]); setError(null); setGraph(null); setSelectedCircuitId(null)
   }, [])
+
+  const matchedCircuitIds = useMemo(
+    () => new Set(circuits.map(circuit => circuit.id)),
+    [circuits],
+  )
+  const scopedNodeIds = useMemo(() => {
+    if (!graph) return new Set<string>()
+    return new Set(
+      graph.nodes
+        .filter(node => (node.circuit_ids || []).some(id => matchedCircuitIds.has(id)))
+        .map(node => node.id),
+    )
+  }, [graph, matchedCircuitIds])
 
   const gNodes: GNode[] = useMemo(() => {
     if (!graph) return []
-    return graph.nodes.map(n => ({ ...n, id: n.id, type: n.type, label: n.label, circuit_ids: (n as any).circuit_ids || [] }))
-  }, [graph])
+    return graph.nodes
+      .filter(node => scopedNodeIds.has(node.id))
+      .map(node => ({ ...node, circuit_ids: node.circuit_ids || [] }))
+  }, [graph, scopedNodeIds])
 
   const gEdges: GEdge[] = useMemo(() => {
     if (!graph) return []
-    // Only show edges that belong to at least one matched circuit (relevant connections)
+    // Defense in depth: never render edges outside the function-matched circuits,
+    // even if an old or malformed backend response contains global graph data.
     return graph.edges
-      .filter(e => ((e as any).circuit_ids || []).length > 0)
-      .map(e => ({ ...e, id: e.id, source: e.source, target: e.target, type: e.type || 'unknown', label: e.label || '', circuit_ids: (e as any).circuit_ids || [], confidence: (e as any).confidence }))
-  }, [graph])
+      .filter(edge =>
+        (edge.circuit_ids || []).some(id => matchedCircuitIds.has(id))
+        && scopedNodeIds.has(edge.source)
+        && scopedNodeIds.has(edge.target),
+      )
+      .map(e => ({
+        ...e,
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        type: e.type || 'unknown',
+        label: e.label || `${(e as any).source_name || e.source} → ${(e as any).target_name || e.target}`,
+        circuit_ids: e.circuit_ids || [],
+        confidence: e.confidence,
+      }))
+  }, [graph, matchedCircuitIds, scopedNodeIds])
 
   // Compute highlight sets when a circuit is selected
   const hlNodeIds = useMemo(() => {
-    if (!selectedId) return undefined
-    return new Set(gNodes.filter(n => ((n as any).circuit_ids || []).includes(selectedId)).map(n => n.id))
-  }, [gNodes, selectedId])
+    if (!selectedCircuitId) return undefined
+    return new Set(gNodes.filter(n => ((n as any).circuit_ids || []).includes(selectedCircuitId)).map(n => n.id))
+  }, [gNodes, selectedCircuitId])
   const hlEdgeIds = useMemo(() => {
-    if (!selectedId) return undefined
-    return new Set(gEdges.filter(e => ((e as any).circuit_ids || []).includes(selectedId)).map(e => e.id))
-  }, [gEdges, selectedId])
+    if (!selectedCircuitId) return undefined
+    return new Set(gEdges.filter(e => ((e as any).circuit_ids || []).includes(selectedCircuitId)).map(e => e.id))
+  }, [gEdges, selectedCircuitId])
 
-  const selectedCircuit = useMemo(() => circuits.find(c => c.id === selectedId), [circuits, selectedId])
+  // Step-mode: only show nodes/edges belonging to the selected circuit
+  const stepNodes = useMemo(() => {
+    if (!selectedCircuitId) return gNodes
+    return gNodes.filter(n => ((n as any).circuit_ids || []).includes(selectedCircuitId))
+  }, [gNodes, selectedCircuitId])
+  const stepEdges = useMemo(() => {
+    if (!selectedCircuitId) return gEdges
+    return gEdges.filter(e => ((e as any).circuit_ids || []).includes(selectedCircuitId))
+  }, [gEdges, selectedCircuitId])
+
+  const displayNodes = graphMode === 'step' ? stepNodes : gNodes
+  const displayEdges = graphMode === 'step' ? stepEdges : gEdges
+
+  const selectedCircuit = useMemo(
+    () => circuits.find(c => c.id === selectedCircuitId),
+    [circuits, selectedCircuitId],
+  )
 
   return (
     <div className="page">
@@ -213,11 +278,12 @@ export function SymptomQueryPage() {
           <div style={{ width: 320, overflow: 'auto', flexShrink: 0 }}>
             <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>匹配回路 ({circuits.length})</div>
             {circuits.map(c => (
-              <div key={c.id} onClick={() => setSelectedId(selectedId === c.id ? null : c.id)}
-                style={{ padding: 10, marginBottom: 8, cursor: 'pointer', borderRadius: 6,
+              <button type="button" key={c.id} aria-pressed={selectedCircuitId === c.id}
+                onClick={() => setSelectedCircuitId(selectedCircuitId === c.id ? null : c.id)}
+                style={{ display: 'block', width: '100%', textAlign: 'left', font: 'inherit', padding: 10, marginBottom: 8, cursor: 'pointer', border: 0, borderRadius: 6,
                   borderLeft: `3px solid hsl(${Math.round(c.match_score * 240)},70%,${Math.round(30 + c.match_score * 40)}%)`,
-                  background: selectedId === c.id ? '#fef3c7' : '#fff',
-                  boxShadow: selectedId === c.id ? '0 0 0 2px #f59e0b' : '0 1px 3px rgba(0,0,0,0.06)' }}>
+                  background: selectedCircuitId === c.id ? '#fef3c7' : '#fff',
+                  boxShadow: selectedCircuitId === c.id ? '0 0 0 2px #f59e0b' : '0 1px 3px rgba(0,0,0,0.06)' }}>
                 <div style={{ fontWeight: 600, fontSize: 13 }}>{c.circuit_name}</div>
                 <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{c.circuit_type || 'Unknown'} · {c.step_count}步 · {c.function_count}功能</div>
                 <div style={{ fontSize: 11, marginTop: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -226,25 +292,43 @@ export function SymptomQueryPage() {
                     <span key={cat} style={{ fontSize: 10, padding: '1px 6px', background: '#eef4ff', color: '#2563eb', borderRadius: 3 }}>{cat}</span>
                   ))}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
 
           {/* Right: graph + detail sidebar */}
           <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 12 }}>
-            <div style={{ flex: 1, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: '#f8fafc', minWidth: 0 }}>
-              {graph ? (
-                <ForceGraph
-                  nodes={gNodes} edges={gEdges}
-                  focusNode={selectedId}
-                  highlightedNodeIds={hlNodeIds}
-                  highlightedEdgeIds={hlEdgeIds}
-                  onNodeClick={(id) => setSelectedId(selectedId === id ? null : id)}
-                  edgeColors={SYMPTOM_EDGE_COLOR} edgeDashes={SYMPTOM_EDGE_DASH}
-                  nodeColors={SYMPTOM_NODE_COLOR} nodeRadii={SYMPTOM_NODE_R}
-                  legendItems={SYMPTOM_LEGEND}
-                />
-              ) : null}
+            <div style={{ flex: 1, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: '#f8fafc', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', fontSize: 11, color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
+                <span>脑区 {displayNodes.length} · 连接 {displayEdges.length}</span>
+                <button className={`btn btn-sm ${graphMode === 'all' ? 'btn-primary' : ''}`} onClick={() => setGraphMode('all')}>全部相关</button>
+                <button className={`btn btn-sm ${graphMode === 'step' ? 'btn-primary' : ''}`} onClick={() => setGraphMode('step')} disabled={!selectedCircuitId}>步骤聚焦</button>
+                {selectedCircuit && <span>已高亮：{selectedCircuit.circuit_name}</span>}
+              </div>
+              {graph && gNodes.length > 0 ? (
+                <>
+                  <div style={{ flex: 1, minHeight: 0 }}>
+                    <ForceGraph
+                      nodes={displayNodes} edges={displayEdges}
+                      focusNode={null}
+                      highlightedNodeIds={hlNodeIds}
+                      highlightedEdgeIds={hlEdgeIds}
+                      edgeColors={SYMPTOM_EDGE_COLOR} edgeDashes={SYMPTOM_EDGE_DASH}
+                      nodeColors={SYMPTOM_NODE_COLOR} nodeRadii={SYMPTOM_NODE_R}
+                      legendItems={SYMPTOM_LEGEND}
+                    />
+                  </div>
+                  {selectedCircuit && (hlEdgeIds?.size || 0) === 0 && (
+                    <div style={{ padding: '6px 12px', color: '#92400e', background: '#fffbeb', fontSize: 11 }}>
+                      该回路暂无可连接的已解析步骤，仅高亮相关脑区。
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: '#94a3b8', fontSize: 13 }}>
+                  匹配回路暂无已解析的脑区图数据
+                </div>
+              )}
             </div>
 
             {/* Circuit detail sidebar */}
@@ -255,7 +339,7 @@ export function SymptomQueryPage() {
                     <div style={{ fontWeight: 700, fontSize: 14, color: '#1f2937' }}>{selectedCircuit.circuit_name}</div>
                     <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{selectedCircuit.circuit_type || 'Unknown'} · 匹配 {(selectedCircuit.match_score * 100).toFixed(0)}%</div>
                   </div>
-                  <button className="btn btn-sm" onClick={() => setSelectedId(null)} style={{ fontSize: 11 }}>✕</button>
+                  <button className="btn btn-sm" onClick={() => setSelectedCircuitId(null)} style={{ fontSize: 11 }}>✕</button>
                 </div>
 
                 <div style={{ marginBottom: 12 }}>

@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock
 
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import DBAPIError
 
 from app.main import app
 from app.services.llm_providers.base import LlmProviderResponse, LlmProviderUsage
@@ -95,14 +97,8 @@ def test_conversation_llm_failure_fallback(monkeypatch):
 # ── Graph — integration test with real DB ─────────────────────────────────────
 
 
-def test_graph_returns_step_level_nodes():
-    """Integration: insert circuits+steps with region_candidate_id, verify graph structure.
-
-    Nodes include brain_region type with real region labels and step_order.
-    Edges include step_flow (between consecutive steps) and belongs_to (step->circuit).
-    co_occurs edges connect brain_region nodes of steps from different circuits
-    sharing the same region_candidate_id.
-    """
+def test_graph_returns_circuit_owned_region_graph():
+    """Integration: graph contains only circuit regions and circuit-owned edges."""
     import asyncio
     import uuid
 
@@ -115,14 +111,25 @@ def test_graph_returns_step_level_nodes():
     # ── Test data UUIDs ────────────────────────────────────────────────────
     circuit_a_id = uuid.uuid4()
     circuit_b_id = uuid.uuid4()
+    circuit_c_id = uuid.uuid4()
+    circuit_d_id = uuid.uuid4()
     region_1_id = uuid.uuid4()
     region_2_id = uuid.uuid4()
-    region_3_id = uuid.uuid4()  # shared by both circuits -> co_occurs
+    region_3_id = uuid.uuid4()  # shared by both circuits
 
     step_a1_id = uuid.uuid4()
     step_a2_id = uuid.uuid4()
+    step_a3_id = uuid.uuid4()
     step_b1_id = uuid.uuid4()
     step_b2_id = uuid.uuid4()
+    step_c1_id = uuid.uuid4()  # unresolved region, single-step boundary case
+    step_d1_id = uuid.uuid4()
+    step_d2_id = uuid.uuid4()
+    connection_a_id = uuid.uuid4()
+    connection_b_id = uuid.uuid4()
+    connection_extra_id = uuid.uuid4()
+    membership_a_id = uuid.uuid4()
+    membership_extra_id = uuid.uuid4()
 
     # Shared synthetic FK targets (these tables exist but we only need IDs)
     _gen_run_id = uuid.uuid4()
@@ -135,7 +142,11 @@ def test_graph_returns_step_level_nodes():
         async with AsyncSessionLocal() as session:
             # Bypass FK checks during test setup — synthetic IDs are unique
             # and always cleaned up, so referential integrity is not at risk.
-            await session.execute(text("SET session_replication_role = replica"))
+            try:
+                await session.execute(text("SET session_replication_role = replica"))
+            except DBAPIError:
+                await session.rollback()
+                pytest.skip("graph integration test requires a PostgreSQL test role with replication privilege")
 
             # ── candidate_brain_regions ─────────────────────────────────────
             regions = [
@@ -172,8 +183,12 @@ def test_graph_returns_step_level_nodes():
                 })
 
             # ── mirror_region_circuits ──────────────────────────────────────
-            for cid, cname, ctype in [(circuit_a_id, "Motor Circuit A", "motor_circuit"),
-                                       (circuit_b_id, "Sensory Circuit B", "sensory_circuit")]:
+            for cid, cname, ctype in [
+                (circuit_a_id, "Motor Circuit A", "motor_circuit"),
+                (circuit_b_id, "Sensory Circuit B", "sensory_circuit"),
+                (circuit_c_id, "Unresolved Circuit C", "unknown"),
+                (circuit_d_id, "Inferred Circuit D", "unknown"),
+            ]:
                 await session.execute(text("""
                     INSERT INTO mirror_region_circuits
                         (id, circuit_name, circuit_type,
@@ -197,8 +212,12 @@ def test_graph_returns_step_level_nodes():
             steps = [
                 (step_a1_id, circuit_a_id, region_1_id, 1, "Precentral", "source", "region"),
                 (step_a2_id, circuit_a_id, region_3_id, 2, "Thalamus",   "relay", "relay"),
+                (step_a3_id, circuit_a_id, region_2_id, 3, "Postcentral", "target", "region"),
                 (step_b1_id, circuit_b_id, region_3_id, 1, "Thalamus",   "source", "region"),
                 (step_b2_id, circuit_b_id, region_2_id, 2, "Postcentral", "target", "region"),
+                (step_c1_id, circuit_c_id, None, 1, "Unresolved", "source", "region"),
+                (step_d1_id, circuit_d_id, region_2_id, 1, "Postcentral", "source", "region"),
+                (step_d2_id, circuit_d_id, region_1_id, 2, "Precentral", "target", "region"),
             ]
             for sid, cid, rid, order, sname, role, stype in steps:
                 await session.execute(text("""
@@ -222,15 +241,81 @@ def test_graph_returns_step_level_nodes():
                     "gran": "macro", "family": "macro_clinical",
                     "atlas": "AAL3", "ver": "v1",
                 })
+
+            # Circuit A owns its projection through an explicit membership.
+            # Circuit B has a real consecutive-step connection but no membership,
+            # so the endpoint must attribute it through the step-pair fallback.
+            for connection_id, source_id, target_id, strength in [
+                (connection_a_id, region_1_id, region_3_id, "moderate"),
+                (connection_b_id, region_3_id, region_2_id, "0.8"),
+                (connection_extra_id, region_1_id, region_2_id, "0.7"),
+            ]:
+                await session.execute(text("""
+                    INSERT INTO mirror_region_connections
+                        (id, source_region_candidate_id, target_region_candidate_id,
+                         granularity_level, granularity_family, source_atlas, source_version,
+                         connection_type, directionality, strength, confidence,
+                         mirror_status, review_status, promotion_status,
+                         raw_payload_json, normalized_payload_json)
+                    VALUES
+                        (:id, :source_id, :target_id,
+                         'macro', 'macro_clinical', 'AAL3', 'v1',
+                         'projection', 'directed', :strength, 0.9,
+                         'llm_suggested', 'pending', 'not_promoted',
+                         '{}'::jsonb, '{}'::jsonb)
+                """), {
+                    "id": connection_id,
+                    "source_id": source_id,
+                    "target_id": target_id,
+                    "strength": strength,
+                })
+            for membership_id, projection_id, source_step_id, target_step_id in [
+                (membership_a_id, connection_a_id, step_a1_id, step_a2_id),
+                # This membership skips the middle step and must not be rendered.
+                (membership_extra_id, connection_extra_id, step_a1_id, step_a3_id),
+            ]:
+                await session.execute(text("""
+                    INSERT INTO mirror_circuit_projection_memberships
+                        (id, circuit_id, projection_id, source_step_id, target_step_id,
+                         granularity_level, granularity_family, source_atlas, source_version,
+                         role_in_circuit, source_method, verification_status,
+                         mirror_status, review_status, promotion_status,
+                         raw_payload_json, normalized_payload_json)
+                    VALUES
+                        (:id, :circuit_id, :projection_id, :source_step_id, :target_step_id,
+                         'macro', 'macro_clinical', 'AAL3', 'v1',
+                         'main_path', 'circuit_to_projection', 'circuit_supported',
+                         'llm_suggested', 'pending', 'not_promoted',
+                         '{}'::jsonb, '{}'::jsonb)
+                """), {
+                    "id": membership_id,
+                    "circuit_id": circuit_a_id,
+                    "projection_id": projection_id,
+                    "source_step_id": source_step_id,
+                    "target_step_id": target_step_id,
+                })
             await session.execute(text("SET session_replication_role = DEFAULT"))
             await session.commit()
 
     async def _teardown():
         async with AsyncSessionLocal() as session:
-            for sid in (step_a1_id, step_a2_id, step_b1_id, step_b2_id):
+            for membership_id in (membership_a_id, membership_extra_id):
+                await session.execute(
+                    text("DELETE FROM mirror_circuit_projection_memberships WHERE id = :id"),
+                    {"id": membership_id},
+                )
+            for connection_id in (connection_a_id, connection_b_id, connection_extra_id):
+                await session.execute(
+                    text("DELETE FROM mirror_region_connections WHERE id = :id"),
+                    {"id": connection_id},
+                )
+            for sid in (
+                step_a1_id, step_a2_id, step_a3_id, step_b1_id, step_b2_id, step_c1_id,
+                step_d1_id, step_d2_id,
+            ):
                 await session.execute(
                     text("DELETE FROM mirror_circuit_steps WHERE id = :id"), {"id": sid})
-            for cid in (circuit_a_id, circuit_b_id):
+            for cid in (circuit_a_id, circuit_b_id, circuit_c_id, circuit_d_id):
                 await session.execute(
                     text("DELETE FROM mirror_region_circuits WHERE id = :id"), {"id": cid})
             for rid in (region_1_id, region_2_id, region_3_id):
@@ -239,63 +324,62 @@ def test_graph_returns_step_level_nodes():
             await session.commit()
 
     loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(_setup())
 
         client = TestClient(app)
         resp = client.post("/api/symptom-query/graph", json={
-            "circuit_ids": [str(circuit_a_id), str(circuit_b_id)],
+            "circuit_ids": [
+                str(circuit_a_id), str(circuit_b_id), str(circuit_c_id), str(circuit_d_id),
+            ],
             "granularity_level": "macro",
         })
 
         assert resp.status_code == 200, resp.text
         data = resp.json()
 
-        # ── Assert nodes ────────────────────────────────────────────────────
         nodes = data["nodes"]
-        assert len(nodes) >= 6, f"expected >=6 nodes, got {len(nodes)}"
-
-        circuit_nodes = [n for n in nodes if n["type"] == "circuit"]
-        region_nodes = [n for n in nodes if n["type"] == "brain_region"]
-
-        assert len(circuit_nodes) == 2, f"expected 2 circuit nodes, got {len(circuit_nodes)}"
-        assert len(region_nodes) == 4, f"expected 4 brain_region nodes, got {len(region_nodes)}"
-
-        circuit_a_node = next(n for n in circuit_nodes if n["label"] == "Motor Circuit A")
-        assert circuit_a_node["id"] == str(circuit_a_id)
-
-        region_labels = {n["label"] for n in region_nodes}
+        assert len(nodes) == 3
+        assert all(n["type"] == "brain_region" for n in nodes)
+        region_labels = {n["label"] for n in nodes}
         assert "Precentral_L" in region_labels, f"missing Precentral_L in {region_labels}"
         assert "Postcentral_R" in region_labels, f"missing Postcentral_R in {region_labels}"
         assert "Thalamus_L" in region_labels, f"missing Thalamus_L in {region_labels}"
 
-        # Check step metadata on region nodes
-        precentral_nodes = [n for n in region_nodes if n["label"] == "Precentral_L"]
-        assert len(precentral_nodes) == 1
-        pn = precentral_nodes[0]
-        assert pn.get("circuit_id") == str(circuit_a_id)
-        assert pn.get("step_order") == 1
-        assert pn.get("role") == "source"
-        assert pn.get("step_name") == "Precentral"
+        by_id = {n["id"]: n for n in nodes}
+        assert set(by_id[str(region_1_id)]["circuit_ids"]) == {
+            str(circuit_a_id), str(circuit_d_id),
+        }
+        assert set(by_id[str(region_2_id)]["circuit_ids"]) == {
+            str(circuit_a_id), str(circuit_b_id), str(circuit_d_id),
+        }
+        assert set(by_id[str(region_3_id)]["circuit_ids"]) == {
+            str(circuit_a_id), str(circuit_b_id),
+        }
 
-        # ── Assert edges ────────────────────────────────────────────────────
-        edges = data["edges"]
-
-        step_flow_edges = [e for e in edges if e.get("label") == "step_flow"]
-        assert len(step_flow_edges) >= 2, f"expected >=2 step_flow edges, got {len(step_flow_edges)}"
-
-        belongs_to_edges = [e for e in edges if e.get("label") == "belongs_to"]
-        assert len(belongs_to_edges) >= 4, f"expected >=4 belongs_to edges, got {len(belongs_to_edges)}"
-
-        co_occurs_edges = [e for e in edges if e.get("label") == "co_occurs"]
-        assert len(co_occurs_edges) >= 1, (
-            f"expected >=1 co_occurs edge (Thalamus shared), got {len(co_occurs_edges)}"
-        )
+        edges = {e["id"]: e for e in data["edges"]}
+        inferred_edge_id = f"step-flow:{circuit_d_id}:{step_d1_id}:{step_d2_id}"
+        assert set(edges) == {str(connection_a_id), str(connection_b_id), inferred_edge_id}
+        assert edges[str(connection_a_id)]["circuit_ids"] == [str(circuit_a_id)]
+        assert set(edges[str(connection_b_id)]["circuit_ids"]) == {
+            str(circuit_a_id), str(circuit_b_id),
+        }
+        assert edges[inferred_edge_id]["circuit_ids"] == [str(circuit_d_id)]
+        assert edges[inferred_edge_id]["type"] == "step_flow"
+        assert edges[str(connection_a_id)]["strength"] == "moderate"
 
     finally:
         loop.run_until_complete(_teardown())
         loop.close()
+
+
+def test_graph_rejects_invalid_circuit_uuid():
+    client = TestClient(app)
+    resp = client.post("/api/symptom-query/graph", json={
+        "circuit_ids": ["not-a-uuid"],
+        "granularity_level": "macro",
+    })
+    assert resp.status_code == 422
 
 
 def test_conversation_summarizing_stage(monkeypatch):
