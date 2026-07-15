@@ -418,10 +418,7 @@ async def get_circuit_graph(
     if not all_circs:
         return GraphDataResponse(nodes=nodes, edges=edges)
 
-    # Load steps with region labels via raw SQL
-    cid_list = ",".join(f"'{c}'" for c in body.circuit_ids if c)
-
-    steps_query = text(f"""
+    steps_query = text("""
         SELECT
             s.id,
             s.circuit_id::text,
@@ -432,11 +429,10 @@ async def get_circuit_graph(
             COALESCE(c.en_name, c.std_name, c.raw_name, s.step_name) as region_label
         FROM mirror_circuit_steps s
         LEFT JOIN candidate_brain_regions c ON c.id = s.region_candidate_id
-        WHERE s.circuit_id IN ({cid_list})
+        WHERE s.circuit_id = ANY(:cids)
         ORDER BY s.circuit_id, s.step_order
     """)
-
-    steps_result = await session.execute(steps_query)
+    steps_result = await session.execute(steps_query, {"cids": cids})
     step_rows = steps_result.fetchall()
 
     # Group steps by circuit

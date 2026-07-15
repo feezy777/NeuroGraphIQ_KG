@@ -6,3 +6,4 @@ Task 2: complete (2cabb1a, review clean)
 Task 3: complete (f5e4ad4, review clean)
 Task 4: complete — 51 backend tests passed, build verified, 4 pre-existing failures confirmed unrelated
 Task step3-1: complete 7ab0282
+Task 1: complete (3 commits, review clean after fix)

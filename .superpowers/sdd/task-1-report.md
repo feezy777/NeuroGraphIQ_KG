@@ -40,3 +40,33 @@ cd backend && .venv/Scripts/python.exe -c "import app.main; print('OK')"
 ## Concerns
 
 None. All changes follow existing patterns in the codebase (`/analyze` and `/expand` endpoints). The error fallback matches the spec requirement for graceful degradation.
+
+---
+
+## Post-Task Fix: Wire granularity_level into prompt + add missing tests
+
+**Date**: 2026-07-15
+
+### Fix 1: `granularity_level` accepted but unused
+
+- **File**: `backend/app/routers/symptom_query.py`
+- Added `{granularity}` placeholder to `CONVERSATION_PROMPT` — a line reading "The user is searching at the {granularity} granularity level. Adapt your terminology accordingly." was inserted after "Your goal is...".
+- Updated the `.format()` call on line 334 to pass `granularity=body.granularity_level`.
+
+### Fix 2: Missing tests for empty messages and LLM failure fallback
+
+- **File**: `backend/tests/test_symptom_query.py`
+- Added `test_conversation_empty_messages_returns_asking` — posts `{"messages": [], "granularity_level": "macro"}` and asserts stage is `"asking"` with non-null content (triggers the early return on line 324-325).
+- Added `test_conversation_llm_failure_fallback` — mocks `complete_json` to raise `Exception("LLM down")`, asserts stage is `"summarizing"` and summary contains the user's symptom word (tests the exception handler on lines 372-375).
+
+### Verification
+
+```
+4 passed, 0 failed (1.42s)
+cd backend && .venv/Scripts/python.exe -c "import app.main; print('OK')"
+→ OK
+```
+
+### Commit
+
+`72dae3b` — `fix: wire granularity_level into CONVERSATION_PROMPT + add empty-message and LLM-failure tests`

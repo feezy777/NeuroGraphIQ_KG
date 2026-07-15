@@ -1,0 +1,300 @@
+diff --git a/.superpowers/sdd/task-1-report.md b/.superpowers/sdd/task-1-report.md
+index 2ef0aab..08f6711 100644
+--- a/.superpowers/sdd/task-1-report.md
++++ b/.superpowers/sdd/task-1-report.md
+@@ -1,40 +1,42 @@
+ # Task 1 Report
+ 
++## Status: DONE
++
+ ## What was changed
+ 
+-**File:** `frontend/src/pages/llm-extraction/components/PoolExtractionModal.tsx`
+-
+-### 1. Imports (line 3 import block)
+-- Added `getExtractionPromptTemplates` (runtime import)
+-- Added `type ExtractionPromptTemplate` (type import)
+-
+-### 2. State variables (after `localPoolId`, around line 219)
+-Added 7 new state variables under a `// ── Prompt engineering` section:
+-- `temperature` (default 0.7)
+-- `maxTokens` (default 4096)
+-- `showPromptPreview` (default false)
+-- `editingPrompt` (default false)
+-- `customSystemPrompt` (default '')
+-- `customUserPrompt` (default '')
+-- `promptTemplates` (typed as `ExtractionPromptTemplate[]`, default [])
+-
+-### 3. Template mapping + effects + memo (between Lock panel height effect and Keep localMembers in sync effect)
+-- `WORKFLOW_PRIMARY_TEMPLATE` mapping: `Record<string, string>` mapping `workflowType` values to template keys
+-- `primaryTemplateKey` derived value from `WORKFLOW_PRIMARY_TEMPLATE[workflowType]`
+-- `useEffect` to load prompt templates via `getExtractionPromptTemplates('extraction')` on modal open
+-- `useMemo` to derive `primaryTemplate` from fetched templates by matching `primaryTemplateKey`
+-- `useEffect` to populate `customSystemPrompt` and `customUserPrompt` when `primaryTemplate` loads
++### 1. New test file: `backend/tests/test_symptom_query.py`
+ 
+-## Build verification
++Two mock-based tests following the FastAPI TestClient + monkeypatch pattern from the existing codebase:
++
++- **`test_conversation_asking_stage`**: Mocks the LLM to return `{"stage":"asking","content":"Do you have tinnitus?","summary":null}`. Asserts 200, correct stage, content, and null summary.
++- **`test_conversation_summarizing_stage`**: Mocks the LLM to return `{"stage":"summarizing","content":null,"summary":"Vestibular symptoms suggestive of BPPV"}`. Asserts 200, correct stage, null content, and the summary.
++
++Mock helper `_mock_provider()` creates an `AsyncMock` provider whose `complete_json` returns an `LlmProviderResponse` with the specified `parsed_json`. Monkeypatch targets `app.routers.symptom_query.get_llm_provider`.
++
++### 2. Modified: `backend/app/routers/symptom_query.py`
+ 
+-Command: `cd frontend && npm run build`
++Added after the `/expand` endpoint (line 289):
+ 
+-**Result: PASS** — 0 TypeScript errors, build succeeds in 1.37s.
++- **`ConversationRequest`** schema: `messages: list[dict[str, str]]`, `granularity_level: str = "macro"`
++- **`ConversationResponse`** schema: `stage: str`, `content: str | None`, `summary: str | None`
++- **`CONVERSATION_PROMPT`** constant: Instructs the LLM to act as a clinical neuroscientist, ask one question per turn, produce summary after 2-4 exchanges, reply JSON only.
++- **`POST /conversation`** endpoint: Uses the same DeepSeek provider/config pattern as `/analyze` and `/expand`. Handles JSON parsing with `_array` unwrap and `ast.literal_eval` fallback. On error: graceful fallback using raw user messages as summary.
++
++## Test summary
++
++```
++2 passed, 0 failed (1.40s)
++```
++
++Pre-existing failures (10) in `test_llm_field_completion`, `test_llm_circuit_projection_extraction`, `test_llm_projection_circuit_extraction`, `test_llm_projection_function_extraction`, and `test_resource_registry` -- unrelated to this change.
++
++## Build verification
+ 
+-Pre-existing warnings (not related to this change):
+-- Dynamic import of `client.ts` by `useCandidatePool.ts`
+-- Chunk size > 500 kB
++```
++cd backend && .venv/Scripts/python.exe -c "import app.main; print('OK')"
++→ OK
++```
+ 
+ ## Concerns
+ 
+-None. All changes are straightforward additions as specified in the brief. No existing functionality is modified.
++None. All changes follow existing patterns in the codebase (`/analyze` and `/expand` endpoints). The error fallback matches the spec requirement for graceful degradation.
+diff --git a/backend/app/routers/symptom_query.py b/backend/app/routers/symptom_query.py
+index 550178a..841f176 100644
+--- a/backend/app/routers/symptom_query.py
++++ b/backend/app/routers/symptom_query.py
+@@ -289,6 +289,92 @@ Output ONLY a JSON array of strings (all expanded terms combined, no duplicates)
+     return ExpandResponse(expanded=list(expanded))
+ 
+ 
++# ── Conversation — LLM-powered symptom triage ──────────────────────────────
++
++class ConversationRequest(BaseModel):
++    messages: list[dict[str, str]]
++    granularity_level: str = "macro"
++
++
++class ConversationResponse(BaseModel):
++    stage: str
++    content: str | None = None
++    summary: str | None = None
++
++
++CONVERSATION_PROMPT = """You are a clinical neuroscientist conducting a symptom triage interview. Your goal is to narrow down the patient's symptoms by asking one clarifying question at a time. The user is searching at the {granularity} granularity level. Adapt your terminology accordingly.
++
++Conversation so far:
++{messages}
++
++Based on the conversation, decide if you need more information or if you can summarize the symptoms.
++
++If you need more information, respond with:
++{{"stage": "asking", "content": "Your single clarifying question here...", "summary": null}}
++
++If you have enough information to form a clinical summary (typically after 2-4 exchanges), respond with:
++{{"stage": "summarizing", "content": null, "summary": "Clinical summary of the symptoms..."}}
++
++Reply ONLY with the JSON object, nothing else."""
++
++
++@router.post("/conversation", response_model=ConversationResponse)
++async def conversation_endpoint(body: ConversationRequest):
++    """LLM-powered symptom triage conversation — asks clarifying questions or summarizes."""
++    if not body.messages:
++        return ConversationResponse(stage="asking", content="Please describe your symptoms.")
++
++    try:
++        cfg = get_deepseek_runtime_config()
++        provider = get_llm_provider("deepseek")
++
++        formatted = "\n".join(
++            f"{m['role']}: {m['content']}" for m in body.messages
++        )
++        prompt = CONVERSATION_PROMPT.format(messages=formatted, granularity=body.granularity_level)
++
++        resp = await provider.complete_json(
++            model=cfg.default_model,
++            system_prompt="You are a clinical neuroscientist. Reply ONLY a JSON object with stage, content, and summary fields.",
++            user_prompt=prompt,
++            temperature=0.3,
++        )
++
++        import ast as _ast, json as _json
++        parsed = resp.parsed_json
++        # DeepSeek JSON mode wraps arrays in {"_array": [...]}; also handle string-wrapped
++        if isinstance(parsed, dict) and "_array" in parsed:
++            parsed = parsed["_array"]
++        if isinstance(parsed, str):
++            for parser in (_json.loads, _ast.literal_eval):
++                try:
++                    parsed = parser(parsed)
++                    break
++                except Exception:
++                    continue
++
++        if isinstance(parsed, dict):
++            stage = str(parsed.get("stage", "asking"))
++            content = parsed.get("content")
++            summary = parsed.get("summary")
++            if stage not in ("asking", "summarizing"):
++                stage = "asking"
++            return ConversationResponse(
++                stage=stage,
++                content=str(content) if content is not None else None,
++                summary=str(summary) if summary is not None else None,
++            )
++
++        # Fallback: use raw user messages as summary
++        raw_summary = " ".join(m["content"] for m in body.messages)
++        return ConversationResponse(stage="summarizing", summary=raw_summary)
++
++    except Exception:
++        logger.exception("Conversation endpoint failed")
++        raw_summary = " ".join(m["content"] for m in body.messages)
++        return ConversationResponse(stage="summarizing", summary=raw_summary)
++
++
+ # ── Graph — circuit IDs → region nodes + connection edges ──────────────────
+ 
+ class GraphDataRequest(BaseModel):
+diff --git a/backend/tests/test_symptom_query.py b/backend/tests/test_symptom_query.py
+new file mode 100644
+index 0000000..105c771
+--- /dev/null
++++ b/backend/tests/test_symptom_query.py
+@@ -0,0 +1,121 @@
++"""Tests for POST /api/symptom-query/conversation — mocked LLM, no real DeepSeek."""
++
++from __future__ import annotations
++
++import json
++from unittest.mock import AsyncMock
++
++from fastapi.testclient import TestClient
++
++from app.main import app
++from app.services.llm_providers.base import LlmProviderResponse, LlmProviderUsage
++
++
++def _mock_provider(parsed_json: dict) -> AsyncMock:
++    """Build an AsyncMock provider whose complete_json returns a given parsed_json."""
++    provider = AsyncMock()
++    provider.complete_json.return_value = LlmProviderResponse(
++        provider="deepseek",
++        model="test-model",
++        raw_text=json.dumps(parsed_json, ensure_ascii=False),
++        parsed_json=parsed_json,
++        usage=LlmProviderUsage(),
++        finish_reason="stop",
++        request_payload_redacted={},
++        response_payload={},
++        latency_ms=0,
++    )
++    return provider
++
++
++def test_conversation_asking_stage(monkeypatch):
++    """LLM returns asking stage — endpoint responds with a follow-up question."""
++    mock_provider = _mock_provider({
++        "stage": "asking",
++        "content": "Do you have tinnitus?",
++        "summary": None,
++    })
++    monkeypatch.setattr(
++        "app.routers.symptom_query.get_llm_provider",
++        lambda _name: mock_provider,
++    )
++
++    client = TestClient(app)
++    resp = client.post("/api/symptom-query/conversation", json={
++        "messages": [
++            {"role": "user", "content": "I have dizziness when I stand up."},
++        ],
++        "granularity_level": "macro",
++    })
++
++    assert resp.status_code == 200
++    data = resp.json()
++    assert data["stage"] == "asking"
++    assert data["content"] == "Do you have tinnitus?"
++    assert data["summary"] is None
++
++
++def test_conversation_empty_messages_returns_asking():
++    """Empty messages list triggers early return with an asking response."""
++    client = TestClient(app)
++    resp = client.post("/api/symptom-query/conversation", json={
++        "messages": [],
++        "granularity_level": "macro",
++    })
++    assert resp.status_code == 200
++    data = resp.json()
++    assert data["stage"] == "asking"
++    assert data["content"] is not None
++
++
++def test_conversation_llm_failure_fallback(monkeypatch):
++    """LLM failure triggers graceful fallback using raw user messages as summary."""
++    mock_provider = AsyncMock()
++    mock_provider.complete_json = AsyncMock(side_effect=Exception("LLM down"))
++    monkeypatch.setattr(
++        "app.routers.symptom_query.get_llm_provider",
++        lambda name: mock_provider,
++    )
++    monkeypatch.setattr(
++        "app.routers.symptom_query.get_deepseek_runtime_config",
++        lambda: type("C", (), {"api_key": "sk-test", "default_model": "deepseek-chat"})(),
++    )
++
++    client = TestClient(app)
++    resp = client.post("/api/symptom-query/conversation", json={
++        "messages": [{"role": "user", "content": "I feel dizzy"}],
++        "granularity_level": "macro",
++    })
++    assert resp.status_code == 200
++    data = resp.json()
++    assert data["stage"] == "summarizing"
++    assert "dizzy" in (data["summary"] or "").lower()
++
++
++def test_conversation_summarizing_stage(monkeypatch):
++    """LLM returns summarizing stage — endpoint responds with a clinical summary."""
++    mock_provider = _mock_provider({
++        "stage": "summarizing",
++        "content": None,
++        "summary": "Vestibular symptoms suggestive of BPPV",
++    })
++    monkeypatch.setattr(
++        "app.routers.symptom_query.get_llm_provider",
++        lambda _name: mock_provider,
++    )
++
++    client = TestClient(app)
++    resp = client.post("/api/symptom-query/conversation", json={
++        "messages": [
++            {"role": "user", "content": "I have dizziness when I stand up."},
++            {"role": "assistant", "content": "Does the room spin or do you feel faint?"},
++            {"role": "user", "content": "The room spins for about 30 seconds."},
++        ],
++        "granularity_level": "macro",
++    })
++
++    assert resp.status_code == 200
++    data = resp.json()
++    assert data["stage"] == "summarizing"
++    assert data["content"] is None
++    assert data["summary"] == "Vestibular symptoms suggestive of BPPV"

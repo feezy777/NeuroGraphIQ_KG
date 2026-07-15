@@ -1,0 +1,418 @@
+diff --git a/backend/app/routers/symptom_query.py b/backend/app/routers/symptom_query.py
+index 841f176..9eea985 100644
+--- a/backend/app/routers/symptom_query.py
++++ b/backend/app/routers/symptom_query.py
+@@ -394,58 +394,153 @@ async def get_circuit_graph(
+ ):
+     cids = [uuid.UUID(c) for c in body.circuit_ids if c]
+     if not cids:
+         return GraphDataResponse(nodes=[], edges=[])
+ 
+-    cid_list = ",".join(f"'{c}'" for c in body.circuit_ids if c)
+-
+     from app.models.mirror_kg import MirrorRegionCircuit
+     circ_result = await session.execute(
+         select(MirrorRegionCircuit).where(MirrorRegionCircuit.id.in_(cids))
+     )
+     all_circs = circ_result.scalars().all()
++
+     nodes: list[dict] = []
+-    edge_set: set[str] = set()
+     edges: list[dict] = []
+-    circ_map: dict[str, str] = {}
++    edge_set: set[str] = set()
+ 
++    # Circuit nodes
+     for circ in all_circs:
+         cid = str(circ.id)
+-        name = circ.circuit_name or cid[:12]
+-        circ_map[name] = cid
+-        nodes.append({"id": cid, "label": name, "type": "circuit"})
+-
+-    import re
+-    region_nodes: dict[str, str] = {}
+-    for circ_name in circ_map:
+-        parts = re.split(r'\s*[→\-]+\s*|\s+circuit\s*|\s+pathway\s*|\s+connection\s*', circ_name, flags=re.IGNORECASE)
+-        for part in parts:
+-            part = part.strip().lower()
+-            if len(part) < 3 or part in ('left','right','the','and','or','to','from','unknown'):
+-                continue
+-            if part not in region_nodes:
+-                rid = f"region_{len(region_nodes)}"
+-                region_nodes[part] = rid
+-                nodes.append({"id": rid, "label": part.title(), "type": "brain_region"})
++        nodes.append({
++            "id": cid,
++            "label": circ.circuit_name or cid[:12],
++            "type": "circuit",
++        })
+ 
+-    for circ in all_circs:
+-        cid = str(circ.id)
+-        circ_parts = re.split(r'\s*[→\-]+\s*|\s+circuit\s*|\s+pathway\s*', circ.circuit_name or '', flags=re.IGNORECASE)
+-        circ_regions = []
+-        for part in circ_parts:
+-            part = part.strip().lower()
+-            if part in region_nodes:
+-                rid = region_nodes[part]
+-                circ_regions.append(rid)
+-                key = f"{cid}-{rid}"
+-                if key not in edge_set:
+-                    edge_set.add(key)
+-                    edges.append({"id": key, "source": cid, "target": rid, "label": "belongs_to"})
+-        for i in range(len(circ_regions)):
+-            for j in range(i+1, len(circ_regions)):
+-                key = f"{circ_regions[i]}-{circ_regions[j]}"
+-                if key not in edge_set:
+-                    edge_set.add(key)
+-                    edges.append({"id": key, "source": circ_regions[i], "target": circ_regions[j], "label": "co_occurs"})
++    if not all_circs:
++        return GraphDataResponse(nodes=nodes, edges=edges)
++
++    # Load steps with region labels via raw SQL
++    cid_list = ",".join(f"'{c}'" for c in body.circuit_ids if c)
++
++    steps_query = text(f"""
++        SELECT
++            s.id,
++            s.circuit_id::text,
++            s.step_order,
++            s.step_name,
++            s.role,
++            s.region_candidate_id::text,
++            COALESCE(c.en_name, c.std_name, c.raw_name, s.step_name) as region_label
++        FROM mirror_circuit_steps s
++        LEFT JOIN candidate_brain_regions c ON c.id = s.region_candidate_id
++        WHERE s.circuit_id IN ({cid_list})
++        ORDER BY s.circuit_id, s.step_order
++    """)
++
++    steps_result = await session.execute(steps_query)
++    step_rows = steps_result.fetchall()
++
++    # Group steps by circuit
++    steps_by_circuit: dict[str, list[dict]] = {}
++
++    for row in step_rows:
++        sid = str(row[0])
++        scid = str(row[1])
++        step_order = row[2]
++        step_name = row[3] or "Unknown"
++        role = row[4] or "unknown"
++        region_candidate_id = row[5] if row[5] and row[5] != "None" else None
++        region_label = row[6] or step_name
++
++        if scid not in steps_by_circuit:
++            steps_by_circuit[scid] = []
++
++        # One node per step (no dedup — enables co_occurs edges across circuits)
++        node_id = f"step_{sid[:12]}"
++
++        info = {
++            "id": sid,
++            "node_id": node_id,
++            "circuit_id": scid,
++            "step_order": step_order,
++            "step_name": step_name,
++            "role": role,
++            "region_label": region_label,
++            "region_candidate_id": region_candidate_id,
++        }
++        steps_by_circuit[scid].append(info)
++
++        # Add brain_region node
++        region_node: dict[str, object] = {
++            "id": node_id,
++            "type": "brain_region",
++            "label": region_label,
++            "circuit_id": scid,
++            "step_order": step_order,
++            "role": role,
++            "step_name": step_name,
++        }
++        if region_candidate_id:
++            region_node["region_candidate_id"] = region_candidate_id
++        nodes.append(region_node)
++
++        # belongs_to edge: brain_region node -> circuit
++        belongs_key = f"belongs_{node_id}_{scid}"
++        if belongs_key not in edge_set:
++            edge_set.add(belongs_key)
++            edges.append({
++                "id": belongs_key,
++                "source": node_id,
++                "target": scid,
++                "label": "belongs_to",
++            })
++
++    # step_flow edges: consecutive steps within same circuit
++    for scid, steps in steps_by_circuit.items():
++        for i in range(len(steps) - 1):
++            source_id = steps[i]["node_id"]
++            target_id = steps[i + 1]["node_id"]
++            flow_key = f"flow_{source_id}_{target_id}"
++            if flow_key not in edge_set:
++                edge_set.add(flow_key)
++                edges.append({
++                    "id": flow_key,
++                    "source": source_id,
++                    "target": target_id,
++                    "label": "step_flow",
++                })
++
++    # co_occurs edges: connect brain_region nodes from DIFFERENT circuits
++    # sharing the same region_candidate_id
++    region_to_nodes: dict[str, list[dict]] = {}
++    for scid, steps in steps_by_circuit.items():
++        for step in steps:
++            rc_id = step.get("region_candidate_id")
++            if rc_id:
++                if rc_id not in region_to_nodes:
++                    region_to_nodes[rc_id] = []
++                region_to_nodes[rc_id].append(step)
++
++    for rc_id, steps in region_to_nodes.items():
++        if len(steps) < 2:
++            continue
++        # Only connect steps from different circuits
++        circuit_ids_set = set(s["circuit_id"] for s in steps)
++        if len(circuit_ids_set) < 2:
++            continue
++        for i in range(len(steps)):
++            for j in range(i + 1, len(steps)):
++                if steps[i]["circuit_id"] != steps[j]["circuit_id"]:
++                    si = steps[i]["node_id"]
++                    sj = steps[j]["node_id"]
++                    co_key = f"co_{si}_{sj}"
++                    if co_key not in edge_set:
++                        edge_set.add(co_key)
++                        edges.append({
++                            "id": co_key,
++                            "source": si,
++                            "target": sj,
++                            "label": "co_occurs",
++                        })
+ 
+     return GraphDataResponse(nodes=nodes, edges=edges)
+ 
+diff --git a/backend/tests/test_symptom_query.py b/backend/tests/test_symptom_query.py
+index 105c771..a9c7388 100644
+--- a/backend/tests/test_symptom_query.py
++++ b/backend/tests/test_symptom_query.py
+@@ -90,10 +90,216 @@ def test_conversation_llm_failure_fallback(monkeypatch):
+     data = resp.json()
+     assert data["stage"] == "summarizing"
+     assert "dizzy" in (data["summary"] or "").lower()
+ 
+ 
++# ── Graph — integration test with real DB ─────────────────────────────────────
++
++
++def test_graph_returns_step_level_nodes():
++    """Integration: insert circuits+steps with region_candidate_id, verify graph structure.
++
++    Nodes include brain_region type with real region labels and step_order.
++    Edges include step_flow (between consecutive steps) and belongs_to (step->circuit).
++    co_occurs edges connect brain_region nodes of steps from different circuits
++    sharing the same region_candidate_id.
++    """
++    import asyncio
++    import uuid
++
++    from sqlalchemy import text
++
++    from app.database import AsyncSessionLocal
++    from fastapi.testclient import TestClient
++    from app.main import app
++
++    # ── Test data UUIDs ────────────────────────────────────────────────────
++    circuit_a_id = uuid.uuid4()
++    circuit_b_id = uuid.uuid4()
++    region_1_id = uuid.uuid4()
++    region_2_id = uuid.uuid4()
++    region_3_id = uuid.uuid4()  # shared by both circuits -> co_occurs
++
++    step_a1_id = uuid.uuid4()
++    step_a2_id = uuid.uuid4()
++    step_b1_id = uuid.uuid4()
++    step_b2_id = uuid.uuid4()
++
++    # Shared synthetic FK targets (these tables exist but we only need IDs)
++    _gen_run_id = uuid.uuid4()
++    _batch_id = uuid.uuid4()
++    _resource_id = uuid.uuid4()
++    _parse_run_id = uuid.uuid4()
++    _file_id = uuid.uuid4()
++
++    async def _setup():
++        async with AsyncSessionLocal() as session:
++            # Bypass FK checks during test setup — synthetic IDs are unique
++            # and always cleaned up, so referential integrity is not at risk.
++            await session.execute(text("SET session_replication_role = replica"))
++
++            # ── candidate_brain_regions ─────────────────────────────────────
++            regions = [
++                (region_1_id, "Precentral_L", "Precentral_L",
++                 "Precentral Gyrus Left", "precentral gyrus"),
++                (region_2_id, "Postcentral_R", "Postcentral_R",
++                 "Postcentral Gyrus Right", "postcentral gyrus"),
++                (region_3_id, "Thalamus_L", "Thalamus_L",
++                 "Thalamus Left", "thalamus"),
++            ]
++            for rid, en_name, raw_name, base_name, std_name in regions:
++                await session.execute(text("""
++                    INSERT INTO candidate_brain_regions
++                        (id, generation_run_id, batch_id, resource_id,
++                         parse_run_id, source_raw_label_id, source_raw_table,
++                         source_file_id, source_atlas, source_version,
++                         raw_name, en_name, std_name, region_base_name,
++                         granularity_level, granularity_family,
++                         candidate_status, raw_payload, row_index)
++                    VALUES
++                        (:id, :gen_run, :batch, :res,
++                         :parse_run, :src_label, :src_table,
++                         :file_id, :atlas, :ver,
++                         :raw, :en, :std, :base,
++                         :gran, :family,
++                         'candidate_created', '{}'::jsonb, 0)
++                """), {
++                    "id": rid, "gen_run": _gen_run_id, "batch": _batch_id,
++                    "res": _resource_id, "parse_run": _parse_run_id,
++                    "src_label": uuid.uuid4(), "src_table": "raw_aal3_region_labels",
++                    "file_id": _file_id, "atlas": "AAL3", "ver": "v1",
++                    "raw": raw_name, "en": en_name, "std": std_name,
++                    "base": base_name, "gran": "macro", "family": "macro_clinical",
++                })
++
++            # ── mirror_region_circuits ──────────────────────────────────────
++            for cid, cname, ctype in [(circuit_a_id, "Motor Circuit A", "motor_circuit"),
++                                       (circuit_b_id, "Sensory Circuit B", "sensory_circuit")]:
++                await session.execute(text("""
++                    INSERT INTO mirror_region_circuits
++                        (id, circuit_name, circuit_type,
++                         granularity_level, granularity_family,
++                         source_atlas, source_version,
++                         mirror_status, review_status, promotion_status,
++                         raw_payload_json, normalized_payload_json)
++                    VALUES
++                        (:id, :name, :ctype,
++                         :gran, :family,
++                         :atlas, :ver,
++                         'llm_suggested', 'pending', 'not_promoted',
++                         '{}'::jsonb, '{}'::jsonb)
++                """), {
++                    "id": cid, "name": cname, "ctype": ctype,
++                    "gran": "macro", "family": "macro_clinical",
++                    "atlas": "AAL3", "ver": "v1",
++                })
++
++            # ── mirror_circuit_steps ────────────────────────────────────────
++            steps = [
++                (step_a1_id, circuit_a_id, region_1_id, 1, "Precentral", "source", "region"),
++                (step_a2_id, circuit_a_id, region_3_id, 2, "Thalamus",   "relay", "relay"),
++                (step_b1_id, circuit_b_id, region_3_id, 1, "Thalamus",   "source", "region"),
++                (step_b2_id, circuit_b_id, region_2_id, 2, "Postcentral", "target", "region"),
++            ]
++            for sid, cid, rid, order, sname, role, stype in steps:
++                await session.execute(text("""
++                    INSERT INTO mirror_circuit_steps
++                        (id, circuit_id, region_candidate_id,
++                         step_order, step_name, step_type, role,
++                         granularity_level, granularity_family,
++                         source_atlas, source_version,
++                         mirror_status, review_status, promotion_status,
++                         raw_payload_json, normalized_payload_json)
++                    VALUES
++                        (:id, :cid, :rid,
++                         :ord, :sname, :stype, :role,
++                         :gran, :family,
++                         :atlas, :ver,
++                         'llm_suggested', 'pending', 'not_promoted',
++                         '{}'::jsonb, '{}'::jsonb)
++                """), {
++                    "id": sid, "cid": cid, "rid": rid,
++                    "ord": order, "sname": sname, "stype": stype, "role": role,
++                    "gran": "macro", "family": "macro_clinical",
++                    "atlas": "AAL3", "ver": "v1",
++                })
++            await session.execute(text("SET session_replication_role = DEFAULT"))
++            await session.commit()
++
++    async def _teardown():
++        async with AsyncSessionLocal() as session:
++            for sid in (step_a1_id, step_a2_id, step_b1_id, step_b2_id):
++                await session.execute(
++                    text("DELETE FROM mirror_circuit_steps WHERE id = :id"), {"id": sid})
++            for cid in (circuit_a_id, circuit_b_id):
++                await session.execute(
++                    text("DELETE FROM mirror_region_circuits WHERE id = :id"), {"id": cid})
++            for rid in (region_1_id, region_2_id, region_3_id):
++                await session.execute(
++                    text("DELETE FROM candidate_brain_regions WHERE id = :id"), {"id": rid})
++            await session.commit()
++
++    loop = asyncio.new_event_loop()
++    asyncio.set_event_loop(loop)
++    try:
++        loop.run_until_complete(_setup())
++
++        client = TestClient(app)
++        resp = client.post("/api/symptom-query/graph", json={
++            "circuit_ids": [str(circuit_a_id), str(circuit_b_id)],
++            "granularity_level": "macro",
++        })
++
++        assert resp.status_code == 200, resp.text
++        data = resp.json()
++
++        # ── Assert nodes ────────────────────────────────────────────────────
++        nodes = data["nodes"]
++        assert len(nodes) >= 6, f"expected >=6 nodes, got {len(nodes)}"
++
++        circuit_nodes = [n for n in nodes if n["type"] == "circuit"]
++        region_nodes = [n for n in nodes if n["type"] == "brain_region"]
++
++        assert len(circuit_nodes) == 2, f"expected 2 circuit nodes, got {len(circuit_nodes)}"
++        assert len(region_nodes) == 4, f"expected 4 brain_region nodes, got {len(region_nodes)}"
++
++        circuit_a_node = next(n for n in circuit_nodes if n["label"] == "Motor Circuit A")
++        assert circuit_a_node["id"] == str(circuit_a_id)
++
++        region_labels = {n["label"] for n in region_nodes}
++        assert "Precentral_L" in region_labels, f"missing Precentral_L in {region_labels}"
++        assert "Postcentral_R" in region_labels, f"missing Postcentral_R in {region_labels}"
++        assert "Thalamus_L" in region_labels, f"missing Thalamus_L in {region_labels}"
++
++        # Check step metadata on region nodes
++        precentral_nodes = [n for n in region_nodes if n["label"] == "Precentral_L"]
++        assert len(precentral_nodes) == 1
++        pn = precentral_nodes[0]
++        assert pn.get("circuit_id") == str(circuit_a_id)
++        assert pn.get("step_order") == 1
++        assert pn.get("role") == "source"
++        assert pn.get("step_name") == "Precentral"
++
++        # ── Assert edges ────────────────────────────────────────────────────
++        edges = data["edges"]
++
++        step_flow_edges = [e for e in edges if e.get("label") == "step_flow"]
++        assert len(step_flow_edges) >= 2, f"expected >=2 step_flow edges, got {len(step_flow_edges)}"
++
++        belongs_to_edges = [e for e in edges if e.get("label") == "belongs_to"]
++        assert len(belongs_to_edges) >= 4, f"expected >=4 belongs_to edges, got {len(belongs_to_edges)}"
++
++        co_occurs_edges = [e for e in edges if e.get("label") == "co_occurs"]
++        assert len(co_occurs_edges) >= 1, (
++            f"expected >=1 co_occurs edge (Thalamus shared), got {len(co_occurs_edges)}"
++        )
++
++    finally:
++        loop.run_until_complete(_teardown())
++        loop.close()
++
++
+ def test_conversation_summarizing_stage(monkeypatch):
+     """LLM returns summarizing stage — endpoint responds with a clinical summary."""
+     mock_provider = _mock_provider({
+         "stage": "summarizing",
+         "content": None,
