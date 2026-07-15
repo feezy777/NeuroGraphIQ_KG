@@ -1,35 +1,25 @@
-# Task 3 Report: Pass temperature/maxTokens/prompt params to API calls
+# Task 3 Report: Extract Shared ForceGraph Component
 
-## Status: DONE
+## Summary
 
-## Changes Made
+Successfully extracted the D3-based ForceGraph component from `GraphExplorerPage.tsx` into a shared component at `frontend/src/components/ForceGraph.tsx`, with all color/dash/radius maps parameterized as props.
 
-File: `frontend/src/pages/llm-extraction/components/PoolExtractionModal.tsx`
+## Changes
 
-### 1. `runSameGranularityFunctionExtraction` call (function extraction path)
-Added three fields after `create_evidence: !dryRun,`:
-- `temperature: temperature !== 0.7 ? temperature : undefined`
-- `max_tokens: maxTokens !== 4096 ? maxTokens : undefined`
-- `prompt_template_key: primaryTemplateKey || undefined`
+### Created: `frontend/src/components/ForceGraph.tsx`
+- **Types:** `GNode`, `GEdge`, `LegendItem` (with index signature on GNode for extensibility, optional `confidence?`/`label?` on GEdge)
+- **Defaults:** `NODE_COLOR`, `NODE_R`, `EDGE_COLOR`, `EDGE_DASH` maps (copied from GraphExplorerPage, consumers override via props)
+- **`ForceGraph` component:** Accepts `nodes`, `edges`, `focusNode`, `onNodeClick`, `edgeColors`, `edgeDashes`, `nodeColors`, `nodeRadii`, `legendItems` props. Handles missing endpoint nodes, large-dataset limiting (2000 nodes max), and renders legend below the SVG when `legendItems` is provided.
+- **`drawGraph` function:** Pure D3 SVG renderer, accepts the same color/dash/radius maps as parameters. Includes tooltip, zoom, drag, and force simulation.
 
-### 2. Composite workflow payload
-Added four fields after `create_evidence: !dryRun,`:
-- `temperature: temperature !== 0.7 ? temperature : undefined`
-- `max_tokens: maxTokens !== 4096 ? maxTokens : undefined`
-- `prompt_template_key: primaryTemplateKey || undefined`
-- `prompt_overrides: editingPrompt && primaryTemplateKey ? { [primaryTemplateKey]: customUserPrompt } : undefined`
-
-### 3. `handleClose` prompt state reset
-Added seven state resets after `setDryRun(false)`:
-- `setTemperature(0.7)`
-- `setMaxTokens(4096)`
-- `setShowPromptPreview(false)`
-- `setEditingPrompt(false)`
-- `setCustomSystemPrompt('')`
-- `setCustomUserPrompt('')`
-- `setPromptTemplates([])`
+### Updated: `frontend/src/pages/GraphExplorerPage.tsx`
+- Removed local `GNode`/`GEdge` interfaces (use imported from shared)
+- Removed local `ForceGraph` and `drawGraph` functions
+- Kept local `NODE_COLOR`, `NODE_R`, `EDGE_COLOR`, `EDGE_DASH` as page-specific config, passed as props
+- Removed inline legend div, replaced with `legendItems` prop on `ForceGraph`
+- Fixed two TS errors from `confidence` becoming optional (used `?? 0`)
 
 ## Verification
-- `npm run build` passes with 0 TypeScript errors and 0 build errors (pre-existing chunk size warnings only).
-- Non-default values only sent to API (defaults yield `undefined`, letting backend use its defaults).
-- All state variables referenced already exist from prior implementation.
+- `npm run build` -- exit 0, no TS errors
+- Backend tests: `tests/test_symptom_query.py` -- 5 passed
+- Committed as `0703fcc` on `main`

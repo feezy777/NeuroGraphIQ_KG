@@ -1,51 +1,40 @@
-# Task 4 Report: Frontend API Types + Quick Cards
+# Task 4 Report: Chat Panel + State Machine for SymptomQueryPage
 
-## Summary
+## Changes Made
 
-Added frontend API types, async functions, and quick card UI for the Circuit → Connection Extraction feature.
+**File:** `frontend/src/pages/SymptomQueryPage.tsx`
 
-## Files Modified
+### What was done
 
-### 1. `frontend/src/api/endpoints.ts`
+1. **Replaced single-line symptom input** with a multi-turn chat panel
+2. **Added state machine** (`idle` -> `chatting` -> `summarizing` -> `analyzing` -> `results`)
+3. **Added state variables:**
+   - `phase` — current stage of the interaction
+   - `messages` — chat history as `{role, content}[]`
+   - `summary` — editable AI-generated symptom summary
+   - `chatInput` — controlled input for chat text
+   - `chatLoading` — loading indicator for send
+   - `chatEndRef` — scroll anchor for auto-scroll
+4. **Added handlers:**
+   - `handleSend` — sends messages to `/api/symptom-query/conversation`, handles `asking` and `summarizing` stages
+   - `handleConfirm` — auto-chains `/analyze` -> `/expand` -> `/search` -> `/graph` on confirmation
+   - `handleContinueChat` — returns to chatting phase for more refinement
+   - `handleClear` — resets all state to idle
+5. **Replaced the top card** with:
+   - Chat bubble display (user right blue, AI left gray) with auto-scroll
+   - Editable summary textarea with "确认并开始分析" / "继续对话" buttons
+   - Input bar with send/clear buttons, disabled during loading/analyzing
+   - Analyzing spinner state
+   - Collapsed "重新查询" `<details>` element in results phase
+6. **Updated circuit list condition** to `phase === 'results' && circuits.length > 0`
+7. **Updated empty state condition** to `phase === 'results' && circuits.length === 0 && ...`
 
-Added the following TypeScript interfaces:
-- `CircuitConnectionExtractionRequest` — request body for /run endpoint
-- `CircuitConnectionExtractionStartResponse` — async start response
-- `CircuitConnectionExtractionItem` — per-circuit result item
-- `CircuitConnectionExtractionRun` — run summary
-- `CircuitConnectionExtractionRunDetail` — run detail with items
-- `CircuitConnectionExtractionRunListResponse` — paginated list
+### Verifications
 
-Added the following async functions:
-- `runCircuitConnectionExtraction(body)` → POST `/api/llm-extraction/circuit-connection-extraction/run`
-- `listCircuitConnectionExtractionRuns(params?)` → GET `/api/llm-extraction/circuit-connection-extraction/runs`
-- `getCircuitConnectionExtractionRun(runId)` → GET `/api/llm-extraction/circuit-connection-extraction/runs/{runId}`
-- `cancelCircuitConnectionExtractionRun(runId)` → POST `/api/llm-extraction/circuit-connection-extraction/runs/{runId}/cancel`
+- `npm run build` — exit 0 (TypeScript + Vite build passes)
+- `pytest tests/test_symptom_query.py -q` — 5 passed
+- Git commit: `8c27447` on branch `main`
 
-### 2. `frontend/src/pages/LlmExtractionPage.tsx`
+### Files Changed
 
-- Added import for `CircuitConnectionExtractionModal` (will be created in Task 5)
-- Added three state variables: `circuitSubTab`, `extractionModalOpen`, `extractionMode`
-- Added a sub-tab toggle UI with two buttons: [回路数据浏览] and [回路→连接提取] in the mirror data tab section
-- When 'connection-extraction' sub-tab is active, shows two quick cards:
-  - 🔗 多连接提取 card (mode: multi_connection)
-  - 🎯 主连接对提取 card (mode: main_pair)
-- When a quick card is clicked, opens a `CircuitConnectionExtractionModal` (modal component deferred to Task 5)
-
-### 3. `frontend/src/styles.css`
-
-Added CSS classes for the circuit connection extraction quick cards:
-- `.llm-quick-cards` — flex container
-- `.llm-quick-card-icon` — icon in quick card
-- `.llm-quick-card-title` — title in quick card
-- `.llm-quick-card-desc` — description in quick card
-- `.llm-quick-card-features` — feature list in quick card
-
-## Verification
-
-- `npx tsc --noEmit` passes with 0 errors
-- The missing modal component import (`CircuitConnectionExtractionModal`) is declared with a comment noting it will be created in Task 5
-
-## Next Steps
-
-- Task 5: Create the actual `CircuitConnectionExtractionModal` wizard component in `frontend/src/pages/llm-extraction/components/`
+- `frontend/src/pages/SymptomQueryPage.tsx` (+115, -22)
