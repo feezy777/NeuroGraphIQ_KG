@@ -131,12 +131,20 @@ export function ForceGraph({
     // Limit rendering for large datasets (D3 force sim handles ~10k edges fine)
     const maxRender = 10000
     const renderNodes = nodes.slice(0, maxRender)
+    // Sort rare edge types LAST so they render on top of common types (e.g. functional
+    // edges visible above the dense structural_connection layer in macro graphs).
+    const EDGE_TYPE_PRIORITY: Record<string, number> = {
+      structural_connection: 0, functional_connectivity: 1, projection: 1,
+      association: 2, coactivation: 2, effective_connectivity: 2,
+      uncertain_connection: 3, unknown: 3, step_flow: 2, co_occurs: 2, belongs_to: 0,
+    }
     const renderEdges = edges
       .filter(
         e =>
           renderNodes.some(n => n.id === e.source) &&
           renderNodes.some(n => n.id === e.target),
       )
+      .sort((a, b) => (EDGE_TYPE_PRIORITY[a.type] ?? 0) - (EDGE_TYPE_PRIORITY[b.type] ?? 0))
       .slice(0, maxRender)
 
     if (nodes.length > maxRender) {

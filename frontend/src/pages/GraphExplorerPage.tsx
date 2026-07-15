@@ -21,14 +21,14 @@ const EDGE_DASH: Record<string, string> = {
 
 /** Legend items describing the node & edge color scheme. */
 const LEGEND_ITEMS: LegendItem[] = [
-  { color: '#3b82f6', dash: '', label: '● 脑区 (Brain Region)' },
-  { color: '#3b82f6', dash: '', label: '━━ 结构连接 (structural)' },
-  { color: '#f59e0b', dash: '6,3', label: '╌╌╌ 功能连接 (functional)' },
-  { color: '#10b981', dash: '2,2', label: '┈┈┈ 投射 (projection)' },
-  { color: '#8b5cf6', dash: '', label: '━━ 关联 (association)' },
-  { color: '#ec4899', dash: '', label: '━━ 共激活 (coactivation)' },
-  { color: '#ef4444', dash: '', label: '━━ 有效连接 (effective)' },
-  { color: '#9ca3af', dash: '', label: '━━ 不确定 (uncertain)' },
+  { color: '#3b82f6', dash: '', label: '● 脑区(Region)' },
+  { color: '#3b82f6', dash: '', label: '结构连接' },
+  { color: '#f59e0b', dash: '6,3', label: '功能连接' },
+  { color: '#10b981', dash: '2,2', label: '投射' },
+  { color: '#8b5cf6', dash: '', label: '关联' },
+  { color: '#ec4899', dash: '', label: '共激活' },
+  { color: '#ef4444', dash: '', label: '有效连接' },
+  { color: '#9ca3af', dash: '', label: '不确定' },
 ]
 
 // ── Normalize ───────────────────────────────────────────────────────────────
