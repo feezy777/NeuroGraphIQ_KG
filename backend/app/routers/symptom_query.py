@@ -46,6 +46,7 @@ class CircuitResult(BaseModel):
     id: str
     circuit_name: str
     circuit_type: str | None = None
+    description: str | None = None
     step_count: int = 0
     function_count: int = 0
     matched_functions: list[str]
@@ -53,6 +54,7 @@ class CircuitResult(BaseModel):
     relevance: float = 0.0
     matched_categories: list[str] = []
     steps: list[dict[str, Any]] = []
+    function_descriptions: dict[str, str] = {}
 
     model_config = {"from_attributes": True}
 
@@ -153,7 +155,7 @@ async def search_circuits(
     where_clause = " OR ".join(f"({p})" for p in where_parts)
 
     query = text(f"""
-        SELECT DISTINCT c.id, c.circuit_name, c.circuit_type,
+        SELECT DISTINCT c.id, c.circuit_name, c.circuit_type, c.description,
                cf.function_domain, cf.function_term_en, cf.function_role,
                GREATEST(similarity(cf.function_domain, :sim_q), similarity(cf.function_term_en, :sim_q)) as sim
         FROM mirror_circuit_functions cf
@@ -173,14 +175,15 @@ async def search_circuits(
     circuit_data: dict[str, dict] = {}
     for row in rows:
         cid = str(row[0])
-        fn_domain = (row[3] or "").strip().lower()
-        fn_term = (row[4] or "").strip().lower()
-        sim = float(row[6] or 0)
+        fn_domain = (row[4] or "").strip().lower()
+        fn_term = (row[5] or "").strip().lower()
+        sim = float(row[7] or 0)
         if cid not in circuit_data:
             circuit_data[cid] = {
                 "id": cid,
                 "circuit_name": row[1] or "Unknown",
                 "circuit_type": row[2],
+                "description": row[3] or "",
                 "sim": sim,
                 "fn_domains": set(),
                 "matched_functions": [],
@@ -237,13 +240,26 @@ async def search_circuits(
         )
         steps = [{"id": str(s.id), "step_order": s.step_order, "step_name": s.step_name, "step_type": s.step_type, "role": s.role}
                  for s in steps_result.scalars().all()]
+        # Load circuit description
+        circ_desc = d.get("description", "")
+        # Load function descriptions for matched functions
+        func_descs: dict[str, str] = {}
+        if d["matched_functions"]:
+            fd_rows = (await session.execute(
+                select(MirrorCircuitFunction.function_term_en, MirrorCircuitFunction.description)
+                .where(MirrorCircuitFunction.circuit_id == uid)
+                .where(MirrorCircuitFunction.function_term_en.in_(d["matched_functions"][:10]))
+            )).fetchall()
+            for fen, fdesc in fd_rows:
+                if fdesc: func_descs[fen or ""] = fdesc
         circuits.append(CircuitResult(
             id=d["id"], circuit_name=d["circuit_name"], circuit_type=d["circuit_type"],
+            description=circ_desc or None,
             step_count=step_count, function_count=d["func_count"],
             matched_functions=d["matched_functions"][:10],
             match_score=round(min(1.0, len(d["matched_functions"]) / max(d["func_count"], 1)), 2),
             relevance=d["relevance"], matched_categories=d.get("matched_categories", []),
-            steps=steps,
+            steps=steps, function_descriptions=func_descs,
         ))
 
     return SymptomSearchResponse(circuits=circuits)

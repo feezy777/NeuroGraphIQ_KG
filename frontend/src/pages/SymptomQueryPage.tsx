@@ -9,9 +9,11 @@ import type { NormalizedEdge, RawGraphData } from './symptom-query/symptomGraphT
 
 interface CircuitResult {
   id: string; circuit_name: string; circuit_type: string | null
+  description?: string | null
   step_count: number; function_count: number; matched_functions: string[]; match_score: number
   relevance: number; matched_categories: string[]
   steps: { id: string; step_order: number; step_name: string; step_type: string; role: string }[]
+  function_descriptions?: Record<string, string>
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
@@ -254,11 +256,28 @@ export function SymptomQueryPage() {
                 </div>
 
                 <div style={{ marginBottom: 12 }}>
+                  {/* Circuit overview */}
+                  {selectedCircuit.description && (
+                    <div style={{ marginBottom: 12, padding: 8, background: '#f8fafc', borderRadius: 6, fontSize: 11, color: '#475569', lineHeight: 1.5 }}>
+                      {selectedCircuit.description}
+                    </div>
+                  )}
+                  {selectedCircuit.function_count > 0 && (
+                    <div style={{ marginBottom: 12, fontSize: 11, color: '#555' }}>
+                      {selectedCircuit.step_count} 步骤 · {selectedCircuit.function_count} 功能 · {selectedCircuit.matched_functions.length} 匹配
+                    </div>
+                  )}
                   <div style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>关联功能</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                    {selectedCircuit.matched_functions.map((f, i) => (
-                      <span key={i} style={{ fontSize: 11, padding: '2px 6px', background: '#fef3c7', color: '#92400e', borderRadius: 4 }}>{f}</span>
-                    ))}
+                    {selectedCircuit.matched_functions.map((f, i) => {
+                      const desc = selectedCircuit.function_descriptions?.[f]
+                      return (
+                        <span key={i} title={desc || f}
+                          style={{ fontSize: 11, padding: '2px 6px', background: '#fef3c7', color: '#92400e', borderRadius: 4, cursor: 'help' }}>
+                          {f}
+                        </span>
+                      )
+                    })}
                   </div>
                 </div>
 
