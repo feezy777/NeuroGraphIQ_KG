@@ -104,16 +104,29 @@ export function computeSymptomGraphVisibility(
 
   if (opts.displayMode === 'region_focus' && opts.focusedNodeId) {
     const hopIds = collectOneHop(new Set([opts.focusedNodeId]), allEdges)
-    const visibleEdges = allEdges.filter(
+    const oneHopEdges = allEdges.filter(
       e => hopIds.has(e.source) && hopIds.has(e.target) && passesFilters(e, opts),
     )
+    const focusCircuitEdges = opts.selectedCircuitId
+      ? oneHopEdges.filter(e => e.circuitIds.includes(opts.selectedCircuitId!))
+      : []
+    const focusCircuitIds = new Set(focusCircuitEdges.map(e => e.id))
+    const visibleEdges = [
+      ...focusCircuitEdges,
+      ...pickBackgroundEdges(oneHopEdges, bgLimit, focusCircuitIds),
+    ]
     if (opts.selectedCircuitId) {
       visibleEdges.forEach(e => {
         if (e.circuitIds.includes(opts.selectedCircuitId!)) circuitPathEdgeIds.add(e.id)
       })
     }
+    const visibleNodeIds = new Set<string>([opts.focusedNodeId])
+    visibleEdges.forEach(e => {
+      visibleNodeIds.add(e.source)
+      visibleNodeIds.add(e.target)
+    })
     return {
-      nodes: allNodes.filter(n => hopIds.has(n.id)),
+      nodes: allNodes.filter(n => visibleNodeIds.has(n.id)),
       edges: visibleEdges,
       circuitPathEdgeIds,
       activeStepEdgeIds,

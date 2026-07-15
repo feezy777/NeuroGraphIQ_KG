@@ -151,6 +151,15 @@ export function SymptomCircuitGraph({
     () => new Set((hoveredNodeId ? model.indexes.edgesByNodeId.get(hoveredNodeId) || [] : []).map(edge => edge.id)),
     [hoveredNodeId, model.indexes.edgesByNodeId],
   )
+  const hoveredNeighborIds = useMemo(() => {
+    const neighbors = new Set<string>()
+    if (!hoveredNodeId) return neighbors
+    neighbors.add(hoveredNodeId)
+    for (const edge of model.indexes.edgesByNodeId.get(hoveredNodeId) || []) {
+      neighbors.add(edge.source === hoveredNodeId ? edge.target : edge.source)
+    }
+    return neighbors
+  }, [hoveredNodeId, model.indexes.edgesByNodeId])
   const relationTypes = useMemo(
     () => [...new Set(model.edges.map(edge => edge.type))].sort(),
     [model.edges],
@@ -345,7 +354,7 @@ export function SymptomCircuitGraph({
               if (!point) return null
               const isFocused = focusedNodeId === node.id
               const isCircuit = node.circuitIds.includes(selectedCircuitId || '')
-              const hasHoverFocus = hoveredNodeId && hoveredNodeId !== node.id && !hoveredEdgeIds.size
+              const hasHoverFocus = Boolean(hoveredNodeId && !hoveredNeighborIds.has(node.id))
               const radius = isFocused ? 13 : isCircuit ? 10 : Math.min(9, 6 + Math.sqrt(node.degree))
               return (
                 <g
