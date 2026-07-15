@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as d3 from 'd3'
 import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
+import { ForceGraph, GNode, GEdge, LegendItem } from '../components/ForceGraph'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
 interface RawGraph { nodes: any[]; edges: any[]; stats: Record<string, number> }
-interface GNode { id: string; type: string; label: string; group: string; name_en: string; name_cn: string; atlas: string }
-interface GEdge { id: string; source: string; target: string; type: string; confidence: number; label: string }
 
 const NODE_COLOR: Record<string, string> = { region: '#3b82f6', circuit: '#f59e0b', connection: '#10b981' }
 const NODE_R: Record<string, number> = { region: 7, circuit: 6, connection: 3 }
@@ -20,6 +19,21 @@ const EDGE_DASH: Record<string, string> = {
   structural_connection: '', functional_connectivity: '6,3', projection: '2,2',
   STARTS_AT: '4,2', ENDS_AT: '4,2', INCLUDES: '6,3',
 }
+
+/** Legend items describing the node & edge color scheme. */
+const LEGEND_ITEMS: LegendItem[] = [
+  { color: '#3b82f6', dash: '', label: '脑区(Region)' },
+  { color: '#f59e0b', dash: '', label: '回路(Circuit)' },
+  { color: '#10b981', dash: '', label: '连接(Connection)' },
+  { color: '#3b82f6', dash: '', label: '结构连接' },
+  { color: '#f59e0b', dash: '6,3', label: '功能连接' },
+  { color: '#10b981', dash: '2,2', label: '投射' },
+  { color: '#8b5cf6', dash: '', label: '关联' },
+  { color: '#ec4899', dash: '', label: '共激活' },
+  { color: '#fcd34d', dash: '', label: '回路起止' },
+  { color: '#c4b5fd', dash: '6,3', label: '回路包含' },
+  { color: '#9ca3af', dash: '', label: '不确定' },
+]
 
 // ── Normalize ───────────────────────────────────────────────────────────────
 
@@ -79,7 +93,7 @@ export function GraphExplorerPage() {
     if (!graph) return []
     return graph.edges.filter(e => {
       if (fType !== 'all' && e.type !== fType) return false
-      if (e.confidence < minConf) return false
+      if ((e.confidence ?? 0) < minConf) return false
       return true
     })
   }, [graph, fType, minConf])
@@ -150,23 +164,7 @@ export function GraphExplorerPage() {
 
       <div style={{flex:1,border:'1px solid var(--border)',borderRadius:8,overflow:'hidden',background:'#f8fafc'}}
         onClick={tab==='focus'?()=>setFocusNode(null):undefined}>
-        {tab==='data'?<DataView edges={visEdges} graph={graph}/>:<ForceGraph nodes={visNodes} edges={visEdges} focusNode={focusNode} onNodeClick={tab==='focus'?setFocusNode:undefined} tab={tab}/>}
-      </div>
-
-      <div style={{display:'flex',gap:24,fontSize:11,color:'#555',marginTop:6,flexWrap:'wrap',lineHeight:'18px'}}>
-        <div><strong>节点:</strong></div>
-        <div><span style={{color:'#3b82f6',fontSize:14}}>●</span> 脑区(Region)</div>
-        <div><span style={{color:'#f59e0b',fontSize:14}}>●</span> 回路(Circuit)</div>
-        <div><span style={{color:'#10b981',fontSize:14}}>●</span> 连接(Connection)</div>
-        <div style={{borderLeft:'1px solid #ddd',paddingLeft:12}}><strong>边:</strong></div>
-        <div><span style={{color:'#3b82f6'}}>━━</span> 结构连接</div>
-        <div><span style={{color:'#f59e0b',borderBottom:'2px dashed #f59e0b'}}>╌╌╌</span> 功能连接</div>
-        <div><span style={{color:'#10b981',borderBottom:'2px dotted #10b981'}}>┈┈┈</span> 投射</div>
-        <div><span style={{color:'#8b5cf6'}}>━━</span> 关联</div>
-        <div><span style={{color:'#ec4899'}}>━━</span> 共激活</div>
-        <div><span style={{color:'#fcd34d'}}>━━</span> 回路起止</div>
-        <div><span style={{borderBottom:'2px dashed #c4b5fd',color:'#c4b5fd'}}>╌╌╌</span> 回路包含</div>
-        <div><span style={{color:'#9ca3af'}}>━━</span> 不确定</div>
+        {tab==='data'?<DataView edges={visEdges} graph={graph}/>:<ForceGraph nodes={visNodes} edges={visEdges} focusNode={focusNode} onNodeClick={tab==='focus'?setFocusNode:undefined} edgeColors={EDGE_COLOR} edgeDashes={EDGE_DASH} nodeColors={NODE_COLOR} nodeRadii={NODE_R} legendItems={LEGEND_ITEMS}/>}
       </div>
     </div>
   )
@@ -179,139 +177,9 @@ function DataView({ edges, graph }: { edges: GEdge[]; graph: { nodes: GNode[]; e
   return <div style={{padding:8,overflow:'auto',height:'100%',fontSize:11}}>
     <table style={{width:'100%',borderCollapse:'collapse'}}>
       <thead><tr style={{background:'#f1f5f9'}}><th style={th}>source</th><th style={th}>target</th><th style={th}>type</th><th style={th}>conf</th><th style={th}>label</th></tr></thead>
-      <tbody>{edges.slice(0,200).map(e=><tr key={e.id}><td style={td}>{nm.get(e.source)||e.source.slice(0,12)}</td><td style={td}>{nm.get(e.target)||e.target.slice(0,12)}</td><td style={td}>{e.type}</td><td style={td}>{(e.confidence*100).toFixed(0)}%</td><td style={{...td,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis'}}>{e.label}</td></tr>)}</tbody>
+      <tbody>{edges.slice(0,200).map(e=><tr key={e.id}><td style={td}>{nm.get(e.source)||e.source.slice(0,12)}</td><td style={td}>{nm.get(e.target)||e.target.slice(0,12)}</td><td style={td}>{e.type}</td><td style={td}>{((e.confidence ?? 0)*100).toFixed(0)}%</td><td style={{...td,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis'}}>{e.label}</td></tr>)}</tbody>
     </table>
   </div>
 }
 const th: React.CSSProperties = { padding: '4px 8px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', position: 'sticky', top: 0, background: '#f1f5f9' }
 const td: React.CSSProperties = { padding: '3px 8px', borderBottom: '1px solid #f3f4f6', whiteSpace: 'nowrap' }
-
-// ── Force Graph ─────────────────────────────────────────────────────────────
-
-function ForceGraph({ nodes: _nodes, edges: _edges, focusNode, onNodeClick, tab }: { nodes: GNode[]; edges: GEdge[]; focusNode: string | null; onNodeClick?: (id: string) => void; tab: string }) {
-  const ref = useRef<HTMLDivElement>(null)
-
-  // Rebuild node set from edges: ensure every edge endpoint has a node
-  const { nodes, edges } = useMemo(() => {
-    const nm = new Map<string, GNode>()
-    for (const n of _nodes) nm.set(n.id, n)
-    // Add missing endpoint nodes from connection edges
-    for (const e of _edges) {
-      const srcId = String(typeof e.source === 'object' ? (e.source as any).id || (e.source as any).name || '' : e.source)
-      const tgtId = String(typeof e.target === 'object' ? (e.target as any).id || (e.target as any).name || '' : e.target)
-      if (!nm.has(srcId) && srcId && e.type !== 'STARTS_AT' && e.type !== 'ENDS_AT' && e.type !== 'INCLUDES') {
-        nm.set(srcId, { id: srcId, type: 'connection', group: 'connection', label: srcId.slice(0, 12), name_en: '', name_cn: '', atlas: '' })
-      }
-      if (!nm.has(tgtId) && tgtId && e.type !== 'STARTS_AT' && e.type !== 'ENDS_AT' && e.type !== 'INCLUDES') {
-        nm.set(tgtId, { id: tgtId, type: 'connection', group: 'connection', label: tgtId.slice(0, 12), name_en: '', name_cn: '', atlas: '' })
-      }
-    }
-    // Filter edges: only keep those where both ends are in the node map AND connected to visible nodes
-    const validEdges = _edges.filter(e => {
-      const s = String(typeof e.source === 'object' ? (e.source as any).id || (e.source as any).name : e.source)
-      const t = String(typeof e.target === 'object' ? (e.target as any).id || (e.target as any).name : e.target)
-      return nm.has(s) && nm.has(t)
-    })
-    // In focus mode: only render edges connected to visible nodes
-    const visIds = new Set(_nodes.map(n => n.id))
-    const renderEdges = tab === 'focus' ? validEdges.filter(e => {
-      const s = String(typeof e.source === 'object' ? (e.source as any).id || (e.source as any).name : e.source)
-      const t = String(typeof e.target === 'object' ? (e.target as any).id || (e.target as any).name : e.target)
-      return visIds.has(s) || visIds.has(t)
-    }) : validEdges
-    return { nodes: [...nm.values()], edges: renderEdges }
-  }, [_nodes, _edges])
-
-  useEffect(() => {
-    const el = ref.current; if (!el || nodes.length === 0) return
-    const W = el.clientWidth || 1000; const H = el.clientHeight || 700
-    d3.select(el).html('')
-
-    // Simple canvas-based approach for large data: limit rendering
-    const maxRender = 2000
-    const renderNodes = nodes.slice(0, maxRender)
-    const renderEdges = edges.filter(e => renderNodes.find(n => n.id === e.source) && renderNodes.find(n => n.id === e.target)).slice(0, maxRender)
-
-    if (nodes.length > maxRender) {
-      d3.select(el).append('div').style('padding', '20px').style('color', '#888').style('textAlign', 'center')
-        .text(`大数据集：${nodes.length} 节点, ${edges.length} 边。渲染前 ${maxRender} 条。`)
-    }
-
-    setTimeout(() => {
-      d3.select(el).html('')
-      drawGraph(el, renderNodes, renderEdges, W, H, focusNode, onNodeClick)
-    }, 10)
-
-    return () => {}
-  }, [nodes.length, edges.length, focusNode])
-
-  return <div ref={ref} style={{ width: '100%', height: '100%' }} />
-}
-
-function drawGraph(el: HTMLDivElement, nodes: GNode[], edges: GEdge[], W: number, H: number, focusNode: string | null, onNodeClick?: (id: string) => void) {
-  d3.select(el).html('')
-  const svg = d3.select(el).append('svg').attr('width', W).attr('height', H)
-  const g = svg.append('g')
-  svg.call(d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.05, 5]).on('zoom', (ev) => g.attr('transform', ev.transform)))
-
-  // Tooltip div
-  const tip = d3.select(el).append('div').style('position', 'absolute').style('pointer-events', 'none')
-    .style('background', '#1f2937').style('color', '#f9fafb').style('padding', '6px 10px')
-    .style('border-radius', '6px').style('font-size', '11px').style('opacity', '0')
-    .style('transition', 'opacity 0.15s').style('max-width', '300px').style('z-index', '100')
-
-  // Spread nodes across canvas with random positions
-  nodes.forEach((n: any) => { n.x = 50 + Math.random() * (W - 100); n.y = 50 + Math.random() * (H - 100) })
-
-  const link = g.append('g').selectAll('line').data(edges).join('line')
-    .attr('stroke', (d: any) => EDGE_COLOR[d.type] || '#d1d5db')
-    .attr('stroke-width', (d: any) => Math.max(0.3, (d.confidence || 0.3) * 1.5))
-    .attr('stroke-opacity', (d: any) => Math.min(0.5, 0.1 + (d.confidence || 0.3)))
-    .attr('stroke-dasharray', (d: any) => EDGE_DASH[d.type] || '')
-    .attr('style', 'cursor:pointer')
-    .on('mouseenter', (ev: any, d: any) => {
-      const typeNames: Record<string,string> = {structural_connection:'结构连接',functional_connectivity:'功能连接',projection:'投射',association:'关联',coactivation:'共激活',effective_connectivity:'有效连接',STARTS_AT:'回路起点',ENDS_AT:'回路终点',INCLUDES:'回路包含'}
-      tip.style('opacity','1').html(`<strong>${typeNames[d.type]||d.type}</strong> 置信度:${((d.confidence||0)*100).toFixed(0)}%<br/>${d.label}`)
-    })
-    .on('mousemove', (ev: any) => { tip.style('left',(ev.offsetX+12)+'px').style('top',(ev.offsetY-10)+'px') })
-    .on('mouseleave', () => { tip.style('opacity','0') })
-
-  const ng = g.append('g').selectAll('g').data(nodes).join('g')
-    .attr('cursor', 'pointer')
-    .on('click', (ev: any, d: any) => { ev.stopPropagation(); onNodeClick?.(d.id) })
-    .on('mouseenter', (ev: any, d: any) => {
-      tip.style('opacity', '1').html(`<strong>${d.type}</strong>: ${d.label}<br/>${d.name_en || ''} ${d.name_cn || ''}`.trim())
-    })
-    .on('mousemove', (ev: any) => { tip.style('left', (ev.offsetX + 12) + 'px').style('top', (ev.offsetY - 10) + 'px') })
-    .on('mouseleave', () => { tip.style('opacity', '0') })
-
-  ng.append('circle')
-    .attr('r', (d: any) => d.id === focusNode ? 12 : (NODE_R[d.type] || 4))
-    .attr('fill', (d: any) => d.id === focusNode ? '#ef4444' : (NODE_COLOR[d.type] || '#999'))
-    .attr('stroke', '#fff').attr('stroke-width', 1.5)
-
-  ng.append('text').text((d: any) => (d.label || '').slice(0, 10))
-    .attr('dx', 9).attr('dy', 4).style('font-size', '7px').style('fill', '#374151')
-
-  // Simulation with strong spreading force
-  const sim = d3.forceSimulation(nodes as any)
-    .force('link', d3.forceLink(edges).id((d: any) => d.id).distance(120))
-    .force('charge', d3.forceManyBody().strength(-600))
-    .force('center', d3.forceCenter(W / 2, H / 2))
-    .force('collision', d3.forceCollide(25))
-    .on('tick', () => {
-      link.attr('x1', (d: any) => d.source.x).attr('y1', (d: any) => d.source.y)
-          .attr('x2', (d: any) => d.target.x).attr('y2', (d: any) => d.target.y)
-      ng.attr('transform', (d: any) => `translate(${d.x},${d.y})`)
-    })
-
-  // Run simulation longer for better spread
-  sim.alpha(1).restart()
-  for (let i = 0; i < 300; i++) sim.tick()
-
-  // Drag
-  ng.call(d3.drag<SVGGElement, any>()
-    .on('start', (ev: any, d: any) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y })
-    .on('drag', (ev: any, d: any) => { d.fx = ev.x; d.fy = ev.y })
-    .on('end', (ev: any, d: any) => { if (!ev.active) sim.alphaTarget(0) }) as any)
-}
