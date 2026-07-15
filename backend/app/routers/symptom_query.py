@@ -347,7 +347,7 @@ async def conversation_endpoint(body: ConversationRequest):
         formatted = "\n".join(
             f"{m['role']}: {m['content']}" for m in body.messages
         )
-        prompt = CONVERSATION_PROMPT.format(messages=formatted, granularity=body.granularity_level)
+        prompt = CONVERSATION_PROMPT.replace("{messages}", formatted).replace("{granularity}", body.granularity_level)
 
         resp = await provider.complete_json(
             model=cfg.default_model,
