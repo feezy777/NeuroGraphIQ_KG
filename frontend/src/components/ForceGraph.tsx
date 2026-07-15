@@ -165,7 +165,7 @@ export function ForceGraph({
 
     return () => {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length, edges.length, focusNode, edgeColors, edgeDashes, nodeColors, nodeRadii])
+  }, [nodes.length, edges.length, focusNode, edgeColors, edgeDashes, nodeColors, nodeRadii, confOpacity])
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
