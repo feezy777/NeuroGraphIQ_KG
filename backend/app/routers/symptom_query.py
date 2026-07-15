@@ -219,10 +219,11 @@ async def search_circuits(
         scored.append(d)
 
     # Mode-based threshold: focused is stricter, exploratory is broader
-    threshold = 20 if body.mode == "focused" else 3
+    threshold = 12 if body.mode == "focused" else 3
     scored = [d for d in scored if d["relevance"] >= threshold]
     scored.sort(key=lambda d: d["relevance"], reverse=True)
-    scored = scored[:50]
+    if body.mode == "focused":
+        scored = scored[:50]  # cap focused for UI performance
 
     # Build CircuitResult list
     circuits = []
