@@ -117,14 +117,14 @@ export function SymptomQueryPage() {
     return graph.edges.map(e => ({ ...e, id: e.id, source: e.source, target: e.target, type: e.type || 'unknown', label: e.label || '', circuit_ids: (e as any).circuit_ids || [], confidence: (e as any).confidence }))
   }, [graph])
 
-  // Highlight nodes/edges belonging to selected circuit
-  const visNodes = useMemo(() => {
-    if (!selectedId) return gNodes
-    return gNodes.map(n => ({ ...n, isHighlighted: ((n as any).circuit_ids || []).includes(selectedId) }))
+  // Compute highlight sets when a circuit is selected
+  const hlNodeIds = useMemo(() => {
+    if (!selectedId) return undefined
+    return new Set(gNodes.filter(n => ((n as any).circuit_ids || []).includes(selectedId)).map(n => n.id))
   }, [gNodes, selectedId])
-  const visEdges = useMemo(() => {
-    if (!selectedId) return gEdges
-    return gEdges.map(e => ({ ...e, isHighlighted: ((e as any).circuit_ids || []).includes(selectedId) }))
+  const hlEdgeIds = useMemo(() => {
+    if (!selectedId) return undefined
+    return new Set(gEdges.filter(e => ((e as any).circuit_ids || []).includes(selectedId)).map(e => e.id))
   }, [gEdges, selectedId])
 
   const selectedCircuit = useMemo(() => circuits.find(c => c.id === selectedId), [circuits, selectedId])
@@ -230,8 +230,10 @@ export function SymptomQueryPage() {
             <div style={{ flex: 1, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: '#f8fafc', minWidth: 0 }}>
               {graph ? (
                 <ForceGraph
-                  nodes={visNodes} edges={visEdges}
+                  nodes={gNodes} edges={gEdges}
                   focusNode={selectedId}
+                  highlightedNodeIds={hlNodeIds}
+                  highlightedEdgeIds={hlEdgeIds}
                   onNodeClick={(id) => setSelectedId(selectedId === id ? null : id)}
                   edgeColors={SYMPTOM_EDGE_COLOR} edgeDashes={SYMPTOM_EDGE_DASH}
                   nodeColors={SYMPTOM_NODE_COLOR} nodeRadii={SYMPTOM_NODE_R}

@@ -74,7 +74,9 @@ interface ForceGraphProps {
   nodeColors?: Record<string, string>
   nodeRadii?: Record<string, number>
   legendItems?: LegendItem[]
-  confOpacity?: boolean  // when true, edge opacity varies by confidence (dimmer = less confident)
+  confOpacity?: boolean
+  highlightedNodeIds?: Set<string>  // nodes to highlight (e.g., circuit's brain regions)
+  highlightedEdgeIds?: Set<string>  // edges to highlight (e.g., circuit's connections)
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -90,6 +92,8 @@ export function ForceGraph({
   nodeRadii = NODE_R,
   legendItems,
   confOpacity = true,
+  highlightedNodeIds,
+  highlightedEdgeIds,
 }: ForceGraphProps) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -161,7 +165,7 @@ export function ForceGraph({
 
     setTimeout(() => {
       d3.select(el).html('')
-      drawGraph(el, renderNodes, renderEdges, W, H, focusNode, onNodeClick, edgeColors, edgeDashes, nodeColors, nodeRadii, undefined, confOpacity)
+      drawGraph(el, renderNodes, renderEdges, W, H, focusNode, onNodeClick, edgeColors, edgeDashes, nodeColors, nodeRadii, undefined, confOpacity, highlightedNodeIds, highlightedEdgeIds)
     }, 10)
 
     return () => {}
@@ -234,6 +238,8 @@ export function drawGraph(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _legendItems?: LegendItem[],
   confOpacity = true,
+  highlightedNodeIds?: Set<string>,
+  highlightedEdgeIds?: Set<string>,
 ) {
   const ec = edgeColors ?? EDGE_COLOR
   const ed = edgeDashes ?? EDGE_DASH
@@ -277,9 +283,9 @@ export function drawGraph(
     .selectAll('line')
     .data(edges)
     .join('line')
-    .attr('stroke', (d: any) => ec[d.type] || '#d1d5db')
-    .attr('stroke-width', (d: any) => Math.max(0.3, (d.confidence || 0.3) * 1.5))
-    .attr('stroke-opacity', (d: any) => confOpacity ? Math.min(0.6, 0.08 + (d.confidence || 0.3)) : 0.4)
+    .attr('stroke', (d: any) => highlightedEdgeIds?.has(d.id) ? '#ef4444' : (ec[d.type] || '#d1d5db'))
+    .attr('stroke-width', (d: any) => highlightedEdgeIds?.has(d.id) ? 3 : Math.max(0.3, (d.confidence || 0.3) * 1.5))
+    .attr('stroke-opacity', (d: any) => highlightedEdgeIds?.has(d.id) ? 0.85 : (confOpacity ? Math.min(0.6, 0.08 + (d.confidence || 0.3)) : 0.4))
     .attr('stroke-dasharray', (d: any) => ed[d.type] || '')
     .attr('style', 'cursor:pointer')
     .on('mouseenter', (ev: any, d: any) => {
@@ -330,10 +336,10 @@ export function drawGraph(
     })
 
   ng.append('circle')
-    .attr('r', (d: any) => (d.id === focusNode ? 12 : nr[d.type] || 4))
-    .attr('fill', (d: any) => (d.id === focusNode ? '#ef4444' : nc[d.type] || '#999'))
-    .attr('stroke', '#fff')
-    .attr('stroke-width', 1.5)
+    .attr('r', (d: any) => (d.id === focusNode || highlightedNodeIds?.has(d.id) ? 12 : nr[d.type] || 4))
+    .attr('fill', (d: any) => (d.id === focusNode || highlightedNodeIds?.has(d.id) ? '#ef4444' : nc[d.type] || '#999'))
+    .attr('stroke', (d: any) => (highlightedNodeIds?.has(d.id) ? '#ef4444' : '#fff'))
+    .attr('stroke-width', (d: any) => (highlightedNodeIds?.has(d.id) ? 3 : 1.5))
 
   ng.append('text')
     .text((d: any) => { const s = (d.label || ''); return s.length > 24 ? s.slice(0, 22) + '…' : s })
