@@ -74,6 +74,7 @@ interface ForceGraphProps {
   nodeColors?: Record<string, string>
   nodeRadii?: Record<string, number>
   legendItems?: LegendItem[]
+  confOpacity?: boolean  // when true, edge opacity varies by confidence (dimmer = less confident)
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -88,6 +89,7 @@ export function ForceGraph({
   nodeColors = NODE_COLOR,
   nodeRadii = NODE_R,
   legendItems,
+  confOpacity = true,
 }: ForceGraphProps) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -158,7 +160,7 @@ export function ForceGraph({
 
     setTimeout(() => {
       d3.select(el).html('')
-      drawGraph(el, renderNodes, renderEdges, W, H, focusNode, onNodeClick, edgeColors, edgeDashes, nodeColors, nodeRadii)
+      drawGraph(el, renderNodes, renderEdges, W, H, focusNode, onNodeClick, edgeColors, edgeDashes, nodeColors, nodeRadii, undefined, confOpacity)
     }, 10)
 
     return () => {}
@@ -221,6 +223,7 @@ export function drawGraph(
   nodeRadii?: Record<string, number>,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _legendItems?: LegendItem[],
+  confOpacity = true,
 ) {
   const ec = edgeColors ?? EDGE_COLOR
   const ed = edgeDashes ?? EDGE_DASH
@@ -266,7 +269,7 @@ export function drawGraph(
     .join('line')
     .attr('stroke', (d: any) => ec[d.type] || '#d1d5db')
     .attr('stroke-width', (d: any) => Math.max(0.3, (d.confidence || 0.3) * 1.5))
-    .attr('stroke-opacity', (d: any) => Math.min(0.5, 0.1 + (d.confidence || 0.3)))
+    .attr('stroke-opacity', (d: any) => confOpacity ? Math.min(0.6, 0.08 + (d.confidence || 0.3)) : 0.4)
     .attr('stroke-dasharray', (d: any) => ed[d.type] || '')
     .attr('style', 'cursor:pointer')
     .on('mouseenter', (ev: any, d: any) => {

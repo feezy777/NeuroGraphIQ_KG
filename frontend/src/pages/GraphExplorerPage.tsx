@@ -62,6 +62,7 @@ export function GraphExplorerPage() {
   const [focusNode, setFocusNode] = useState<string | null>(null)
   const [reloadTick, setReloadTick] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
+  const [confOpacity, setConfOpacity] = useState(true)
   const initialLoadRef = useRef(true)
   const { granularity } = useGlobalGranularity()
 
@@ -121,6 +122,9 @@ export function GraphExplorerPage() {
           <button className="btn btn-sm" onClick={() => setReloadTick(t => t + 1)} disabled={refreshing} title="重新拉取最新数据">
             {refreshing ? '⏳ 刷新中' : '🔄 刷新'}
           </button>
+          <button className={`btn btn-sm${confOpacity ? ' btn-primary' : ''}`} onClick={() => setConfOpacity(c => !c)} title="按置信度区分连线明暗">
+            {confOpacity ? '📊 置信度' : '📊 统一'}
+          </button>
           {(['focus','global','data'] as const).map(t => (
             <button key={t} className={`btn btn-sm${tab===t?' btn-primary':''}`} onClick={()=>setTab(t)}>
               {t==='focus'?'🔍 聚焦':t==='global'?'🌐 全局':'📊 数据'}
@@ -158,7 +162,7 @@ export function GraphExplorerPage() {
 
       <div style={{flex:1,border:'1px solid var(--border)',borderRadius:8,overflow:'hidden',background:'#f8fafc'}}
         onClick={tab==='focus'?()=>setFocusNode(null):undefined}>
-        {tab==='data'?<DataView edges={visEdges} graph={graph}/>:<ForceGraph nodes={visNodes} edges={visEdges} focusNode={focusNode} onNodeClick={tab==='focus'?setFocusNode:undefined} edgeColors={EDGE_COLOR} edgeDashes={EDGE_DASH} nodeColors={NODE_COLOR} nodeRadii={NODE_R} legendItems={LEGEND_ITEMS}/>}
+        {tab==='data'?<DataView edges={visEdges} graph={graph}/>:<ForceGraph nodes={visNodes} edges={visEdges} focusNode={focusNode} onNodeClick={tab==='focus'?setFocusNode:undefined} edgeColors={EDGE_COLOR} edgeDashes={EDGE_DASH} nodeColors={NODE_COLOR} nodeRadii={NODE_R} legendItems={LEGEND_ITEMS} confOpacity={confOpacity}/>}
       </div>
     </div>
   )
