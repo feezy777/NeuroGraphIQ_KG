@@ -219,8 +219,8 @@ async def search_circuits(
         d["func_count"] = func_count
         scored.append(d)
 
-    # Filter relevance >= 15, sort DESC, top 50
-    scored = [d for d in scored if d["relevance"] >= 15]
+    # Filter relevance >= 5 (lenient enough for circuits with sparse function_domain data)
+    scored = [d for d in scored if d["relevance"] >= 5]
     scored.sort(key=lambda d: d["relevance"], reverse=True)
     scored = scored[:50]
 
@@ -417,20 +417,22 @@ async def get_circuit_graph(
     # ── Step → region mapping per circuit ──────────────────────────────────
     steps_sql = text("""
         SELECT s.circuit_id::text, s.region_candidate_id::text,
-               COALESCE(cbr.en_name, cbr.std_name, cbr.raw_name, s.step_name) as label
+               COALESCE(cbr.en_name, cbr.std_name, cbr.raw_name, s.step_name) as label,
+               s.step_name
         FROM mirror_circuit_steps s
         LEFT JOIN candidate_brain_regions cbr ON cbr.id = s.region_candidate_id
-        WHERE s.circuit_id = ANY(:cids) AND s.region_candidate_id IS NOT NULL
+        WHERE s.circuit_id = ANY(:cids)
     """)
     rows = (await session.execute(steps_sql, {"cids": cids})).fetchall()
     if not rows:
         return GraphDataResponse(nodes=[], edges=[])
 
-    # Dedup by region_candidate_id — one node per unique brain region
+    # Dedup: use region_candidate_id if present, else fallback to step_name per circuit
     region_circuits: dict[str, set[str]] = {}
     region_labels: dict[str, str] = {}
     for row in rows:
-        cid = str(row[0]); rid = str(row[1]); label = row[2] or "?"
+        cid = str(row[0]); rid_raw = row[1]; label = row[2] or row[3] or "?"
+        rid = str(rid_raw) if rid_raw else f"{cid}:{label}"
         region_circuits.setdefault(rid, set()).add(cid)
         region_labels[rid] = label
 
