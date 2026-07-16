@@ -31,6 +31,8 @@ interface Props {
   onDeleteSelected?: (ids: string[]) => void
   onFetchAll?: () => Promise<FormalRow[]>
   extraToolbarButtons?: React.ReactNode
+  /** Current granularity level for schema display in FormalAlignmentCard */
+  granularityLevel?: string
 }
 
 export function FormalObjectTableSection({
@@ -49,6 +51,7 @@ export function FormalObjectTableSection({
   onRefresh,
   onDeleteSelected,
   onFetchAll,
+  granularityLevel,
 }: Props) {
   const { t } = useI18n()
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -185,7 +188,7 @@ export function FormalObjectTableSection({
 
   return (
     <div className="data-center-formal-table">
-      <FormalAlignmentCard mapping={mapping} items={items} />
+      <FormalAlignmentCard mapping={mapping} items={items} total={total} granularityLevel={granularityLevel} />
 
       <div className="data-center-formal-toolbar">
         <button

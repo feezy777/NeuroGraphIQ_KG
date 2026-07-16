@@ -1,0 +1,252 @@
+/* brain3d.css — 3D Brain Map styles */
+
+.brain-3d-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #1a1a2e;
+  color: #e0e0e0;
+}
+
+.brain-3d-main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.brain-3d-viewer {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+}
+
+.brain-3d-sidebar {
+  width: 360px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  background: #16213e;
+  border-left: 1px solid #0f3460;
+  padding: 0;
+}
+
+/* Container */
+.brain-3d-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Toolbar */
+.brain-3d-toolbar {
+  display: flex;
+  gap: 16px;
+  padding: 8px 12px;
+  background: #16213e;
+  border-bottom: 1px solid #0f3460;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.brain-3d-toolbar-section {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.brain-3d-label {
+  font-size: 12px;
+  color: #a0a0c0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.brain-3d-label input[type="range"] {
+  width: 80px;
+}
+
+.brain-3d-btn-group {
+  display: flex;
+  gap: 2px;
+}
+
+.brain-3d-btn-sm {
+  padding: 2px 8px;
+  font-size: 11px;
+  background: #1a1a2e;
+  color: #a0a0c0;
+  border: 1px solid #0f3460;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.brain-3d-btn-sm:hover {
+  background: #0f3460;
+  color: #fff;
+}
+
+.brain-3d-btn-active {
+  background: #0f3460;
+  color: #00D4FF;
+  border-color: #00D4FF;
+}
+
+/* Canvas */
+.brain-3d-canvas-wrapper {
+  flex: 1;
+  cursor: grab;
+}
+
+.brain-3d-canvas-wrapper:active {
+  cursor: grabbing;
+}
+
+/* Status bar */
+.brain-3d-status {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #8888aa;
+  background: #1a1a2e;
+  border-bottom: 1px solid #0f3460;
+}
+
+.brain-3d-hover-info {
+  color: #6DB3F2;
+}
+
+/* Detail panel */
+.brain-3d-detail-panel {
+  padding: 16px;
+  border-bottom: 1px solid #0f3460;
+}
+
+.brain-3d-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.brain-3d-detail-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #fff;
+}
+
+.brain-3d-close-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.brain-3d-detail-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.brain-3d-detail-list dt {
+  color: #8888aa;
+  font-weight: 500;
+}
+
+.brain-3d-detail-list dd {
+  color: #c0c0e0;
+  margin: 0;
+  word-break: break-all;
+}
+
+/* Badges */
+.brain-3d-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.brain-3d-badge-verified_exact { background: #1a472a; color: #4caf50; }
+.brain-3d-badge-verified_alias { background: #1a3a4a; color: #2196f3; }
+.brain-3d-badge-manual_review { background: #4a3a1a; color: #ff9800; }
+.brain-3d-badge-unmapped { background: #3a1a1a; color: #f44336; }
+
+/* Unplaced regions */
+.brain-3d-unplaced {
+  padding: 16px;
+}
+
+.brain-3d-unplaced h4 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: #fff;
+}
+
+.brain-3d-unplaced h5 {
+  margin: 12px 0 8px;
+  font-size: 12px;
+  color: #a0a0c0;
+}
+
+.brain-3d-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.brain-3d-stat {
+  background: #1a1a2e;
+  padding: 8px;
+  border-radius: 4px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.brain-3d-stat strong { display: block; font-size: 20px; }
+
+.brain-3d-stat-ok strong { color: #4caf50; }
+.brain-3d-stat-warn strong { color: #ff9800; }
+.brain-3d-stat-muted strong { color: #8888aa; }
+
+.brain-3d-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.brain-3d-table th, .brain-3d-table td {
+  padding: 4px 8px;
+  text-align: left;
+  border-bottom: 1px solid #0f3460;
+}
+
+.brain-3d-table th {
+  color: #8888aa;
+  font-weight: 500;
+}
+
+.brain-3d-table td {
+  color: #c0c0e0;
+}
+
+/* Loading & error */
+.brain-3d-loading, .brain-3d-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 16px;
+}
+
+.brain-3d-error {
+  flex-direction: column;
+  color: #f44336;
+}

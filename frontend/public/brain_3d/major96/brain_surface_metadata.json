@@ -1,0 +1,36 @@
+{
+  "generated_at": "2026-07-16T05:13:02.074100+00:00",
+  "atlas": "AAL",
+  "atlas_version": "Tzourio-Mazoyer_2002",
+  "coordinate_space": "MNI",
+  "hemispheres": {
+    "left": {
+      "file": "brain_left.json",
+      "vertex_count": 29318,
+      "face_count": 19560,
+      "split_rule": "MNI x < 0"
+    },
+    "right": {
+      "file": "brain_right.json",
+      "vertex_count": 31527,
+      "face_count": 15774,
+      "split_rule": "MNI x >= 0"
+    }
+  },
+  "atlas_info": {
+    "name": "AAL",
+    "reference": "Tzourio-Mazoyer et al., NeuroImage 2002",
+    "shape": [
+      91,
+      109,
+      91
+    ],
+    "spacing_mm": [
+      2.0,
+      2.0,
+      2.0
+    ],
+    "orientation": "LAS",
+    "n_labels": 116
+  }
+}

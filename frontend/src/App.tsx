@@ -1,4 +1,4 @@
-import { useState, useEffect, type ComponentType } from 'react'
+import { useState, useEffect, lazy, Suspense, type ComponentType } from 'react'
 import { I18nProvider } from './i18n-context'
 import { WorkbenchLogProvider } from './logging/WorkbenchLogContext'
 import { WorkbenchLayout } from './layout/WorkbenchLayout'
@@ -19,7 +19,10 @@ import { SettingsPage } from './pages/SettingsPage'
 import { MirrorKgPage } from './pages/MirrorKgPage'
 import { BackgroundTaskCenterPage } from './pages/BackgroundTaskCenter'
 import { GraphExplorerPage } from './pages/GraphExplorerPage'
+import './components/brain-3d/brain3d.css'
 import { TaskDetailModalProvider } from './components/TaskDetailModal'
+
+const Brain3DPage = lazy(() => import('./pages/Brain3DPage').then(m => ({ default: m.Brain3DPage })))
 
 const ROUTES: Record<string, ComponentType> = {
   '/': DashboardPage,
@@ -32,6 +35,7 @@ const ROUTES: Record<string, ComponentType> = {
   '/mirror-kg': MirrorKgPage,
   '/task-center': BackgroundTaskCenterPage,
   '/graph-explorer': GraphExplorerPage,
+  '/brain-3d': Brain3DPage,
   '/symptom-query': SymptomQueryPage,
   '/rule-validation': RuleValidationPage,
   '/human-review': HumanReviewPage,
@@ -75,7 +79,9 @@ export default function App() {
         <WorkbenchLogProvider>
           <GranularityProvider>
             <WorkbenchLayout currentPath={path}>
-              <Page />
+              <Suspense fallback={<div className="page-loading" />}>
+                <Page />
+              </Suspense>
             </WorkbenchLayout>
           </GranularityProvider>
         </WorkbenchLogProvider>

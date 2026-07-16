@@ -496,7 +496,7 @@ export function MacroClinicalDataPanel({
 
           onRefresh={handleCompletionDone}
           onFetchAll={handleFetchAll}
-
+          granularityLevel={granularityLevel}
         />
 
       )}
@@ -550,6 +550,7 @@ export function MacroClinicalDataPanel({
 
           onRefresh={handleCompletionDone}
           onFetchAll={handleFetchAll}
+          granularityLevel={granularityLevel}
 
         />
 
@@ -561,7 +562,7 @@ export function MacroClinicalDataPanel({
 
         <div className="data-center-formal-table">
 
-          <FormalAlignmentCard mapping={formalMapping} items={[]} />
+          <FormalAlignmentCard mapping={formalMapping} items={[]} granularityLevel={granularityLevel} />
 
           <div className="data-center-init-warning">
 
@@ -599,6 +600,7 @@ export function MacroClinicalDataPanel({
 
           onRefresh={handleCompletionDone}
           onFetchAll={handleFetchAll}
+          granularityLevel={granularityLevel}
 
         />
 

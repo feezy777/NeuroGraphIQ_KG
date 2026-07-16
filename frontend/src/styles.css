@@ -105,12 +105,17 @@ code { font-family: 'Consolas', 'Menlo', monospace; font-size: 12px; }
   min-width: 0;
   min-height: 0;
 }
-.main.main-data-center {
+.main.main-data-center,
+.main.main-brain-3d {
   overflow: hidden;
   display: flex;
   flex-direction: column;
   padding: 16px 20px;
   padding-bottom: calc(16px + var(--log-console-height-collapsed));
+}
+.main.main-brain-3d {
+  padding: 0;
+  padding-bottom: var(--log-console-height-collapsed);
 }
 .layout.log-console-expanded .main.main-data-center {
   padding-bottom: calc(16px + var(--log-console-actual-height, var(--log-console-height-expanded)));

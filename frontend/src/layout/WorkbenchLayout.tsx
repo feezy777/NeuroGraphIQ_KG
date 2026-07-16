@@ -13,6 +13,7 @@ import {
   MonitorPlay,
   Share2,
   Search,
+  Brain,
 } from 'lucide-react'
 import { useI18n } from '../i18n-context'
 import { useWorkbenchLog } from '../logging/useWorkbenchLog'
@@ -35,6 +36,7 @@ const NAV_ITEMS = [
   { path: '/promotions', labelKey: 'nav.promotions', icon: ArrowUpToLine },
   { path: '/task-center', labelKey: 'nav.taskCenter', icon: MonitorPlay },
   { path: '/graph-explorer', labelKey: 'nav.graphExplorer', icon: Share2 },
+  { path: '/brain-3d', labelKey: 'nav.brain3D', icon: Brain },
   { path: '/symptom-query', labelKey: 'nav.symptomQuery', icon: Search },
   { path: '/settings', labelKey: 'nav.settings', icon: Settings },
 ]
@@ -123,7 +125,7 @@ const Sidebar = memo(function Sidebar({ activePath, t }: { activePath: string; t
 
 const MainContent = memo(function MainContent({ activePath, children }: { activePath: string; children: React.ReactNode }) {
   return (
-    <main className={`main${activePath === '/data-center' ? ' main-data-center' : ''}${activePath === '/llm-extraction' ? ' main-llm-data-first' : ''}`}>
+    <main className={`main${activePath === '/data-center' ? ' main-data-center' : ''}${activePath === '/llm-extraction' ? ' main-llm-data-first' : ''}${activePath === '/brain-3d' ? ' main-brain-3d' : ''}`}>
       {children}
     </main>
   )

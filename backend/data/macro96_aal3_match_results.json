@@ -1,0 +1,1523 @@
+{
+  "matches": [
+    {
+      "macro96_id": 1,
+      "macro96_name_en": "white matter",
+      "macro96_name_cn": "脑白质",
+      "macro96_laterality": "midline",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "unmapped",
+      "mni_centroid": null,
+      "confidence": 0,
+      "rationale": "Global white matter label — no single AAL3 region corresponds. Would need WM parcellation atlas."
+    },
+    {
+      "macro96_id": 2,
+      "macro96_name_en": "left lateral ventricle",
+      "macro96_name_cn": "左侧脑室",
+      "macro96_laterality": "left",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "unmapped",
+      "mni_centroid": null,
+      "confidence": 0,
+      "rationale": "Ventricle not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 3,
+      "macro96_name_en": "left inferior lateral ventricle",
+      "macro96_name_cn": "左下侧脑室",
+      "macro96_laterality": "left",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "unmapped",
+      "mni_centroid": null,
+      "confidence": 0,
+      "rationale": "Ventricle not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 4,
+      "macro96_name_en": "left cerebellum exterior",
+      "macro96_name_cn": "左小脑外侧",
+      "macro96_laterality": "left",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "unmapped",
+      "mni_centroid": null,
+      "confidence": 0,
+      "rationale": "Cerebellum exterior is not a specific AAL3 region; AAL3 has cerebellar lobules."
+    },
+    {
+      "macro96_id": 5,
+      "macro96_name_en": "left cerebellum white matter",
+      "macro96_name_cn": "左侧小脑白质",
+      "macro96_laterality": "left",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "unmapped",
+      "mni_centroid": null,
+      "confidence": 0,
+      "rationale": "Cerebellar white matter not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 6,
+      "macro96_name_en": "left thalamus proper",
+      "macro96_name_cn": "左丘脑本体",
+      "macro96_laterality": "left",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "manual_review",
+      "mni_centroid": null,
+      "confidence": 0.5,
+      "rationale": "AAL3 has multiple thalamic subnuclei; 'thalamus proper' could be composite. Suggest mapping to all left thalamic nuclei or use Thal_AV_L as representative."
+    },
+    {
+      "macro96_id": 7,
+      "macro96_name_en": "left caudate",
+      "macro96_name_cn": "左尾状核",
+      "macro96_laterality": "left",
+      "aal3_index": 75,
+      "aal3_name": "Caudate_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -13,
+        "y": 15,
+        "z": 10
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left caudate."
+    },
+    {
+      "macro96_id": 8,
+      "macro96_name_en": "left putamen",
+      "macro96_name_cn": "左壳核",
+      "macro96_laterality": "left",
+      "aal3_index": 77,
+      "aal3_name": "Putamen_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -28,
+        "y": 2,
+        "z": 3
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left putamen."
+    },
+    {
+      "macro96_id": 9,
+      "macro96_name_en": "left pallidum",
+      "macro96_name_cn": "左苍白球",
+      "macro96_laterality": "left",
+      "aal3_index": 79,
+      "aal3_name": "Pallidum_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -20,
+        "y": -2,
+        "z": 0
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left pallidum."
+    },
+    {
+      "macro96_id": 10,
+      "macro96_name_en": "3rd ventricle",
+      "macro96_name_cn": "第三脑室",
+      "macro96_laterality": "midline",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "unmapped",
+      "mni_centroid": null,
+      "confidence": 0,
+      "rationale": "Ventricle not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 11,
+      "macro96_name_en": "4th ventricle",
+      "macro96_name_cn": "第四脑室",
+      "macro96_laterality": "midline",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "unmapped",
+      "mni_centroid": null,
+      "confidence": 0,
+      "rationale": "Ventricle not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 12,
+      "macro96_name_en": "Brain stem",
+      "macro96_name_cn": "脑干",
+      "macro96_laterality": "midline",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "manual_review",
+      "mni_centroid": null,
+      "confidence": 0.5,
+      "rationale": "AAL3 has brainstem nuclei (VTA, SN, Red_N, LC, Raphe) but not a single 'brain stem' label. Could map to composite or leave unmapped."
+    },
+    {
+      "macro96_id": 13,
+      "macro96_name_en": "left hippocampus",
+      "macro96_name_cn": "左海马",
+      "macro96_laterality": "left",
+      "aal3_index": 41,
+      "aal3_name": "Hippocampus_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -30,
+        "y": -22,
+        "z": -12
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left hippocampus."
+    },
+    {
+      "macro96_id": 14,
+      "macro96_name_en": "left amygdala",
+      "macro96_name_cn": "左杏仁核",
+      "macro96_laterality": "left",
+      "aal3_index": 45,
+      "aal3_name": "Amygdala_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -24,
+        "y": -4,
+        "z": -18
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left amygdala."
+    },
+    {
+      "macro96_id": 15,
+      "macro96_name_en": "CSF",
+      "macro96_name_cn": "脑脊液",
+      "macro96_laterality": "midline",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "unmapped",
+      "mni_centroid": null,
+      "confidence": 0,
+      "rationale": "CSF not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 16,
+      "macro96_name_en": "left accumbens area",
+      "macro96_name_cn": "左伏隔区",
+      "macro96_laterality": "left",
+      "aal3_index": 157,
+      "aal3_name": "N_Acc_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -10,
+        "y": 14,
+        "z": -8
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left nucleus accumbens."
+    },
+    {
+      "macro96_id": 17,
+      "macro96_name_en": "left ventral diencephalon",
+      "macro96_name_cn": "左腹间脑",
+      "macro96_laterality": "left",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "manual_review",
+      "mni_centroid": null,
+      "confidence": 0.3,
+      "rationale": "Ventral diencephalon not directly in AAL3; includes hypothalamus, subthalamus. No single label."
+    },
+    {
+      "macro96_id": 18,
+      "macro96_name_en": "right lateral ventricle",
+      "macro96_name_cn": "右侧脑室",
+      "macro96_laterality": "right",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "unmapped",
+      "mni_centroid": null,
+      "confidence": 0,
+      "rationale": "Ventricle not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 19,
+      "macro96_name_en": "right inferior lateral ventricle",
+      "macro96_name_cn": "右下侧脑室",
+      "macro96_laterality": "right",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "unmapped",
+      "mni_centroid": null,
+      "confidence": 0,
+      "rationale": "Ventricle not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 20,
+      "macro96_name_en": "right cerebellum exterior",
+      "macro96_name_cn": "右小脑外侧",
+      "macro96_laterality": "right",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "unmapped",
+      "mni_centroid": null,
+      "confidence": 0,
+      "rationale": "Cerebellum exterior not a specific AAL3 region."
+    },
+    {
+      "macro96_id": 21,
+      "macro96_name_en": "right cerebellum white matter",
+      "macro96_name_cn": "右小脑白质",
+      "macro96_laterality": "right",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "unmapped",
+      "mni_centroid": null,
+      "confidence": 0,
+      "rationale": "Cerebellar white matter not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 22,
+      "macro96_name_en": "right thalamus proper",
+      "macro96_name_cn": "右丘脑本体",
+      "macro96_laterality": "right",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "manual_review",
+      "mni_centroid": null,
+      "confidence": 0.5,
+      "rationale": "AAL3 has multiple right thalamic subnuclei; composite."
+    },
+    {
+      "macro96_id": 23,
+      "macro96_name_en": "right caudate",
+      "macro96_name_cn": "右尾状核",
+      "macro96_laterality": "right",
+      "aal3_index": 76,
+      "aal3_name": "Caudate_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 13,
+        "y": 15,
+        "z": 10
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right caudate."
+    },
+    {
+      "macro96_id": 24,
+      "macro96_name_en": "right putamen",
+      "macro96_name_cn": "右壳核",
+      "macro96_laterality": "right",
+      "aal3_index": 78,
+      "aal3_name": "Putamen_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 28,
+        "y": 2,
+        "z": 3
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right putamen."
+    },
+    {
+      "macro96_id": 25,
+      "macro96_name_en": "right pallidum",
+      "macro96_name_cn": "右苍白球",
+      "macro96_laterality": "right",
+      "aal3_index": 80,
+      "aal3_name": "Pallidum_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 20,
+        "y": -2,
+        "z": 0
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right pallidum."
+    },
+    {
+      "macro96_id": 26,
+      "macro96_name_en": "right hippocampus",
+      "macro96_name_cn": "右海马",
+      "macro96_laterality": "right",
+      "aal3_index": 42,
+      "aal3_name": "Hippocampus_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 30,
+        "y": -22,
+        "z": -12
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right hippocampus."
+    },
+    {
+      "macro96_id": 27,
+      "macro96_name_en": "right amygdala",
+      "macro96_name_cn": "右杏仁核",
+      "macro96_laterality": "right",
+      "aal3_index": 46,
+      "aal3_name": "Amygdala_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 24,
+        "y": -4,
+        "z": -18
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right amygdala."
+    },
+    {
+      "macro96_id": 28,
+      "macro96_name_en": "right accumbens area",
+      "macro96_name_cn": "右伏隔区",
+      "macro96_laterality": "right",
+      "aal3_index": 158,
+      "aal3_name": "N_Acc_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 10,
+        "y": 14,
+        "z": -8
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right nucleus accumbens."
+    },
+    {
+      "macro96_id": 29,
+      "macro96_name_en": "right ventral diencephalon",
+      "macro96_name_cn": "右腹间脑",
+      "macro96_laterality": "right",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "manual_review",
+      "mni_centroid": null,
+      "confidence": 0.3,
+      "rationale": "Ventral diencephalon not directly in AAL3."
+    },
+    {
+      "macro96_id": 30,
+      "macro96_name_en": "left basal forebrain",
+      "macro96_name_cn": "左基底前脑",
+      "macro96_laterality": "left",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "manual_review",
+      "mni_centroid": null,
+      "confidence": 0.3,
+      "rationale": "Basal forebrain not directly in AAL3; includes nucleus basalis, etc."
+    },
+    {
+      "macro96_id": 31,
+      "macro96_name_en": "right basal forebrain",
+      "macro96_name_cn": "右基底前脑",
+      "macro96_laterality": "right",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "manual_review",
+      "mni_centroid": null,
+      "confidence": 0.3,
+      "rationale": "Basal forebrain not directly in AAL3."
+    },
+    {
+      "macro96_id": 32,
+      "macro96_name_en": "cerebellar vermal lobules I-V",
+      "macro96_name_cn": "小脑小叶I-V",
+      "macro96_laterality": "unknown",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "approximate",
+      "mni_centroid": null,
+      "confidence": 0.6,
+      "rationale": "AAL3 has Vermis_1_2, Vermis_3, Vermis_4_5. Could map to those, but composite."
+    },
+    {
+      "macro96_id": 33,
+      "macro96_name_en": "cerebellar vermal lobules VI-VII",
+      "macro96_name_cn": "小脑小叶VI-VII",
+      "macro96_laterality": "unknown",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "approximate",
+      "mni_centroid": null,
+      "confidence": 0.6,
+      "rationale": "AAL3 has Vermis_6, Vermis_7. Could map to those."
+    },
+    {
+      "macro96_id": 34,
+      "macro96_name_en": "cerebellar vermal lobules VIII-X",
+      "macro96_name_cn": "小脑小叶VIII-X",
+      "macro96_laterality": "unknown",
+      "aal3_index": null,
+      "aal3_name": null,
+      "match_quality": "approximate",
+      "mni_centroid": null,
+      "confidence": 0.6,
+      "rationale": "AAL3 has Vermis_8, Vermis_9, Vermis_10. Could map to those."
+    },
+    {
+      "macro96_id": 35,
+      "macro96_name_en": "left caudal anterior cingulate",
+      "macro96_name_cn": "左尾前扣带",
+      "macro96_laterality": "left",
+      "aal3_index": 151,
+      "aal3_name": "ACC_sub_L",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": -6,
+        "y": 36,
+        "z": 8
+      },
+      "confidence": 0.7,
+      "rationale": "Caudal anterior cingulate likely corresponds to ACC_sub (subgenual) or ACC_pre. Using ACC_sub_L as best match."
+    },
+    {
+      "macro96_id": 36,
+      "macro96_name_en": "left caudal middle frontal",
+      "macro96_name_cn": "左尾中额叶",
+      "macro96_laterality": "left",
+      "aal3_index": 5,
+      "aal3_name": "Frontal_Mid_2_L",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": -36,
+        "y": 32,
+        "z": 32
+      },
+      "confidence": 0.7,
+      "rationale": "Caudal middle frontal likely corresponds to Frontal_Mid_2_L."
+    },
+    {
+      "macro96_id": 37,
+      "macro96_name_en": "left cuneus",
+      "macro96_name_cn": "左楔",
+      "macro96_laterality": "left",
+      "aal3_index": 49,
+      "aal3_name": "Cuneus_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -8,
+        "y": -76,
+        "z": 28
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left cuneus."
+    },
+    {
+      "macro96_id": 38,
+      "macro96_name_en": "left entorhinal",
+      "macro96_name_cn": "左内嗅",
+      "macro96_laterality": "left",
+      "aal3_index": 43,
+      "aal3_name": "ParaHippocampal_L",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": -22,
+        "y": -14,
+        "z": -28
+      },
+      "confidence": 0.6,
+      "rationale": "Entorhinal cortex is part of parahippocampal gyrus; AAL3 has ParaHippocampal_L but not entorhinal specifically."
+    },
+    {
+      "macro96_id": 39,
+      "macro96_name_en": "left fusiform",
+      "macro96_name_cn": "左梭形",
+      "macro96_laterality": "left",
+      "aal3_index": 59,
+      "aal3_name": "Fusiform_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -36,
+        "y": -38,
+        "z": -22
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left fusiform."
+    },
+    {
+      "macro96_id": 40,
+      "macro96_name_en": "left inferior parietal",
+      "macro96_name_cn": "左下顶叶",
+      "macro96_laterality": "left",
+      "aal3_index": 65,
+      "aal3_name": "Parietal_Inf_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -44,
+        "y": -38,
+        "z": 44
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left inferior parietal."
+    },
+    {
+      "macro96_id": 41,
+      "macro96_name_en": "left inferior temporal",
+      "macro96_name_cn": "左下颞叶",
+      "macro96_laterality": "left",
+      "aal3_index": 93,
+      "aal3_name": "Temporal_Inf_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -48,
+        "y": -30,
+        "z": -22
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left inferior temporal."
+    },
+    {
+      "macro96_id": 42,
+      "macro96_name_en": "left isthmus cingulate",
+      "macro96_name_cn": "左扣带回峡部",
+      "macro96_laterality": "left",
+      "aal3_index": 39,
+      "aal3_name": "Cingulate_Post_L",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": -8,
+        "y": -40,
+        "z": 28
+      },
+      "confidence": 0.7,
+      "rationale": "Isthmus of cingulate is posterior cingulate; AAL3 has Cingulate_Post_L."
+    },
+    {
+      "macro96_id": 43,
+      "macro96_name_en": "left lateral occipital",
+      "macro96_name_cn": "左侧枕外侧",
+      "macro96_laterality": "left",
+      "aal3_index": 55,
+      "aal3_name": "Occipital_Mid_L",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": -32,
+        "y": -82,
+        "z": 16
+      },
+      "confidence": 0.7,
+      "rationale": "Lateral occipital likely corresponds to Occipital_Mid_L or Occipital_Sup_L. Using Occipital_Mid_L."
+    },
+    {
+      "macro96_id": 44,
+      "macro96_name_en": "left lateral orbitofrontal",
+      "macro96_name_cn": "左眶额外侧",
+      "macro96_laterality": "left",
+      "aal3_index": 31,
+      "aal3_name": "OFClat_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -28,
+        "y": 40,
+        "z": -14
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left lateral orbitofrontal."
+    },
+    {
+      "macro96_id": 45,
+      "macro96_name_en": "left lingual gyrus",
+      "macro96_name_cn": "左舌回",
+      "macro96_laterality": "left",
+      "aal3_index": 51,
+      "aal3_name": "Lingual_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -16,
+        "y": -60,
+        "z": -4
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left lingual."
+    },
+    {
+      "macro96_id": 46,
+      "macro96_name_en": "left medial orbitofrontal",
+      "macro96_name_cn": "左眶额内侧",
+      "macro96_laterality": "left",
+      "aal3_index": 25,
+      "aal3_name": "OFCmed_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -10,
+        "y": 44,
+        "z": -16
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left medial orbitofrontal."
+    },
+    {
+      "macro96_id": 47,
+      "macro96_name_en": "left middle temporal",
+      "macro96_name_cn": "左中颞叶",
+      "macro96_laterality": "left",
+      "aal3_index": 89,
+      "aal3_name": "Temporal_Mid_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -56,
+        "y": -32,
+        "z": -8
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left middle temporal."
+    },
+    {
+      "macro96_id": 48,
+      "macro96_name_en": "left parahippocampal",
+      "macro96_name_cn": "左海马旁",
+      "macro96_laterality": "left",
+      "aal3_index": 43,
+      "aal3_name": "ParaHippocampal_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -22,
+        "y": -14,
+        "z": -28
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left parahippocampal."
+    },
+    {
+      "macro96_id": 49,
+      "macro96_name_en": "left paracentral",
+      "macro96_name_cn": "左旁中央",
+      "macro96_laterality": "left",
+      "aal3_index": 73,
+      "aal3_name": "Paracentral_Lobule_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -8,
+        "y": -24,
+        "z": 68
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left paracentral lobule."
+    },
+    {
+      "macro96_id": 50,
+      "macro96_name_en": "left pars opercularis",
+      "macro96_name_cn": "左鳃盖部",
+      "macro96_laterality": "left",
+      "aal3_index": 7,
+      "aal3_name": "Frontal_Inf_Oper_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -48,
+        "y": 16,
+        "z": 16
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left pars opercularis."
+    },
+    {
+      "macro96_id": 51,
+      "macro96_name_en": "left pars orbitalis",
+      "macro96_name_cn": "左眶部",
+      "macro96_laterality": "left",
+      "aal3_index": 11,
+      "aal3_name": "Frontal_Inf_Orb_2_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -40,
+        "y": 32,
+        "z": -12
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left pars orbitalis."
+    },
+    {
+      "macro96_id": 52,
+      "macro96_name_en": "left pars triangularis",
+      "macro96_name_cn": "左三角部",
+      "macro96_laterality": "left",
+      "aal3_index": 9,
+      "aal3_name": "Frontal_Inf_Tri_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -44,
+        "y": 28,
+        "z": 12
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left pars triangularis."
+    },
+    {
+      "macro96_id": 53,
+      "macro96_name_en": "left pericalcarine",
+      "macro96_name_cn": "左骨膜",
+      "macro96_laterality": "left",
+      "aal3_index": 47,
+      "aal3_name": "Calcarine_L",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": -12,
+        "y": -70,
+        "z": 10
+      },
+      "confidence": 0.7,
+      "rationale": "Pericalcarine cortex corresponds to calcarine sulcus region; AAL3 has Calcarine_L."
+    },
+    {
+      "macro96_id": 54,
+      "macro96_name_en": "left postcentral",
+      "macro96_name_cn": "左后中央",
+      "macro96_laterality": "left",
+      "aal3_index": 61,
+      "aal3_name": "Postcentral_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -44,
+        "y": -22,
+        "z": 52
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left postcentral."
+    },
+    {
+      "macro96_id": 55,
+      "macro96_name_en": "left posterior cingulate",
+      "macro96_name_cn": "左后扣带",
+      "macro96_laterality": "left",
+      "aal3_index": 39,
+      "aal3_name": "Cingulate_Post_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -8,
+        "y": -40,
+        "z": 28
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left posterior cingulate."
+    },
+    {
+      "macro96_id": 56,
+      "macro96_name_en": "left precentral",
+      "macro96_name_cn": "左中央前",
+      "macro96_laterality": "left",
+      "aal3_index": 1,
+      "aal3_name": "Precentral_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -36,
+        "y": -14,
+        "z": 56
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left precentral."
+    },
+    {
+      "macro96_id": 57,
+      "macro96_name_en": "left precuneus",
+      "macro96_name_cn": "左楔前叶",
+      "macro96_laterality": "left",
+      "aal3_index": 71,
+      "aal3_name": "Precuneus_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -10,
+        "y": -56,
+        "z": 48
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left precuneus."
+    },
+    {
+      "macro96_id": 58,
+      "macro96_name_en": "left rostral anterior cingulate",
+      "macro96_name_cn": "左喙前扣带",
+      "macro96_laterality": "left",
+      "aal3_index": 153,
+      "aal3_name": "ACC_pre_L",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": -6,
+        "y": 40,
+        "z": 12
+      },
+      "confidence": 0.7,
+      "rationale": "Rostral anterior cingulate likely corresponds to ACC_pre_L (pregenual)."
+    },
+    {
+      "macro96_id": 59,
+      "macro96_name_en": "left rostral middle frontal",
+      "macro96_name_cn": "左喙中额叶",
+      "macro96_laterality": "left",
+      "aal3_index": 5,
+      "aal3_name": "Frontal_Mid_2_L",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": -36,
+        "y": 32,
+        "z": 32
+      },
+      "confidence": 0.7,
+      "rationale": "Rostral middle frontal likely corresponds to Frontal_Mid_2_L."
+    },
+    {
+      "macro96_id": 60,
+      "macro96_name_en": "left superior frontal",
+      "macro96_name_cn": "左上额叶",
+      "macro96_laterality": "left",
+      "aal3_index": 3,
+      "aal3_name": "Frontal_Sup_2_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -24,
+        "y": 32,
+        "z": 44
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left superior frontal."
+    },
+    {
+      "macro96_id": 61,
+      "macro96_name_en": "left superior parietal",
+      "macro96_name_cn": "左上顶叶",
+      "macro96_laterality": "left",
+      "aal3_index": 63,
+      "aal3_name": "Parietal_Sup_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -28,
+        "y": -52,
+        "z": 56
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left superior parietal."
+    },
+    {
+      "macro96_id": 62,
+      "macro96_name_en": "left superior temporal",
+      "macro96_name_cn": "左颞上叶",
+      "macro96_laterality": "left",
+      "aal3_index": 85,
+      "aal3_name": "Temporal_Sup_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -52,
+        "y": -14,
+        "z": 4
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left superior temporal."
+    },
+    {
+      "macro96_id": 63,
+      "macro96_name_en": "left supramarginal",
+      "macro96_name_cn": "左超边缘",
+      "macro96_laterality": "left",
+      "aal3_index": 67,
+      "aal3_name": "SupraMarginal_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -56,
+        "y": -32,
+        "z": 32
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left supramarginal."
+    },
+    {
+      "macro96_id": 64,
+      "macro96_name_en": "left transverse temporal",
+      "macro96_name_cn": "左横颞叶",
+      "macro96_laterality": "left",
+      "aal3_index": 83,
+      "aal3_name": "Heschl_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -44,
+        "y": -22,
+        "z": 12
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left Heschl's gyrus (transverse temporal)."
+    },
+    {
+      "macro96_id": 65,
+      "macro96_name_en": "left insula",
+      "macro96_name_cn": "左脑岛",
+      "macro96_laterality": "left",
+      "aal3_index": 33,
+      "aal3_name": "Insula_L",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": -36,
+        "y": 6,
+        "z": 4
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: left insula."
+    },
+    {
+      "macro96_id": 66,
+      "macro96_name_en": "right caudal anterior cingulate",
+      "macro96_name_cn": "右尾前扣带回",
+      "macro96_laterality": "right",
+      "aal3_index": 152,
+      "aal3_name": "ACC_sub_R",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": 6,
+        "y": 36,
+        "z": 8
+      },
+      "confidence": 0.7,
+      "rationale": "Caudal anterior cingulate likely corresponds to ACC_sub_R."
+    },
+    {
+      "macro96_id": 67,
+      "macro96_name_en": "right caudal middle frontal",
+      "macro96_name_cn": "右尾中额叶",
+      "macro96_laterality": "right",
+      "aal3_index": 6,
+      "aal3_name": "Frontal_Mid_2_R",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": 36,
+        "y": 32,
+        "z": 32
+      },
+      "confidence": 0.7,
+      "rationale": "Caudal middle frontal likely corresponds to Frontal_Mid_2_R."
+    },
+    {
+      "macro96_id": 68,
+      "macro96_name_en": "right cuneus",
+      "macro96_name_cn": "右楔",
+      "macro96_laterality": "right",
+      "aal3_index": 50,
+      "aal3_name": "Cuneus_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 8,
+        "y": -76,
+        "z": 28
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right cuneus."
+    },
+    {
+      "macro96_id": 69,
+      "macro96_name_en": "right entorhinal",
+      "macro96_name_cn": "右内嗅",
+      "macro96_laterality": "right",
+      "aal3_index": 44,
+      "aal3_name": "ParaHippocampal_R",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": 22,
+        "y": -14,
+        "z": -28
+      },
+      "confidence": 0.6,
+      "rationale": "Entorhinal cortex is part of parahippocampal gyrus; AAL3 has ParaHippocampal_R."
+    },
+    {
+      "macro96_id": 70,
+      "macro96_name_en": "right fusiform",
+      "macro96_name_cn": "右梭形",
+      "macro96_laterality": "right",
+      "aal3_index": 60,
+      "aal3_name": "Fusiform_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 36,
+        "y": -38,
+        "z": -22
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right fusiform."
+    },
+    {
+      "macro96_id": 71,
+      "macro96_name_en": "right inferior parietal",
+      "macro96_name_cn": "右下顶叶",
+      "macro96_laterality": "right",
+      "aal3_index": 66,
+      "aal3_name": "Parietal_Inf_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 44,
+        "y": -38,
+        "z": 44
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right inferior parietal."
+    },
+    {
+      "macro96_id": 72,
+      "macro96_name_en": "right inferior temporal",
+      "macro96_name_cn": "右下颞叶",
+      "macro96_laterality": "right",
+      "aal3_index": 94,
+      "aal3_name": "Temporal_Inf_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 48,
+        "y": -30,
+        "z": -22
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right inferior temporal."
+    },
+    {
+      "macro96_id": 73,
+      "macro96_name_en": "right isthmus cingulate",
+      "macro96_name_cn": "右侧扣带峡部",
+      "macro96_laterality": "right",
+      "aal3_index": 40,
+      "aal3_name": "Cingulate_Post_R",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": 8,
+        "y": -40,
+        "z": 28
+      },
+      "confidence": 0.7,
+      "rationale": "Isthmus of cingulate is posterior cingulate; AAL3 has Cingulate_Post_R."
+    },
+    {
+      "macro96_id": 74,
+      "macro96_name_en": "right lateral occipital",
+      "macro96_name_cn": "右侧枕外侧",
+      "macro96_laterality": "right",
+      "aal3_index": 56,
+      "aal3_name": "Occipital_Mid_R",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": 32,
+        "y": -82,
+        "z": 16
+      },
+      "confidence": 0.7,
+      "rationale": "Lateral occipital likely corresponds to Occipital_Mid_R."
+    },
+    {
+      "macro96_id": 75,
+      "macro96_name_en": "right lateral orbitofrontal",
+      "macro96_name_cn": "右眶额外侧",
+      "macro96_laterality": "right",
+      "aal3_index": 32,
+      "aal3_name": "OFClat_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 28,
+        "y": 40,
+        "z": -14
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right lateral orbitofrontal."
+    },
+    {
+      "macro96_id": 76,
+      "macro96_name_en": "right lingual gyrus",
+      "macro96_name_cn": "右舌回",
+      "macro96_laterality": "right",
+      "aal3_index": 52,
+      "aal3_name": "Lingual_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 16,
+        "y": -60,
+        "z": -4
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right lingual."
+    },
+    {
+      "macro96_id": 77,
+      "macro96_name_en": "right medial orbitofrontal",
+      "macro96_name_cn": "右眶额内侧",
+      "macro96_laterality": "right",
+      "aal3_index": 26,
+      "aal3_name": "OFCmed_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 10,
+        "y": 44,
+        "z": -16
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right medial orbitofrontal."
+    },
+    {
+      "macro96_id": 78,
+      "macro96_name_en": "right middle temporal",
+      "macro96_name_cn": "右中颞叶",
+      "macro96_laterality": "right",
+      "aal3_index": 90,
+      "aal3_name": "Temporal_Mid_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 56,
+        "y": -32,
+        "z": -8
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right middle temporal."
+    },
+    {
+      "macro96_id": 79,
+      "macro96_name_en": "right parahippocampal",
+      "macro96_name_cn": "右海马旁",
+      "macro96_laterality": "right",
+      "aal3_index": 44,
+      "aal3_name": "ParaHippocampal_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 22,
+        "y": -14,
+        "z": -28
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right parahippocampal."
+    },
+    {
+      "macro96_id": 80,
+      "macro96_name_en": "right paracentral",
+      "macro96_name_cn": "右旁中央",
+      "macro96_laterality": "right",
+      "aal3_index": 74,
+      "aal3_name": "Paracentral_Lobule_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 8,
+        "y": -24,
+        "z": 68
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right paracentral lobule."
+    },
+    {
+      "macro96_id": 81,
+      "macro96_name_en": "right pars opercularis",
+      "macro96_name_cn": "右鳃盖部",
+      "macro96_laterality": "right",
+      "aal3_index": 8,
+      "aal3_name": "Frontal_Inf_Oper_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 48,
+        "y": 16,
+        "z": 16
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right pars opercularis."
+    },
+    {
+      "macro96_id": 82,
+      "macro96_name_en": "right pars orbitalis",
+      "macro96_name_cn": "右眶部",
+      "macro96_laterality": "right",
+      "aal3_index": 12,
+      "aal3_name": "Frontal_Inf_Orb_2_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 40,
+        "y": 32,
+        "z": -12
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right pars orbitalis."
+    },
+    {
+      "macro96_id": 83,
+      "macro96_name_en": "right pars triangularis",
+      "macro96_name_cn": "右三角部",
+      "macro96_laterality": "right",
+      "aal3_index": 10,
+      "aal3_name": "Frontal_Inf_Tri_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 44,
+        "y": 28,
+        "z": 12
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right pars triangularis."
+    },
+    {
+      "macro96_id": 84,
+      "macro96_name_en": "right pericalcarine",
+      "macro96_name_cn": "右骨膜",
+      "macro96_laterality": "right",
+      "aal3_index": 48,
+      "aal3_name": "Calcarine_R",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": 12,
+        "y": -70,
+        "z": 10
+      },
+      "confidence": 0.7,
+      "rationale": "Pericalcarine cortex corresponds to calcarine sulcus region; AAL3 has Calcarine_R."
+    },
+    {
+      "macro96_id": 85,
+      "macro96_name_en": "right postcentral",
+      "macro96_name_cn": "右后中央",
+      "macro96_laterality": "right",
+      "aal3_index": 62,
+      "aal3_name": "Postcentral_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 44,
+        "y": -22,
+        "z": 52
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right postcentral."
+    },
+    {
+      "macro96_id": 86,
+      "macro96_name_en": "right posterior cingulate",
+      "macro96_name_cn": "右后扣带",
+      "macro96_laterality": "right",
+      "aal3_index": 40,
+      "aal3_name": "Cingulate_Post_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 8,
+        "y": -40,
+        "z": 28
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right posterior cingulate."
+    },
+    {
+      "macro96_id": 87,
+      "macro96_name_en": "right precentral",
+      "macro96_name_cn": "右中心前",
+      "macro96_laterality": "right",
+      "aal3_index": 2,
+      "aal3_name": "Precentral_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 36,
+        "y": -14,
+        "z": 56
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right precentral."
+    },
+    {
+      "macro96_id": 88,
+      "macro96_name_en": "right precuneus",
+      "macro96_name_cn": "右楔前叶",
+      "macro96_laterality": "right",
+      "aal3_index": 72,
+      "aal3_name": "Precuneus_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 10,
+        "y": -56,
+        "z": 48
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right precuneus."
+    },
+    {
+      "macro96_id": 89,
+      "macro96_name_en": "right rostral anterior cingulate",
+      "macro96_name_cn": "右喙前扣带",
+      "macro96_laterality": "right",
+      "aal3_index": 154,
+      "aal3_name": "ACC_pre_R",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": 6,
+        "y": 40,
+        "z": 12
+      },
+      "confidence": 0.7,
+      "rationale": "Rostral anterior cingulate likely corresponds to ACC_pre_R."
+    },
+    {
+      "macro96_id": 90,
+      "macro96_name_en": "right rostral middle frontal",
+      "macro96_name_cn": "右喙中额叶",
+      "macro96_laterality": "right",
+      "aal3_index": 6,
+      "aal3_name": "Frontal_Mid_2_R",
+      "match_quality": "approximate",
+      "mni_centroid": {
+        "x": 36,
+        "y": 32,
+        "z": 32
+      },
+      "confidence": 0.7,
+      "rationale": "Rostral middle frontal likely corresponds to Frontal_Mid_2_R."
+    },
+    {
+      "macro96_id": 91,
+      "macro96_name_en": "right superior frontal",
+      "macro96_name_cn": "右上额叶",
+      "macro96_laterality": "right",
+      "aal3_index": 4,
+      "aal3_name": "Frontal_Sup_2_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 24,
+        "y": 32,
+        "z": 44
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right superior frontal."
+    },
+    {
+      "macro96_id": 92,
+      "macro96_name_en": "right superior parietal",
+      "macro96_name_cn": "右上顶叶",
+      "macro96_laterality": "right",
+      "aal3_index": 64,
+      "aal3_name": "Parietal_Sup_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 28,
+        "y": -52,
+        "z": 56
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right superior parietal."
+    },
+    {
+      "macro96_id": 93,
+      "macro96_name_en": "right superior temporal",
+      "macro96_name_cn": "右颞上叶",
+      "macro96_laterality": "right",
+      "aal3_index": 86,
+      "aal3_name": "Temporal_Sup_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 52,
+        "y": -14,
+        "z": 4
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right superior temporal."
+    },
+    {
+      "macro96_id": 94,
+      "macro96_name_en": "right supramarginal",
+      "macro96_name_cn": "右超边缘",
+      "macro96_laterality": "right",
+      "aal3_index": 68,
+      "aal3_name": "SupraMarginal_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 56,
+        "y": -32,
+        "z": 32
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right supramarginal."
+    },
+    {
+      "macro96_id": 95,
+      "macro96_name_en": "right transverse temporal",
+      "macro96_name_cn": "右颞横叶",
+      "macro96_laterality": "right",
+      "aal3_index": 84,
+      "aal3_name": "Heschl_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 44,
+        "y": -22,
+        "z": 12
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right Heschl's gyrus (transverse temporal)."
+    },
+    {
+      "macro96_id": 96,
+      "macro96_name_en": "right insula",
+      "macro96_name_cn": "右脑岛",
+      "macro96_laterality": "right",
+      "aal3_index": 34,
+      "aal3_name": "Insula_R",
+      "match_quality": "exact",
+      "mni_centroid": {
+        "x": 36,
+        "y": 6,
+        "z": 4
+      },
+      "confidence": 1.0,
+      "rationale": "Exact match: right insula."
+    }
+  ],
+  "unmatched": [
+    {
+      "macro96_id": 1,
+      "macro96_name_en": "white matter",
+      "reason": "Global white matter label — no single AAL3 region corresponds. Would need WM parcellation atlas."
+    },
+    {
+      "macro96_id": 2,
+      "macro96_name_en": "left lateral ventricle",
+      "reason": "Ventricle not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 3,
+      "macro96_name_en": "left inferior lateral ventricle",
+      "reason": "Ventricle not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 4,
+      "macro96_name_en": "left cerebellum exterior",
+      "reason": "Cerebellum exterior is not a specific AAL3 region; AAL3 has cerebellar lobules."
+    },
+    {
+      "macro96_id": 5,
+      "macro96_name_en": "left cerebellum white matter",
+      "reason": "Cerebellar white matter not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 10,
+      "macro96_name_en": "3rd ventricle",
+      "reason": "Ventricle not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 11,
+      "macro96_name_en": "4th ventricle",
+      "reason": "Ventricle not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 15,
+      "macro96_name_en": "CSF",
+      "reason": "CSF not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 18,
+      "macro96_name_en": "right lateral ventricle",
+      "reason": "Ventricle not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 19,
+      "macro96_name_en": "right inferior lateral ventricle",
+      "reason": "Ventricle not parcellated in AAL3."
+    },
+    {
+      "macro96_id": 20,
+      "macro96_name_en": "right cerebellum exterior",
+      "reason": "Cerebellum exterior not a specific AAL3 region."
+    },
+    {
+      "macro96_id": 21,
+      "macro96_name_en": "right cerebellum white matter",
+      "reason": "Cerebellar white matter not parcellated in AAL3."
+    }
+  ],
+  "summary": {
+    "total_macro96": 96,
+    "total_matched": 84,
+    "total_unmatched": 12,
+    "exact_matches": 56,
+    "alias_matches": 0,
+    "approximate_matches": 16,
+    "manual_review": 12
+  }
+}

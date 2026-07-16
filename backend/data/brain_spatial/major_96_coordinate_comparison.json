@@ -1,0 +1,1384 @@
+{
+  "metadata": {
+    "generated": "2026-07-16T05:08:13.184465+00:00"
+  },
+  "stats": {
+    "deepseek_comparable": 72,
+    "deepseek_mean_distance_mm": 5.9,
+    "deepseek_median_distance_mm": 5.7,
+    "deepseek_max_distance_mm": 12.8,
+    "deepseek_close_le_5mm": 33,
+    "deepseek_moderate_5_15mm": 39,
+    "deepseek_severe_gt_15mm": 0
+  },
+  "comparisons": [
+    {
+      "region_id": null,
+      "name_en": "left caudate",
+      "deepseek_mni": {
+        "x": -13,
+        "y": 15,
+        "z": 10
+      },
+      "verified_mni": {
+        "x": -12.0,
+        "y": 10.0,
+        "z": 8.0
+      },
+      "distance_mm": 5.5,
+      "grade": "moderate",
+      "dx": -1.0,
+      "dy": 5.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left putamen",
+      "deepseek_mni": {
+        "x": -28,
+        "y": 2,
+        "z": 3
+      },
+      "verified_mni": {
+        "x": -24.0,
+        "y": 2.0,
+        "z": 2.0
+      },
+      "distance_mm": 4.1,
+      "grade": "close",
+      "dx": -4.0,
+      "dy": 0.0,
+      "dz": 1.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left pallidum",
+      "deepseek_mni": {
+        "x": -20,
+        "y": -2,
+        "z": 0
+      },
+      "verified_mni": {
+        "x": -18.0,
+        "y": -2.0,
+        "z": -2.0
+      },
+      "distance_mm": 2.8,
+      "grade": "close",
+      "dx": -2.0,
+      "dy": 0.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left hippocampus",
+      "deepseek_mni": {
+        "x": -30,
+        "y": -22,
+        "z": -12
+      },
+      "verified_mni": {
+        "x": -26.0,
+        "y": -22.0,
+        "z": -12.0
+      },
+      "distance_mm": 4.0,
+      "grade": "close",
+      "dx": -4.0,
+      "dy": 0.0,
+      "dz": 0.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left amygdala",
+      "deepseek_mni": {
+        "x": -24,
+        "y": -4,
+        "z": -18
+      },
+      "verified_mni": {
+        "x": -24.0,
+        "y": -2.0,
+        "z": -18.0
+      },
+      "distance_mm": 2.0,
+      "grade": "close",
+      "dx": 0.0,
+      "dy": -2.0,
+      "dz": 0.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right caudate",
+      "deepseek_mni": {
+        "x": 13,
+        "y": 15,
+        "z": 10
+      },
+      "verified_mni": {
+        "x": 14.0,
+        "y": 10.0,
+        "z": 8.0
+      },
+      "distance_mm": 5.5,
+      "grade": "moderate",
+      "dx": -1.0,
+      "dy": 5.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right putamen",
+      "deepseek_mni": {
+        "x": 28,
+        "y": 2,
+        "z": 3
+      },
+      "verified_mni": {
+        "x": 28.0,
+        "y": 4.0,
+        "z": 2.0
+      },
+      "distance_mm": 2.2,
+      "grade": "close",
+      "dx": 0.0,
+      "dy": -2.0,
+      "dz": 1.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right pallidum",
+      "deepseek_mni": {
+        "x": 20,
+        "y": -2,
+        "z": 0
+      },
+      "verified_mni": {
+        "x": 20.0,
+        "y": -2.0,
+        "z": -2.0
+      },
+      "distance_mm": 2.0,
+      "grade": "close",
+      "dx": 0.0,
+      "dy": 0.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right hippocampus",
+      "deepseek_mni": {
+        "x": 30,
+        "y": -22,
+        "z": -12
+      },
+      "verified_mni": {
+        "x": 28.0,
+        "y": -20.0,
+        "z": -12.0
+      },
+      "distance_mm": 2.8,
+      "grade": "close",
+      "dx": 2.0,
+      "dy": -2.0,
+      "dz": 0.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right amygdala",
+      "deepseek_mni": {
+        "x": 24,
+        "y": -4,
+        "z": -18
+      },
+      "verified_mni": {
+        "x": 28.0,
+        "y": 0.0,
+        "z": -18.0
+      },
+      "distance_mm": 5.7,
+      "grade": "moderate",
+      "dx": -4.0,
+      "dy": -4.0,
+      "dz": 0.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left caudal anterior cingulate",
+      "deepseek_mni": {
+        "x": -6,
+        "y": 36,
+        "z": 8
+      },
+      "verified_mni": {
+        "x": -4.0,
+        "y": 34.0,
+        "z": 12.0
+      },
+      "distance_mm": 4.9,
+      "grade": "close",
+      "dx": -2.0,
+      "dy": 2.0,
+      "dz": -4.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left caudal middle frontal",
+      "deepseek_mni": {
+        "x": -36,
+        "y": 32,
+        "z": 32
+      },
+      "verified_mni": {
+        "x": -34.0,
+        "y": 32.0,
+        "z": 34.0
+      },
+      "distance_mm": 2.8,
+      "grade": "close",
+      "dx": -2.0,
+      "dy": 0.0,
+      "dz": -2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left cuneus",
+      "deepseek_mni": {
+        "x": -8,
+        "y": -76,
+        "z": 28
+      },
+      "verified_mni": {
+        "x": -6.0,
+        "y": -82.0,
+        "z": 26.0
+      },
+      "distance_mm": 6.6,
+      "grade": "moderate",
+      "dx": -2.0,
+      "dy": 6.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left entorhinal",
+      "deepseek_mni": {
+        "x": -22,
+        "y": -14,
+        "z": -28
+      },
+      "verified_mni": {
+        "x": -20.0,
+        "y": -18.0,
+        "z": -22.0
+      },
+      "distance_mm": 7.5,
+      "grade": "moderate",
+      "dx": -2.0,
+      "dy": 4.0,
+      "dz": -6.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left fusiform",
+      "deepseek_mni": {
+        "x": -36,
+        "y": -38,
+        "z": -22
+      },
+      "verified_mni": {
+        "x": -32.0,
+        "y": -42.0,
+        "z": -22.0
+      },
+      "distance_mm": 5.7,
+      "grade": "moderate",
+      "dx": -4.0,
+      "dy": 4.0,
+      "dz": 0.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left inferior parietal",
+      "deepseek_mni": {
+        "x": -44,
+        "y": -38,
+        "z": 44
+      },
+      "verified_mni": {
+        "x": -44.0,
+        "y": -48.0,
+        "z": 46.0
+      },
+      "distance_mm": 10.2,
+      "grade": "moderate",
+      "dx": 0.0,
+      "dy": 10.0,
+      "dz": -2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left inferior temporal",
+      "deepseek_mni": {
+        "x": -48,
+        "y": -30,
+        "z": -22
+      },
+      "verified_mni": {
+        "x": -50.0,
+        "y": -30.0,
+        "z": -24.0
+      },
+      "distance_mm": 2.8,
+      "grade": "close",
+      "dx": 2.0,
+      "dy": 0.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left isthmus cingulate",
+      "deepseek_mni": {
+        "x": -8,
+        "y": -40,
+        "z": 28
+      },
+      "verified_mni": {
+        "x": -6.0,
+        "y": -44.0,
+        "z": 24.0
+      },
+      "distance_mm": 6.0,
+      "grade": "moderate",
+      "dx": -2.0,
+      "dy": 4.0,
+      "dz": 4.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left lateral occipital",
+      "deepseek_mni": {
+        "x": -32,
+        "y": -82,
+        "z": 16
+      },
+      "verified_mni": {
+        "x": -32.0,
+        "y": -82.0,
+        "z": 14.0
+      },
+      "distance_mm": 2.0,
+      "grade": "close",
+      "dx": 0.0,
+      "dy": 0.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left lateral orbitofrontal",
+      "deepseek_mni": {
+        "x": -28,
+        "y": 40,
+        "z": -14
+      },
+      "verified_mni": {
+        "x": -30.0,
+        "y": 50.0,
+        "z": -10.0
+      },
+      "distance_mm": 11.0,
+      "grade": "moderate",
+      "dx": 2.0,
+      "dy": -10.0,
+      "dz": -4.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left lingual gyrus",
+      "deepseek_mni": {
+        "x": -16,
+        "y": -60,
+        "z": -4
+      },
+      "verified_mni": {
+        "x": -14.0,
+        "y": -68.0,
+        "z": -6.0
+      },
+      "distance_mm": 8.5,
+      "grade": "moderate",
+      "dx": -2.0,
+      "dy": 8.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left medial orbitofrontal",
+      "deepseek_mni": {
+        "x": -10,
+        "y": 44,
+        "z": -16
+      },
+      "verified_mni": {
+        "x": -6.0,
+        "y": 52.0,
+        "z": -8.0
+      },
+      "distance_mm": 12.0,
+      "grade": "moderate",
+      "dx": -4.0,
+      "dy": -8.0,
+      "dz": -8.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left middle temporal",
+      "deepseek_mni": {
+        "x": -56,
+        "y": -32,
+        "z": -8
+      },
+      "verified_mni": {
+        "x": -56.0,
+        "y": -34.0,
+        "z": -4.0
+      },
+      "distance_mm": 4.5,
+      "grade": "close",
+      "dx": 0.0,
+      "dy": 2.0,
+      "dz": -4.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left parahippocampal",
+      "deepseek_mni": {
+        "x": -22,
+        "y": -14,
+        "z": -28
+      },
+      "verified_mni": {
+        "x": -20.0,
+        "y": -18.0,
+        "z": -22.0
+      },
+      "distance_mm": 7.5,
+      "grade": "moderate",
+      "dx": -2.0,
+      "dy": 4.0,
+      "dz": -6.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left paracentral",
+      "deepseek_mni": {
+        "x": -8,
+        "y": -24,
+        "z": 68
+      },
+      "verified_mni": {
+        "x": -8.0,
+        "y": -26.0,
+        "z": 68.0
+      },
+      "distance_mm": 2.0,
+      "grade": "close",
+      "dx": 0.0,
+      "dy": 2.0,
+      "dz": 0.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left pars opercularis",
+      "deepseek_mni": {
+        "x": -48,
+        "y": 16,
+        "z": 16
+      },
+      "verified_mni": {
+        "x": -48.0,
+        "y": 12.0,
+        "z": 18.0
+      },
+      "distance_mm": 4.5,
+      "grade": "close",
+      "dx": 0.0,
+      "dy": 4.0,
+      "dz": -2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left pars orbitalis",
+      "deepseek_mni": {
+        "x": -40,
+        "y": 32,
+        "z": -12
+      },
+      "verified_mni": {
+        "x": -36.0,
+        "y": 30.0,
+        "z": -14.0
+      },
+      "distance_mm": 4.9,
+      "grade": "close",
+      "dx": -4.0,
+      "dy": 2.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left pars triangularis",
+      "deepseek_mni": {
+        "x": -44,
+        "y": 28,
+        "z": 12
+      },
+      "verified_mni": {
+        "x": -46.0,
+        "y": 28.0,
+        "z": 12.0
+      },
+      "distance_mm": 2.0,
+      "grade": "close",
+      "dx": 2.0,
+      "dy": 0.0,
+      "dz": 0.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left pericalcarine",
+      "deepseek_mni": {
+        "x": -12,
+        "y": -70,
+        "z": 10
+      },
+      "verified_mni": {
+        "x": -8.0,
+        "y": -80.0,
+        "z": 6.0
+      },
+      "distance_mm": 11.5,
+      "grade": "moderate",
+      "dx": -4.0,
+      "dy": 10.0,
+      "dz": 4.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left postcentral",
+      "deepseek_mni": {
+        "x": -44,
+        "y": -22,
+        "z": 52
+      },
+      "verified_mni": {
+        "x": -42.0,
+        "y": -24.0,
+        "z": 48.0
+      },
+      "distance_mm": 4.9,
+      "grade": "close",
+      "dx": -2.0,
+      "dy": 2.0,
+      "dz": 4.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left posterior cingulate",
+      "deepseek_mni": {
+        "x": -8,
+        "y": -40,
+        "z": 28
+      },
+      "verified_mni": {
+        "x": -6.0,
+        "y": -44.0,
+        "z": 24.0
+      },
+      "distance_mm": 6.0,
+      "grade": "moderate",
+      "dx": -2.0,
+      "dy": 4.0,
+      "dz": 4.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left precentral",
+      "deepseek_mni": {
+        "x": -36,
+        "y": -14,
+        "z": 56
+      },
+      "verified_mni": {
+        "x": -38.0,
+        "y": -6.0,
+        "z": 50.0
+      },
+      "distance_mm": 10.2,
+      "grade": "moderate",
+      "dx": 2.0,
+      "dy": -8.0,
+      "dz": 6.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left precuneus",
+      "deepseek_mni": {
+        "x": -10,
+        "y": -56,
+        "z": 48
+      },
+      "verified_mni": {
+        "x": -8.0,
+        "y": -58.0,
+        "z": 46.0
+      },
+      "distance_mm": 3.5,
+      "grade": "close",
+      "dx": -2.0,
+      "dy": 2.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left rostral anterior cingulate",
+      "deepseek_mni": {
+        "x": -6,
+        "y": 40,
+        "z": 12
+      },
+      "verified_mni": {
+        "x": -4.0,
+        "y": 34.0,
+        "z": 12.0
+      },
+      "distance_mm": 6.3,
+      "grade": "moderate",
+      "dx": -2.0,
+      "dy": 6.0,
+      "dz": 0.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left rostral middle frontal",
+      "deepseek_mni": {
+        "x": -36,
+        "y": 32,
+        "z": 32
+      },
+      "verified_mni": {
+        "x": -34.0,
+        "y": 32.0,
+        "z": 34.0
+      },
+      "distance_mm": 2.8,
+      "grade": "close",
+      "dx": -2.0,
+      "dy": 0.0,
+      "dz": -2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left superior frontal",
+      "deepseek_mni": {
+        "x": -24,
+        "y": 32,
+        "z": 44
+      },
+      "verified_mni": {
+        "x": -18.0,
+        "y": 34.0,
+        "z": 40.0
+      },
+      "distance_mm": 7.5,
+      "grade": "moderate",
+      "dx": -6.0,
+      "dy": -2.0,
+      "dz": 4.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left superior parietal",
+      "deepseek_mni": {
+        "x": -28,
+        "y": -52,
+        "z": 56
+      },
+      "verified_mni": {
+        "x": -24.0,
+        "y": -60.0,
+        "z": 58.0
+      },
+      "distance_mm": 9.2,
+      "grade": "moderate",
+      "dx": -4.0,
+      "dy": 8.0,
+      "dz": -2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left superior temporal",
+      "deepseek_mni": {
+        "x": -52,
+        "y": -14,
+        "z": 4
+      },
+      "verified_mni": {
+        "x": -54.0,
+        "y": -22.0,
+        "z": 6.0
+      },
+      "distance_mm": 8.5,
+      "grade": "moderate",
+      "dx": 2.0,
+      "dy": 8.0,
+      "dz": -2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left supramarginal",
+      "deepseek_mni": {
+        "x": -56,
+        "y": -32,
+        "z": 32
+      },
+      "verified_mni": {
+        "x": -56.0,
+        "y": -34.0,
+        "z": 30.0
+      },
+      "distance_mm": 2.8,
+      "grade": "close",
+      "dx": 0.0,
+      "dy": 2.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left transverse temporal",
+      "deepseek_mni": {
+        "x": -44,
+        "y": -22,
+        "z": 12
+      },
+      "verified_mni": {
+        "x": -42.0,
+        "y": -20.0,
+        "z": 8.0
+      },
+      "distance_mm": 4.9,
+      "grade": "close",
+      "dx": -2.0,
+      "dy": -2.0,
+      "dz": 4.0
+    },
+    {
+      "region_id": null,
+      "name_en": "left insula",
+      "deepseek_mni": {
+        "x": -36,
+        "y": 6,
+        "z": 4
+      },
+      "verified_mni": {
+        "x": -36.0,
+        "y": 6.0,
+        "z": 2.0
+      },
+      "distance_mm": 2.0,
+      "grade": "close",
+      "dx": 0.0,
+      "dy": 0.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right caudal anterior cingulate",
+      "deepseek_mni": {
+        "x": 6,
+        "y": 36,
+        "z": 8
+      },
+      "verified_mni": {
+        "x": 8.0,
+        "y": 36.0,
+        "z": 14.0
+      },
+      "distance_mm": 6.3,
+      "grade": "moderate",
+      "dx": -2.0,
+      "dy": 0.0,
+      "dz": -6.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right caudal middle frontal",
+      "deepseek_mni": {
+        "x": 36,
+        "y": 32,
+        "z": 32
+      },
+      "verified_mni": {
+        "x": 38.0,
+        "y": 32.0,
+        "z": 32.0
+      },
+      "distance_mm": 2.0,
+      "grade": "close",
+      "dx": -2.0,
+      "dy": 0.0,
+      "dz": 0.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right cuneus",
+      "deepseek_mni": {
+        "x": 8,
+        "y": -76,
+        "z": 28
+      },
+      "verified_mni": {
+        "x": 14.0,
+        "y": -80.0,
+        "z": 26.0
+      },
+      "distance_mm": 7.5,
+      "grade": "moderate",
+      "dx": -6.0,
+      "dy": 4.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right entorhinal",
+      "deepseek_mni": {
+        "x": 22,
+        "y": -14,
+        "z": -28
+      },
+      "verified_mni": {
+        "x": 24.0,
+        "y": -16.0,
+        "z": -22.0
+      },
+      "distance_mm": 6.6,
+      "grade": "moderate",
+      "dx": -2.0,
+      "dy": 2.0,
+      "dz": -6.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right fusiform",
+      "deepseek_mni": {
+        "x": 36,
+        "y": -38,
+        "z": -22
+      },
+      "verified_mni": {
+        "x": 34.0,
+        "y": -40.0,
+        "z": -22.0
+      },
+      "distance_mm": 2.8,
+      "grade": "close",
+      "dx": 2.0,
+      "dy": 2.0,
+      "dz": 0.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right inferior parietal",
+      "deepseek_mni": {
+        "x": 44,
+        "y": -38,
+        "z": 44
+      },
+      "verified_mni": {
+        "x": 46.0,
+        "y": -48.0,
+        "z": 48.0
+      },
+      "distance_mm": 11.0,
+      "grade": "moderate",
+      "dx": -2.0,
+      "dy": 10.0,
+      "dz": -4.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right inferior temporal",
+      "deepseek_mni": {
+        "x": 48,
+        "y": -30,
+        "z": -22
+      },
+      "verified_mni": {
+        "x": 54.0,
+        "y": -32.0,
+        "z": -24.0
+      },
+      "distance_mm": 6.6,
+      "grade": "moderate",
+      "dx": -6.0,
+      "dy": 2.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right isthmus cingulate",
+      "deepseek_mni": {
+        "x": 8,
+        "y": -40,
+        "z": 28
+      },
+      "verified_mni": {
+        "x": 8.0,
+        "y": -44.0,
+        "z": 20.0
+      },
+      "distance_mm": 8.9,
+      "grade": "moderate",
+      "dx": 0.0,
+      "dy": 4.0,
+      "dz": 8.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right lateral occipital",
+      "deepseek_mni": {
+        "x": 32,
+        "y": -82,
+        "z": 16
+      },
+      "verified_mni": {
+        "x": 38.0,
+        "y": -80.0,
+        "z": 18.0
+      },
+      "distance_mm": 6.6,
+      "grade": "moderate",
+      "dx": -6.0,
+      "dy": -2.0,
+      "dz": -2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right lateral orbitofrontal",
+      "deepseek_mni": {
+        "x": 28,
+        "y": 40,
+        "z": -14
+      },
+      "verified_mni": {
+        "x": 32.0,
+        "y": 52.0,
+        "z": -12.0
+      },
+      "distance_mm": 12.8,
+      "grade": "moderate",
+      "dx": -4.0,
+      "dy": -12.0,
+      "dz": -2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right lingual gyrus",
+      "deepseek_mni": {
+        "x": 16,
+        "y": -60,
+        "z": -4
+      },
+      "verified_mni": {
+        "x": 16.0,
+        "y": -68.0,
+        "z": -6.0
+      },
+      "distance_mm": 8.2,
+      "grade": "moderate",
+      "dx": 0.0,
+      "dy": 8.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right medial orbitofrontal",
+      "deepseek_mni": {
+        "x": 10,
+        "y": 44,
+        "z": -16
+      },
+      "verified_mni": {
+        "x": 8.0,
+        "y": 50.0,
+        "z": -8.0
+      },
+      "distance_mm": 10.2,
+      "grade": "moderate",
+      "dx": 2.0,
+      "dy": -6.0,
+      "dz": -8.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right middle temporal",
+      "deepseek_mni": {
+        "x": 56,
+        "y": -32,
+        "z": -8
+      },
+      "verified_mni": {
+        "x": 58.0,
+        "y": -38.0,
+        "z": -2.0
+      },
+      "distance_mm": 8.7,
+      "grade": "moderate",
+      "dx": -2.0,
+      "dy": 6.0,
+      "dz": -6.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right parahippocampal",
+      "deepseek_mni": {
+        "x": 22,
+        "y": -14,
+        "z": -28
+      },
+      "verified_mni": {
+        "x": 24.0,
+        "y": -16.0,
+        "z": -22.0
+      },
+      "distance_mm": 6.6,
+      "grade": "moderate",
+      "dx": -2.0,
+      "dy": 2.0,
+      "dz": -6.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right paracentral",
+      "deepseek_mni": {
+        "x": 8,
+        "y": -24,
+        "z": 68
+      },
+      "verified_mni": {
+        "x": 8.0,
+        "y": -32.0,
+        "z": 66.0
+      },
+      "distance_mm": 8.2,
+      "grade": "moderate",
+      "dx": 0.0,
+      "dy": 8.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right pars opercularis",
+      "deepseek_mni": {
+        "x": 48,
+        "y": 16,
+        "z": 16
+      },
+      "verified_mni": {
+        "x": 50.0,
+        "y": 14.0,
+        "z": 20.0
+      },
+      "distance_mm": 4.9,
+      "grade": "close",
+      "dx": -2.0,
+      "dy": 2.0,
+      "dz": -4.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right pars orbitalis",
+      "deepseek_mni": {
+        "x": 40,
+        "y": 32,
+        "z": -12
+      },
+      "verified_mni": {
+        "x": 40.0,
+        "y": 30.0,
+        "z": -14.0
+      },
+      "distance_mm": 2.8,
+      "grade": "close",
+      "dx": 0.0,
+      "dy": 2.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right pars triangularis",
+      "deepseek_mni": {
+        "x": 44,
+        "y": 28,
+        "z": 12
+      },
+      "verified_mni": {
+        "x": 50.0,
+        "y": 28.0,
+        "z": 12.0
+      },
+      "distance_mm": 6.0,
+      "grade": "moderate",
+      "dx": -6.0,
+      "dy": 0.0,
+      "dz": 0.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right pericalcarine",
+      "deepseek_mni": {
+        "x": 12,
+        "y": -70,
+        "z": 10
+      },
+      "verified_mni": {
+        "x": 16.0,
+        "y": -74.0,
+        "z": 8.0
+      },
+      "distance_mm": 6.0,
+      "grade": "moderate",
+      "dx": -4.0,
+      "dy": 4.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right postcentral",
+      "deepseek_mni": {
+        "x": 44,
+        "y": -22,
+        "z": 52
+      },
+      "verified_mni": {
+        "x": 42.0,
+        "y": -26.0,
+        "z": 52.0
+      },
+      "distance_mm": 4.5,
+      "grade": "close",
+      "dx": 2.0,
+      "dy": 4.0,
+      "dz": 0.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right posterior cingulate",
+      "deepseek_mni": {
+        "x": 8,
+        "y": -40,
+        "z": 28
+      },
+      "verified_mni": {
+        "x": 8.0,
+        "y": -44.0,
+        "z": 20.0
+      },
+      "distance_mm": 8.9,
+      "grade": "moderate",
+      "dx": 0.0,
+      "dy": 4.0,
+      "dz": 8.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right precentral",
+      "deepseek_mni": {
+        "x": 36,
+        "y": -14,
+        "z": 56
+      },
+      "verified_mni": {
+        "x": 42.0,
+        "y": -10.0,
+        "z": 50.0
+      },
+      "distance_mm": 9.4,
+      "grade": "moderate",
+      "dx": -6.0,
+      "dy": -4.0,
+      "dz": 6.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right precuneus",
+      "deepseek_mni": {
+        "x": 10,
+        "y": -56,
+        "z": 48
+      },
+      "verified_mni": {
+        "x": 10.0,
+        "y": -58.0,
+        "z": 42.0
+      },
+      "distance_mm": 6.3,
+      "grade": "moderate",
+      "dx": 0.0,
+      "dy": 2.0,
+      "dz": 6.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right rostral anterior cingulate",
+      "deepseek_mni": {
+        "x": 6,
+        "y": 40,
+        "z": 12
+      },
+      "verified_mni": {
+        "x": 8.0,
+        "y": 36.0,
+        "z": 14.0
+      },
+      "distance_mm": 4.9,
+      "grade": "close",
+      "dx": -2.0,
+      "dy": 4.0,
+      "dz": -2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right rostral middle frontal",
+      "deepseek_mni": {
+        "x": 36,
+        "y": 32,
+        "z": 32
+      },
+      "verified_mni": {
+        "x": 38.0,
+        "y": 32.0,
+        "z": 32.0
+      },
+      "distance_mm": 2.0,
+      "grade": "close",
+      "dx": -2.0,
+      "dy": 0.0,
+      "dz": 0.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right superior frontal",
+      "deepseek_mni": {
+        "x": 24,
+        "y": 32,
+        "z": 44
+      },
+      "verified_mni": {
+        "x": 22.0,
+        "y": 30.0,
+        "z": 44.0
+      },
+      "distance_mm": 2.8,
+      "grade": "close",
+      "dx": 2.0,
+      "dy": 2.0,
+      "dz": 0.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right superior parietal",
+      "deepseek_mni": {
+        "x": 28,
+        "y": -52,
+        "z": 56
+      },
+      "verified_mni": {
+        "x": 26.0,
+        "y": -60.0,
+        "z": 60.0
+      },
+      "distance_mm": 9.2,
+      "grade": "moderate",
+      "dx": 2.0,
+      "dy": 8.0,
+      "dz": -4.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right superior temporal",
+      "deepseek_mni": {
+        "x": 52,
+        "y": -14,
+        "z": 4
+      },
+      "verified_mni": {
+        "x": 58.0,
+        "y": -24.0,
+        "z": 6.0
+      },
+      "distance_mm": 11.8,
+      "grade": "moderate",
+      "dx": -6.0,
+      "dy": 10.0,
+      "dz": -2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right supramarginal",
+      "deepseek_mni": {
+        "x": 56,
+        "y": -32,
+        "z": 32
+      },
+      "verified_mni": {
+        "x": 58.0,
+        "y": -32.0,
+        "z": 34.0
+      },
+      "distance_mm": 2.8,
+      "grade": "close",
+      "dx": -2.0,
+      "dy": 0.0,
+      "dz": -2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right transverse temporal",
+      "deepseek_mni": {
+        "x": 44,
+        "y": -22,
+        "z": 12
+      },
+      "verified_mni": {
+        "x": 46.0,
+        "y": -18.0,
+        "z": 10.0
+      },
+      "distance_mm": 4.9,
+      "grade": "close",
+      "dx": -2.0,
+      "dy": -4.0,
+      "dz": 2.0
+    },
+    {
+      "region_id": null,
+      "name_en": "right insula",
+      "deepseek_mni": {
+        "x": 36,
+        "y": 6,
+        "z": 4
+      },
+      "verified_mni": {
+        "x": 38.0,
+        "y": 6.0,
+        "z": 2.0
+      },
+      "distance_mm": 2.8,
+      "grade": "close",
+      "dx": -2.0,
+      "dy": 0.0,
+      "dz": 2.0
+    }
+  ]
+}

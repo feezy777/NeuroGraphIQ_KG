@@ -239,6 +239,7 @@ export function MirrorKgPanel({
           onRefresh={handleCompletionDone}
           onDeleteSelected={handleBulkDelete}
           onFetchAll={handleFetchAll}
+          granularityLevel={granularityLevel}
         />
       )}
 

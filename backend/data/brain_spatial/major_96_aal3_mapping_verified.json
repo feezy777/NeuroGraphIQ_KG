@@ -1,0 +1,3884 @@
+{
+  "metadata": {
+    "generated": "2026-07-16T05:08:13.184465+00:00",
+    "atlas": "AAL",
+    "atlas_file": "D:\\Tool\\Coding\\IDE\\PyCharm\\NeuroGraphIQ_KG_V3_1\\backend\\data\\atlases\\aal3\\aal\\atlas\\AAL.nii",
+    "label_file": "D:\\Tool\\Coding\\IDE\\PyCharm\\NeuroGraphIQ_KG_V3_1\\backend\\data\\atlases\\aal3\\aal\\ROI_MNI_V4.txt",
+    "nifti_hash": "91e8ec62a293c2a2",
+    "label_hash": "fc3aa3001131895e",
+    "nifti_shape": [
+      91,
+      109,
+      91
+    ],
+    "nifti_voxel_spacing": [
+      2.0,
+      2.0,
+      2.0
+    ],
+    "nifti_orientation": "LAS",
+    "nifti_affine": [
+      [
+        -2.0,
+        0.0,
+        0.0,
+        90.0
+      ],
+      [
+        0.0,
+        2.0,
+        0.0,
+        -126.0
+      ],
+      [
+        0.0,
+        0.0,
+        2.0,
+        -72.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "atlas_version": "Tzourio-Mazoyer_2002"
+  },
+  "stats": {
+    "total": 96,
+    "verified_exact": 46,
+    "verified_alias": 26,
+    "manual_review": 12,
+    "unmapped": 12,
+    "rejected": 0,
+    "with_verified_coordinates": 72,
+    "with_missing_coordinates": 24,
+    "deepseek_comparable": 72,
+    "deepseek_mean_distance_mm": 5.9,
+    "deepseek_median_distance_mm": 5.7,
+    "deepseek_max_distance_mm": 12.8,
+    "deepseek_close_le_5mm": 33,
+    "deepseek_moderate_5_15mm": 39,
+    "deepseek_severe_gt_15mm": 0
+  },
+  "issues": [],
+  "regions": [
+    {
+      "region_id": null,
+      "label_value": 1,
+      "name_en": "white matter",
+      "name_cn": "脑白质",
+      "laterality": "midline",
+      "phase1_mapping_status": "unmapped",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0,
+      "phase1_mni_centroid": null,
+      "mapping_method": "unmapped",
+      "mapping_status": "unmapped",
+      "validation_issues": [],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 2,
+      "name_en": "left lateral ventricle",
+      "name_cn": "左侧脑室",
+      "laterality": "left",
+      "phase1_mapping_status": "unmapped",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0,
+      "phase1_mni_centroid": null,
+      "mapping_method": "unmapped",
+      "mapping_status": "unmapped",
+      "validation_issues": [],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 3,
+      "name_en": "left inferior lateral ventricle",
+      "name_cn": "左下侧脑室",
+      "laterality": "left",
+      "phase1_mapping_status": "unmapped",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0,
+      "phase1_mni_centroid": null,
+      "mapping_method": "unmapped",
+      "mapping_status": "unmapped",
+      "validation_issues": [],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 4,
+      "name_en": "left cerebellum exterior",
+      "name_cn": "左小脑外侧",
+      "laterality": "left",
+      "phase1_mapping_status": "unmapped",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0,
+      "phase1_mni_centroid": null,
+      "mapping_method": "unmapped",
+      "mapping_status": "unmapped",
+      "validation_issues": [],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 5,
+      "name_en": "left cerebellum white matter",
+      "name_cn": "左侧小脑白质",
+      "laterality": "left",
+      "phase1_mapping_status": "unmapped",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0,
+      "phase1_mni_centroid": null,
+      "mapping_method": "unmapped",
+      "mapping_status": "unmapped",
+      "validation_issues": [],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 6,
+      "name_en": "left thalamus proper",
+      "name_cn": "左丘脑本体",
+      "laterality": "left",
+      "phase1_mapping_status": "manual_review",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0.5,
+      "phase1_mni_centroid": null,
+      "mapping_method": "manual_review",
+      "mapping_status": "manual_review",
+      "validation_issues": [
+        "Phase 1 marked as manual_review; no AAL label found"
+      ],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 7,
+      "name_en": "left caudate",
+      "name_cn": "左尾状核",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Caudate_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -13,
+        "y": 15,
+        "z": 10
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 7001,
+      "official_aal_name": "Caudate_L",
+      "official_aal_abbrev": "NCG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 7001,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -11.8,
+        "y": 9.7,
+        "z": 8.1
+      },
+      "representative_point_mni": {
+        "x": -12.0,
+        "y": 10.0,
+        "z": 8.0
+      },
+      "representative_voxel_ijk": {
+        "i": 51,
+        "j": 68,
+        "k": 40
+      },
+      "voxel_count": 962,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 8,
+      "name_en": "left putamen",
+      "name_cn": "左壳核",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Putamen_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -28,
+        "y": 2,
+        "z": 3
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 7011,
+      "official_aal_name": "Putamen_L",
+      "official_aal_abbrev": "NLG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 7011,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -24.2,
+        "y": 2.6,
+        "z": 1.1
+      },
+      "representative_point_mni": {
+        "x": -24.0,
+        "y": 2.0,
+        "z": 2.0
+      },
+      "representative_voxel_ijk": {
+        "i": 57,
+        "j": 64,
+        "k": 37
+      },
+      "voxel_count": 1009,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 9,
+      "name_en": "left pallidum",
+      "name_cn": "左苍白球",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Pallidum_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -20,
+        "y": -2,
+        "z": 0
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 7021,
+      "official_aal_name": "Pallidum_L",
+      "official_aal_abbrev": "PALLG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 7021,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -18.1,
+        "y": -1.4,
+        "z": -1.0
+      },
+      "representative_point_mni": {
+        "x": -18.0,
+        "y": -2.0,
+        "z": -2.0
+      },
+      "representative_voxel_ijk": {
+        "i": 54,
+        "j": 62,
+        "k": 35
+      },
+      "voxel_count": 293,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 10,
+      "name_en": "3rd ventricle",
+      "name_cn": "第三脑室",
+      "laterality": "midline",
+      "phase1_mapping_status": "unmapped",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0,
+      "phase1_mni_centroid": null,
+      "mapping_method": "unmapped",
+      "mapping_status": "unmapped",
+      "validation_issues": [],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 11,
+      "name_en": "4th ventricle",
+      "name_cn": "第四脑室",
+      "laterality": "midline",
+      "phase1_mapping_status": "unmapped",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0,
+      "phase1_mni_centroid": null,
+      "mapping_method": "unmapped",
+      "mapping_status": "unmapped",
+      "validation_issues": [],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 12,
+      "name_en": "Brain stem",
+      "name_cn": "脑干",
+      "laterality": "midline",
+      "phase1_mapping_status": "manual_review",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0.5,
+      "phase1_mni_centroid": null,
+      "mapping_method": "manual_review",
+      "mapping_status": "manual_review",
+      "validation_issues": [
+        "Phase 1 marked as manual_review; no AAL label found"
+      ],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 13,
+      "name_en": "left hippocampus",
+      "name_cn": "左海马",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Hippocampus_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -30,
+        "y": -22,
+        "z": -12
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 4101,
+      "official_aal_name": "Hippocampus_L",
+      "official_aal_abbrev": "HIPPOG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4101,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -25.3,
+        "y": -22.0,
+        "z": -11.4
+      },
+      "representative_point_mni": {
+        "x": -26.0,
+        "y": -22.0,
+        "z": -12.0
+      },
+      "representative_voxel_ijk": {
+        "i": 58,
+        "j": 52,
+        "k": 30
+      },
+      "voxel_count": 932,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 14,
+      "name_en": "left amygdala",
+      "name_cn": "左杏仁核",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Amygdala_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -24,
+        "y": -4,
+        "z": -18
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 4201,
+      "official_aal_name": "Amygdala_L",
+      "official_aal_abbrev": "AMYGDG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4201,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -23.5,
+        "y": -1.9,
+        "z": -18.5
+      },
+      "representative_point_mni": {
+        "x": -24.0,
+        "y": -2.0,
+        "z": -18.0
+      },
+      "representative_voxel_ijk": {
+        "i": 57,
+        "j": 62,
+        "k": 27
+      },
+      "voxel_count": 220,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 15,
+      "name_en": "CSF",
+      "name_cn": "脑脊液",
+      "laterality": "midline",
+      "phase1_mapping_status": "unmapped",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0,
+      "phase1_mni_centroid": null,
+      "mapping_method": "unmapped",
+      "mapping_status": "unmapped",
+      "validation_issues": [],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 16,
+      "name_en": "left accumbens area",
+      "name_cn": "左伏隔区",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "N_Acc_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -10,
+        "y": 14,
+        "z": -8
+      },
+      "mapping_method": "manual_review",
+      "mapping_status": "manual_review",
+      "validation_issues": [
+        "Could not map to any AAL label"
+      ],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 17,
+      "name_en": "left ventral diencephalon",
+      "name_cn": "左腹间脑",
+      "laterality": "left",
+      "phase1_mapping_status": "manual_review",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0.3,
+      "phase1_mni_centroid": null,
+      "mapping_method": "manual_review",
+      "mapping_status": "manual_review",
+      "validation_issues": [
+        "Phase 1 marked as manual_review; no AAL label found"
+      ],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 18,
+      "name_en": "right lateral ventricle",
+      "name_cn": "右侧脑室",
+      "laterality": "right",
+      "phase1_mapping_status": "unmapped",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0,
+      "phase1_mni_centroid": null,
+      "mapping_method": "unmapped",
+      "mapping_status": "unmapped",
+      "validation_issues": [],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 19,
+      "name_en": "right inferior lateral ventricle",
+      "name_cn": "右下侧脑室",
+      "laterality": "right",
+      "phase1_mapping_status": "unmapped",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0,
+      "phase1_mni_centroid": null,
+      "mapping_method": "unmapped",
+      "mapping_status": "unmapped",
+      "validation_issues": [],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 20,
+      "name_en": "right cerebellum exterior",
+      "name_cn": "右小脑外侧",
+      "laterality": "right",
+      "phase1_mapping_status": "unmapped",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0,
+      "phase1_mni_centroid": null,
+      "mapping_method": "unmapped",
+      "mapping_status": "unmapped",
+      "validation_issues": [],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 21,
+      "name_en": "right cerebellum white matter",
+      "name_cn": "右小脑白质",
+      "laterality": "right",
+      "phase1_mapping_status": "unmapped",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0,
+      "phase1_mni_centroid": null,
+      "mapping_method": "unmapped",
+      "mapping_status": "unmapped",
+      "validation_issues": [],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 22,
+      "name_en": "right thalamus proper",
+      "name_cn": "右丘脑本体",
+      "laterality": "right",
+      "phase1_mapping_status": "manual_review",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0.5,
+      "phase1_mni_centroid": null,
+      "mapping_method": "manual_review",
+      "mapping_status": "manual_review",
+      "validation_issues": [
+        "Phase 1 marked as manual_review; no AAL label found"
+      ],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 23,
+      "name_en": "right caudate",
+      "name_cn": "右尾状核",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Caudate_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 13,
+        "y": 15,
+        "z": 10
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 7002,
+      "official_aal_name": "Caudate_R",
+      "official_aal_abbrev": "NCD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 7002,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 14.5,
+        "y": 10.8,
+        "z": 8.1
+      },
+      "representative_point_mni": {
+        "x": 14.0,
+        "y": 10.0,
+        "z": 8.0
+      },
+      "representative_voxel_ijk": {
+        "i": 38,
+        "j": 68,
+        "k": 40
+      },
+      "voxel_count": 994,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 24,
+      "name_en": "right putamen",
+      "name_cn": "右壳核",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Putamen_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 28,
+        "y": 2,
+        "z": 3
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 7012,
+      "official_aal_name": "Putamen_R",
+      "official_aal_abbrev": "NLD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 7012,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 27.5,
+        "y": 3.7,
+        "z": 1.2
+      },
+      "representative_point_mni": {
+        "x": 28.0,
+        "y": 4.0,
+        "z": 2.0
+      },
+      "representative_voxel_ijk": {
+        "i": 31,
+        "j": 65,
+        "k": 37
+      },
+      "voxel_count": 1064,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 25,
+      "name_en": "right pallidum",
+      "name_cn": "右苍白球",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Pallidum_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 20,
+        "y": -2,
+        "z": 0
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 7022,
+      "official_aal_name": "Pallidum_R",
+      "official_aal_abbrev": "PALLD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 7022,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 20.9,
+        "y": -1.1,
+        "z": -1.1
+      },
+      "representative_point_mni": {
+        "x": 20.0,
+        "y": -2.0,
+        "z": -2.0
+      },
+      "representative_voxel_ijk": {
+        "i": 35,
+        "j": 62,
+        "k": 35
+      },
+      "voxel_count": 280,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 26,
+      "name_en": "right hippocampus",
+      "name_cn": "右海马",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Hippocampus_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 30,
+        "y": -22,
+        "z": -12
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 4102,
+      "official_aal_name": "Hippocampus_R",
+      "official_aal_abbrev": "HIPPOD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4102,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 28.9,
+        "y": -21.0,
+        "z": -11.6
+      },
+      "representative_point_mni": {
+        "x": 28.0,
+        "y": -20.0,
+        "z": -12.0
+      },
+      "representative_voxel_ijk": {
+        "i": 31,
+        "j": 53,
+        "k": 30
+      },
+      "voxel_count": 946,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 27,
+      "name_en": "right amygdala",
+      "name_cn": "右杏仁核",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Amygdala_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 24,
+        "y": -4,
+        "z": -18
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 4202,
+      "official_aal_name": "Amygdala_R",
+      "official_aal_abbrev": "AMYGDD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4202,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 27.1,
+        "y": -0.6,
+        "z": -18.8
+      },
+      "representative_point_mni": {
+        "x": 28.0,
+        "y": 0.0,
+        "z": -18.0
+      },
+      "representative_voxel_ijk": {
+        "i": 31,
+        "j": 63,
+        "k": 27
+      },
+      "voxel_count": 248,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 28,
+      "name_en": "right accumbens area",
+      "name_cn": "右伏隔区",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "N_Acc_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 10,
+        "y": 14,
+        "z": -8
+      },
+      "mapping_method": "manual_review",
+      "mapping_status": "manual_review",
+      "validation_issues": [
+        "Could not map to any AAL label"
+      ],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 29,
+      "name_en": "right ventral diencephalon",
+      "name_cn": "右腹间脑",
+      "laterality": "right",
+      "phase1_mapping_status": "manual_review",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0.3,
+      "phase1_mni_centroid": null,
+      "mapping_method": "manual_review",
+      "mapping_status": "manual_review",
+      "validation_issues": [
+        "Phase 1 marked as manual_review; no AAL label found"
+      ],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 30,
+      "name_en": "left basal forebrain",
+      "name_cn": "左基底前脑",
+      "laterality": "left",
+      "phase1_mapping_status": "manual_review",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0.3,
+      "phase1_mni_centroid": null,
+      "mapping_method": "manual_review",
+      "mapping_status": "manual_review",
+      "validation_issues": [
+        "Phase 1 marked as manual_review; no AAL label found"
+      ],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 31,
+      "name_en": "right basal forebrain",
+      "name_cn": "右基底前脑",
+      "laterality": "right",
+      "phase1_mapping_status": "manual_review",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0.3,
+      "phase1_mni_centroid": null,
+      "mapping_method": "manual_review",
+      "mapping_status": "manual_review",
+      "validation_issues": [
+        "Phase 1 marked as manual_review; no AAL label found"
+      ],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 32,
+      "name_en": "cerebellar vermal lobules I-V",
+      "name_cn": "小脑小叶I-V",
+      "laterality": "unknown",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0.6,
+      "phase1_mni_centroid": null,
+      "mapping_method": "manual_review",
+      "mapping_status": "manual_review",
+      "validation_issues": [
+        "Could not map to any AAL label"
+      ],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 33,
+      "name_en": "cerebellar vermal lobules VI-VII",
+      "name_cn": "小脑小叶VI-VII",
+      "laterality": "unknown",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0.6,
+      "phase1_mni_centroid": null,
+      "mapping_method": "manual_review",
+      "mapping_status": "manual_review",
+      "validation_issues": [
+        "Could not map to any AAL label"
+      ],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 34,
+      "name_en": "cerebellar vermal lobules VIII-X",
+      "name_cn": "小脑小叶VIII-X",
+      "laterality": "unknown",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": null,
+      "phase1_confidence": 0.6,
+      "phase1_mni_centroid": null,
+      "mapping_method": "manual_review",
+      "mapping_status": "manual_review",
+      "validation_issues": [
+        "Could not map to any AAL label"
+      ],
+      "proposed_aal_label": null,
+      "official_aal_name": null,
+      "official_aal_abbrev": null,
+      "coordinate_status": "missing",
+      "coordinate_source": null,
+      "atlas": "AAL",
+      "atlas_label": null,
+      "coordinate_space": null,
+      "center_of_mass_mni": null,
+      "representative_point_mni": null,
+      "representative_voxel_ijk": null,
+      "voxel_count": null,
+      "mapping_confidence": null
+    },
+    {
+      "region_id": null,
+      "label_value": 35,
+      "name_en": "left caudal anterior cingulate",
+      "name_cn": "左尾前扣带",
+      "laterality": "left",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "ACC_sub_L",
+      "phase1_confidence": 0.7,
+      "phase1_mni_centroid": {
+        "x": -6,
+        "y": 36,
+        "z": 8
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: ACC_sub_L → Cingulum_Ant_L"
+      ],
+      "proposed_aal_label": 4001,
+      "official_aal_name": "Cingulum_Ant_L",
+      "official_aal_abbrev": "CIAG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4001,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -4.4,
+        "y": 34.2,
+        "z": 12.5
+      },
+      "representative_point_mni": {
+        "x": -4.0,
+        "y": 34.0,
+        "z": 12.0
+      },
+      "representative_voxel_ijk": {
+        "i": 47,
+        "j": 80,
+        "k": 42
+      },
+      "voxel_count": 1400,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 36,
+      "name_en": "left caudal middle frontal",
+      "name_cn": "左尾中额叶",
+      "laterality": "left",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "Frontal_Mid_2_L",
+      "phase1_confidence": 0.7,
+      "phase1_mni_centroid": {
+        "x": -36,
+        "y": 32,
+        "z": 32
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: Frontal_Mid_2_L → Frontal_Mid_L"
+      ],
+      "proposed_aal_label": 2201,
+      "official_aal_name": "Frontal_Mid_L",
+      "official_aal_abbrev": "F2G",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2201,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -33.8,
+        "y": 31.5,
+        "z": 34.1
+      },
+      "representative_point_mni": {
+        "x": -34.0,
+        "y": 32.0,
+        "z": 34.0
+      },
+      "representative_voxel_ijk": {
+        "i": 62,
+        "j": 79,
+        "k": 53
+      },
+      "voxel_count": 4863,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 37,
+      "name_en": "left cuneus",
+      "name_cn": "左楔",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Cuneus_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -8,
+        "y": -76,
+        "z": 28
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 5011,
+      "official_aal_name": "Cuneus_L",
+      "official_aal_abbrev": "QG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 5011,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -6.3,
+        "y": -81.4,
+        "z": 25.8
+      },
+      "representative_point_mni": {
+        "x": -6.0,
+        "y": -82.0,
+        "z": 26.0
+      },
+      "representative_voxel_ijk": {
+        "i": 48,
+        "j": 22,
+        "k": 49
+      },
+      "voxel_count": 1526,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 38,
+      "name_en": "left entorhinal",
+      "name_cn": "左内嗅",
+      "laterality": "left",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "ParaHippocampal_L",
+      "phase1_confidence": 0.6,
+      "phase1_mni_centroid": {
+        "x": -22,
+        "y": -14,
+        "z": -28
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [],
+      "proposed_aal_label": 4111,
+      "official_aal_name": "ParaHippocampal_L",
+      "official_aal_abbrev": "PARA_HIPPOG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4111,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -21.5,
+        "y": -17.3,
+        "z": -21.9
+      },
+      "representative_point_mni": {
+        "x": -20.0,
+        "y": -18.0,
+        "z": -22.0
+      },
+      "representative_voxel_ijk": {
+        "i": 55,
+        "j": 54,
+        "k": 25
+      },
+      "voxel_count": 978,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 39,
+      "name_en": "left fusiform",
+      "name_cn": "左梭形",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Fusiform_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -36,
+        "y": -38,
+        "z": -22
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 5401,
+      "official_aal_name": "Fusiform_L",
+      "official_aal_abbrev": "FUSIG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 5401,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -31.4,
+        "y": -41.4,
+        "z": -21.6
+      },
+      "representative_point_mni": {
+        "x": -32.0,
+        "y": -42.0,
+        "z": -22.0
+      },
+      "representative_voxel_ijk": {
+        "i": 61,
+        "j": 42,
+        "k": 25
+      },
+      "voxel_count": 2310,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 40,
+      "name_en": "left inferior parietal",
+      "name_cn": "左下顶叶",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Parietal_Inf_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -44,
+        "y": -38,
+        "z": 44
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 6201,
+      "official_aal_name": "Parietal_Inf_L",
+      "official_aal_abbrev": "P2G",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 6201,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -43.1,
+        "y": -47.0,
+        "z": 45.4
+      },
+      "representative_point_mni": {
+        "x": -44.0,
+        "y": -48.0,
+        "z": 46.0
+      },
+      "representative_voxel_ijk": {
+        "i": 67,
+        "j": 39,
+        "k": 59
+      },
+      "voxel_count": 2447,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 41,
+      "name_en": "left inferior temporal",
+      "name_cn": "左下颞叶",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Temporal_Inf_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -48,
+        "y": -30,
+        "z": -22
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 8301,
+      "official_aal_name": "Temporal_Inf_L",
+      "official_aal_abbrev": "T3G",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 8301,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -50.0,
+        "y": -29.3,
+        "z": -24.5
+      },
+      "representative_point_mni": {
+        "x": -50.0,
+        "y": -30.0,
+        "z": -24.0
+      },
+      "representative_voxel_ijk": {
+        "i": 70,
+        "j": 48,
+        "k": 24
+      },
+      "voxel_count": 3200,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 42,
+      "name_en": "left isthmus cingulate",
+      "name_cn": "左扣带回峡部",
+      "laterality": "left",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "Cingulate_Post_L",
+      "phase1_confidence": 0.7,
+      "phase1_mni_centroid": {
+        "x": -8,
+        "y": -40,
+        "z": 28
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: Cingulate_Post_L → Cingulum_Post_L"
+      ],
+      "proposed_aal_label": 4021,
+      "official_aal_name": "Cingulum_Post_L",
+      "official_aal_abbrev": "CIPG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4021,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -5.2,
+        "y": -44.2,
+        "z": 23.3
+      },
+      "representative_point_mni": {
+        "x": -6.0,
+        "y": -44.0,
+        "z": 24.0
+      },
+      "representative_voxel_ijk": {
+        "i": 48,
+        "j": 41,
+        "k": 48
+      },
+      "voxel_count": 463,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 43,
+      "name_en": "left lateral occipital",
+      "name_cn": "左侧枕外侧",
+      "laterality": "left",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "Occipital_Mid_L",
+      "phase1_confidence": 0.7,
+      "phase1_mni_centroid": {
+        "x": -32,
+        "y": -82,
+        "z": 16
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [],
+      "proposed_aal_label": 5201,
+      "official_aal_name": "Occipital_Mid_L",
+      "official_aal_abbrev": "O2G",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 5201,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -32.6,
+        "y": -82.0,
+        "z": 14.8
+      },
+      "representative_point_mni": {
+        "x": -32.0,
+        "y": -82.0,
+        "z": 14.0
+      },
+      "representative_voxel_ijk": {
+        "i": 61,
+        "j": 22,
+        "k": 43
+      },
+      "voxel_count": 3270,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 44,
+      "name_en": "left lateral orbitofrontal",
+      "name_cn": "左眶额外侧",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "OFClat_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -28,
+        "y": 40,
+        "z": -14
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: OFClat_L → Frontal_Mid_Orb_L"
+      ],
+      "proposed_aal_label": 2211,
+      "official_aal_name": "Frontal_Mid_Orb_L",
+      "official_aal_abbrev": "F2OG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2211,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -30.9,
+        "y": 49.1,
+        "z": -11.0
+      },
+      "representative_point_mni": {
+        "x": -30.0,
+        "y": 50.0,
+        "z": -10.0
+      },
+      "representative_voxel_ijk": {
+        "i": 60,
+        "j": 88,
+        "k": 31
+      },
+      "voxel_count": 888,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 45,
+      "name_en": "left lingual gyrus",
+      "name_cn": "左舌回",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Lingual_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -16,
+        "y": -60,
+        "z": -4
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 5021,
+      "official_aal_name": "Lingual_L",
+      "official_aal_abbrev": "LINGG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 5021,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -14.9,
+        "y": -68.9,
+        "z": -6.0
+      },
+      "representative_point_mni": {
+        "x": -14.0,
+        "y": -68.0,
+        "z": -6.0
+      },
+      "representative_voxel_ijk": {
+        "i": 52,
+        "j": 29,
+        "k": 33
+      },
+      "voxel_count": 2095,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 46,
+      "name_en": "left medial orbitofrontal",
+      "name_cn": "左眶额内侧",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "OFCmed_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -10,
+        "y": 44,
+        "z": -16
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: OFCmed_L → Frontal_Med_Orb_L"
+      ],
+      "proposed_aal_label": 2611,
+      "official_aal_name": "Frontal_Med_Orb_L",
+      "official_aal_abbrev": "FMOG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2611,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -5.4,
+        "y": 52.5,
+        "z": -8.9
+      },
+      "representative_point_mni": {
+        "x": -6.0,
+        "y": 52.0,
+        "z": -8.0
+      },
+      "representative_voxel_ijk": {
+        "i": 48,
+        "j": 89,
+        "k": 32
+      },
+      "voxel_count": 719,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 47,
+      "name_en": "left middle temporal",
+      "name_cn": "左中颞叶",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Temporal_Mid_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -56,
+        "y": -32,
+        "z": -8
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 8201,
+      "official_aal_name": "Temporal_Mid_L",
+      "official_aal_abbrev": "T2G",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 8201,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -55.9,
+        "y": -35.0,
+        "z": -3.6
+      },
+      "representative_point_mni": {
+        "x": -56.0,
+        "y": -34.0,
+        "z": -4.0
+      },
+      "representative_voxel_ijk": {
+        "i": 73,
+        "j": 46,
+        "k": 34
+      },
+      "voxel_count": 4942,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 48,
+      "name_en": "left parahippocampal",
+      "name_cn": "左海马旁",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "ParaHippocampal_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -22,
+        "y": -14,
+        "z": -28
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 4111,
+      "official_aal_name": "ParaHippocampal_L",
+      "official_aal_abbrev": "PARA_HIPPOG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4111,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -21.5,
+        "y": -17.3,
+        "z": -21.9
+      },
+      "representative_point_mni": {
+        "x": -20.0,
+        "y": -18.0,
+        "z": -22.0
+      },
+      "representative_voxel_ijk": {
+        "i": 55,
+        "j": 54,
+        "k": 25
+      },
+      "voxel_count": 978,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 49,
+      "name_en": "left paracentral",
+      "name_cn": "左旁中央",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Paracentral_Lobule_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -8,
+        "y": -24,
+        "z": 68
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 6401,
+      "official_aal_name": "Paracentral_Lobule_L",
+      "official_aal_abbrev": "LPCG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 6401,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -8.0,
+        "y": -26.7,
+        "z": 68.7
+      },
+      "representative_point_mni": {
+        "x": -8.0,
+        "y": -26.0,
+        "z": 68.0
+      },
+      "representative_voxel_ijk": {
+        "i": 49,
+        "j": 50,
+        "k": 70
+      },
+      "voxel_count": 1349,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 50,
+      "name_en": "left pars opercularis",
+      "name_cn": "左鳃盖部",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Frontal_Inf_Oper_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -48,
+        "y": 16,
+        "z": 16
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 2301,
+      "official_aal_name": "Frontal_Inf_Oper_L",
+      "official_aal_abbrev": "F3OPG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2301,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -48.8,
+        "y": 11.5,
+        "z": 17.8
+      },
+      "representative_point_mni": {
+        "x": -48.0,
+        "y": 12.0,
+        "z": 18.0
+      },
+      "representative_voxel_ijk": {
+        "i": 69,
+        "j": 69,
+        "k": 45
+      },
+      "voxel_count": 1038,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 51,
+      "name_en": "left pars orbitalis",
+      "name_cn": "左眶部",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Frontal_Inf_Orb_2_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -40,
+        "y": 32,
+        "z": -12
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: Frontal_Inf_Orb_2_L → Frontal_Inf_Orb_L"
+      ],
+      "proposed_aal_label": 2321,
+      "official_aal_name": "Frontal_Inf_Orb_L",
+      "official_aal_abbrev": "F3OG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2321,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -36.2,
+        "y": 29.5,
+        "z": -13.5
+      },
+      "representative_point_mni": {
+        "x": -36.0,
+        "y": 30.0,
+        "z": -14.0
+      },
+      "representative_voxel_ijk": {
+        "i": 63,
+        "j": 78,
+        "k": 29
+      },
+      "voxel_count": 1690,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 52,
+      "name_en": "left pars triangularis",
+      "name_cn": "左三角部",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Frontal_Inf_Tri_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -44,
+        "y": 28,
+        "z": 12
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 2311,
+      "official_aal_name": "Frontal_Inf_Tri_L",
+      "official_aal_abbrev": "F3TG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2311,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -45.9,
+        "y": 28.7,
+        "z": 12.6
+      },
+      "representative_point_mni": {
+        "x": -46.0,
+        "y": 28.0,
+        "z": 12.0
+      },
+      "representative_voxel_ijk": {
+        "i": 68,
+        "j": 77,
+        "k": 42
+      },
+      "voxel_count": 2529,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 53,
+      "name_en": "left pericalcarine",
+      "name_cn": "左骨膜",
+      "laterality": "left",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "Calcarine_L",
+      "phase1_confidence": 0.7,
+      "phase1_mni_centroid": {
+        "x": -12,
+        "y": -70,
+        "z": 10
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [],
+      "proposed_aal_label": 5001,
+      "official_aal_name": "Calcarine_L",
+      "official_aal_abbrev": "V1G",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 5001,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -7.5,
+        "y": -79.8,
+        "z": 5.1
+      },
+      "representative_point_mni": {
+        "x": -8.0,
+        "y": -80.0,
+        "z": 6.0
+      },
+      "representative_voxel_ijk": {
+        "i": 49,
+        "j": 23,
+        "k": 39
+      },
+      "voxel_count": 2258,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 54,
+      "name_en": "left postcentral",
+      "name_cn": "左后中央",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Postcentral_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -44,
+        "y": -22,
+        "z": 52
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 6001,
+      "official_aal_name": "Postcentral_L",
+      "official_aal_abbrev": "PAG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 6001,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -42.9,
+        "y": -23.8,
+        "z": 47.5
+      },
+      "representative_point_mni": {
+        "x": -42.0,
+        "y": -24.0,
+        "z": 48.0
+      },
+      "representative_voxel_ijk": {
+        "i": 66,
+        "j": 51,
+        "k": 60
+      },
+      "voxel_count": 3892,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 55,
+      "name_en": "left posterior cingulate",
+      "name_cn": "左后扣带",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Cingulate_Post_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -8,
+        "y": -40,
+        "z": 28
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: Cingulate_Post_L → Cingulum_Post_L"
+      ],
+      "proposed_aal_label": 4021,
+      "official_aal_name": "Cingulum_Post_L",
+      "official_aal_abbrev": "CIPG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4021,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -5.2,
+        "y": -44.2,
+        "z": 23.3
+      },
+      "representative_point_mni": {
+        "x": -6.0,
+        "y": -44.0,
+        "z": 24.0
+      },
+      "representative_voxel_ijk": {
+        "i": 48,
+        "j": 41,
+        "k": 48
+      },
+      "voxel_count": 463,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 56,
+      "name_en": "left precentral",
+      "name_cn": "左中央前",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Precentral_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -36,
+        "y": -14,
+        "z": 56
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 2001,
+      "official_aal_name": "Precentral_L",
+      "official_aal_abbrev": "FAG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2001,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -38.9,
+        "y": -7.0,
+        "z": 49.6
+      },
+      "representative_point_mni": {
+        "x": -38.0,
+        "y": -6.0,
+        "z": 50.0
+      },
+      "representative_voxel_ijk": {
+        "i": 64,
+        "j": 60,
+        "k": 61
+      },
+      "voxel_count": 3526,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 57,
+      "name_en": "left precuneus",
+      "name_cn": "左楔前叶",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Precuneus_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -10,
+        "y": -56,
+        "z": 48
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 6301,
+      "official_aal_name": "Precuneus_L",
+      "official_aal_abbrev": "PQG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 6301,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -7.6,
+        "y": -57.3,
+        "z": 46.6
+      },
+      "representative_point_mni": {
+        "x": -8.0,
+        "y": -58.0,
+        "z": 46.0
+      },
+      "representative_voxel_ijk": {
+        "i": 49,
+        "j": 34,
+        "k": 59
+      },
+      "voxel_count": 3528,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 58,
+      "name_en": "left rostral anterior cingulate",
+      "name_cn": "左喙前扣带",
+      "laterality": "left",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "ACC_pre_L",
+      "phase1_confidence": 0.7,
+      "phase1_mni_centroid": {
+        "x": -6,
+        "y": 40,
+        "z": 12
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: ACC_pre_L → Cingulum_Ant_L"
+      ],
+      "proposed_aal_label": 4001,
+      "official_aal_name": "Cingulum_Ant_L",
+      "official_aal_abbrev": "CIAG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4001,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -4.4,
+        "y": 34.2,
+        "z": 12.5
+      },
+      "representative_point_mni": {
+        "x": -4.0,
+        "y": 34.0,
+        "z": 12.0
+      },
+      "representative_voxel_ijk": {
+        "i": 47,
+        "j": 80,
+        "k": 42
+      },
+      "voxel_count": 1400,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 59,
+      "name_en": "left rostral middle frontal",
+      "name_cn": "左喙中额叶",
+      "laterality": "left",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "Frontal_Mid_2_L",
+      "phase1_confidence": 0.7,
+      "phase1_mni_centroid": {
+        "x": -36,
+        "y": 32,
+        "z": 32
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: Frontal_Mid_2_L → Frontal_Mid_L"
+      ],
+      "proposed_aal_label": 2201,
+      "official_aal_name": "Frontal_Mid_L",
+      "official_aal_abbrev": "F2G",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2201,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -33.8,
+        "y": 31.5,
+        "z": 34.1
+      },
+      "representative_point_mni": {
+        "x": -34.0,
+        "y": 32.0,
+        "z": 34.0
+      },
+      "representative_voxel_ijk": {
+        "i": 62,
+        "j": 79,
+        "k": 53
+      },
+      "voxel_count": 4863,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 60,
+      "name_en": "left superior frontal",
+      "name_cn": "左上额叶",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Frontal_Sup_2_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -24,
+        "y": 32,
+        "z": 44
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: Frontal_Sup_2_L → Frontal_Sup_L"
+      ],
+      "proposed_aal_label": 2101,
+      "official_aal_name": "Frontal_Sup_L",
+      "official_aal_abbrev": "F1G",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2101,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -18.8,
+        "y": 33.5,
+        "z": 41.0
+      },
+      "representative_point_mni": {
+        "x": -18.0,
+        "y": 34.0,
+        "z": 40.0
+      },
+      "representative_voxel_ijk": {
+        "i": 54,
+        "j": 80,
+        "k": 56
+      },
+      "voxel_count": 3599,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 61,
+      "name_en": "left superior parietal",
+      "name_cn": "左上顶叶",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Parietal_Sup_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -28,
+        "y": -52,
+        "z": 56
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 6101,
+      "official_aal_name": "Parietal_Sup_L",
+      "official_aal_abbrev": "P1G",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 6101,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -23.7,
+        "y": -60.8,
+        "z": 57.7
+      },
+      "representative_point_mni": {
+        "x": -24.0,
+        "y": -60.0,
+        "z": 58.0
+      },
+      "representative_voxel_ijk": {
+        "i": 57,
+        "j": 33,
+        "k": 65
+      },
+      "voxel_count": 2065,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 62,
+      "name_en": "left superior temporal",
+      "name_cn": "左颞上叶",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Temporal_Sup_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -52,
+        "y": -14,
+        "z": 4
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 8111,
+      "official_aal_name": "Temporal_Sup_L",
+      "official_aal_abbrev": "T1G",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 8111,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -53.4,
+        "y": -22.0,
+        "z": 5.8
+      },
+      "representative_point_mni": {
+        "x": -54.0,
+        "y": -22.0,
+        "z": 6.0
+      },
+      "representative_voxel_ijk": {
+        "i": 72,
+        "j": 52,
+        "k": 39
+      },
+      "voxel_count": 2296,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 63,
+      "name_en": "left supramarginal",
+      "name_cn": "左超边缘",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "SupraMarginal_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -56,
+        "y": -32,
+        "z": 32
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 6211,
+      "official_aal_name": "SupraMarginal_L",
+      "official_aal_abbrev": "GSMG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 6211,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -56.1,
+        "y": -34.9,
+        "z": 29.1
+      },
+      "representative_point_mni": {
+        "x": -56.0,
+        "y": -34.0,
+        "z": 30.0
+      },
+      "representative_voxel_ijk": {
+        "i": 73,
+        "j": 46,
+        "k": 51
+      },
+      "voxel_count": 1256,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 64,
+      "name_en": "left transverse temporal",
+      "name_cn": "左横颞叶",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Heschl_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -44,
+        "y": -22,
+        "z": 12
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 8101,
+      "official_aal_name": "Heschl_L",
+      "official_aal_abbrev": "HESCHLG",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 8101,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -42.3,
+        "y": -20.0,
+        "z": 8.7
+      },
+      "representative_point_mni": {
+        "x": -42.0,
+        "y": -20.0,
+        "z": 8.0
+      },
+      "representative_voxel_ijk": {
+        "i": 66,
+        "j": 53,
+        "k": 40
+      },
+      "voxel_count": 225,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 65,
+      "name_en": "left insula",
+      "name_cn": "左脑岛",
+      "laterality": "left",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Insula_L",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": -36,
+        "y": 6,
+        "z": 4
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 3001,
+      "official_aal_name": "Insula_L",
+      "official_aal_abbrev": "ING",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 3001,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": -35.4,
+        "y": 5.4,
+        "z": 2.2
+      },
+      "representative_point_mni": {
+        "x": -36.0,
+        "y": 6.0,
+        "z": 2.0
+      },
+      "representative_voxel_ijk": {
+        "i": 63,
+        "j": 66,
+        "k": 37
+      },
+      "voxel_count": 1858,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 66,
+      "name_en": "right caudal anterior cingulate",
+      "name_cn": "右尾前扣带回",
+      "laterality": "right",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "ACC_sub_R",
+      "phase1_confidence": 0.7,
+      "phase1_mni_centroid": {
+        "x": 6,
+        "y": 36,
+        "z": 8
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: ACC_sub_R → Cingulum_Ant_R"
+      ],
+      "proposed_aal_label": 4002,
+      "official_aal_name": "Cingulum_Ant_R",
+      "official_aal_abbrev": "CIAD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4002,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 8.1,
+        "y": 35.7,
+        "z": 14.4
+      },
+      "representative_point_mni": {
+        "x": 8.0,
+        "y": 36.0,
+        "z": 14.0
+      },
+      "representative_voxel_ijk": {
+        "i": 41,
+        "j": 81,
+        "k": 43
+      },
+      "voxel_count": 1313,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 67,
+      "name_en": "right caudal middle frontal",
+      "name_cn": "右尾中额叶",
+      "laterality": "right",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "Frontal_Mid_2_R",
+      "phase1_confidence": 0.7,
+      "phase1_mni_centroid": {
+        "x": 36,
+        "y": 32,
+        "z": 32
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: Frontal_Mid_2_R → Frontal_Mid_R"
+      ],
+      "proposed_aal_label": 2202,
+      "official_aal_name": "Frontal_Mid_R",
+      "official_aal_abbrev": "F2D",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2202,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 37.4,
+        "y": 31.8,
+        "z": 32.8
+      },
+      "representative_point_mni": {
+        "x": 38.0,
+        "y": 32.0,
+        "z": 32.0
+      },
+      "representative_voxel_ijk": {
+        "i": 26,
+        "j": 79,
+        "k": 52
+      },
+      "voxel_count": 5104,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 68,
+      "name_en": "right cuneus",
+      "name_cn": "右楔",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Cuneus_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 8,
+        "y": -76,
+        "z": 28
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 5012,
+      "official_aal_name": "Cuneus_R",
+      "official_aal_abbrev": "QD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 5012,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 13.2,
+        "y": -80.6,
+        "z": 26.9
+      },
+      "representative_point_mni": {
+        "x": 14.0,
+        "y": -80.0,
+        "z": 26.0
+      },
+      "representative_voxel_ijk": {
+        "i": 38,
+        "j": 23,
+        "k": 49
+      },
+      "voxel_count": 1424,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 69,
+      "name_en": "right entorhinal",
+      "name_cn": "右内嗅",
+      "laterality": "right",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "ParaHippocampal_R",
+      "phase1_confidence": 0.6,
+      "phase1_mni_centroid": {
+        "x": 22,
+        "y": -14,
+        "z": -28
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [],
+      "proposed_aal_label": 4112,
+      "official_aal_name": "ParaHippocampal_R",
+      "official_aal_abbrev": "PARA_HIPPOD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4112,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 25.1,
+        "y": -16.3,
+        "z": -21.7
+      },
+      "representative_point_mni": {
+        "x": 24.0,
+        "y": -16.0,
+        "z": -22.0
+      },
+      "representative_voxel_ijk": {
+        "i": 33,
+        "j": 55,
+        "k": 25
+      },
+      "voxel_count": 1132,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 70,
+      "name_en": "right fusiform",
+      "name_cn": "右梭形",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Fusiform_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 36,
+        "y": -38,
+        "z": -22
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 5402,
+      "official_aal_name": "Fusiform_R",
+      "official_aal_abbrev": "FUSID",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 5402,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 33.7,
+        "y": -40.2,
+        "z": -21.5
+      },
+      "representative_point_mni": {
+        "x": 34.0,
+        "y": -40.0,
+        "z": -22.0
+      },
+      "representative_voxel_ijk": {
+        "i": 28,
+        "j": 43,
+        "k": 25
+      },
+      "voxel_count": 2518,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 71,
+      "name_en": "right inferior parietal",
+      "name_cn": "右下顶叶",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Parietal_Inf_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 44,
+        "y": -38,
+        "z": 44
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 6202,
+      "official_aal_name": "Parietal_Inf_R",
+      "official_aal_abbrev": "P2D",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 6202,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 46.3,
+        "y": -47.6,
+        "z": 48.2
+      },
+      "representative_point_mni": {
+        "x": 46.0,
+        "y": -48.0,
+        "z": 48.0
+      },
+      "representative_voxel_ijk": {
+        "i": 22,
+        "j": 39,
+        "k": 60
+      },
+      "voxel_count": 1345,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 72,
+      "name_en": "right inferior temporal",
+      "name_cn": "右下颞叶",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Temporal_Inf_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 48,
+        "y": -30,
+        "z": -22
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 8302,
+      "official_aal_name": "Temporal_Inf_R",
+      "official_aal_abbrev": "T3D",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 8302,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 53.4,
+        "y": -32.1,
+        "z": -23.7
+      },
+      "representative_point_mni": {
+        "x": 54.0,
+        "y": -32.0,
+        "z": -24.0
+      },
+      "representative_voxel_ijk": {
+        "i": 18,
+        "j": 47,
+        "k": 24
+      },
+      "voxel_count": 3557,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 73,
+      "name_en": "right isthmus cingulate",
+      "name_cn": "右侧扣带峡部",
+      "laterality": "right",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "Cingulate_Post_R",
+      "phase1_confidence": 0.7,
+      "phase1_mni_centroid": {
+        "x": 8,
+        "y": -40,
+        "z": 28
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: Cingulate_Post_R → Cingulum_Post_R"
+      ],
+      "proposed_aal_label": 4022,
+      "official_aal_name": "Cingulum_Post_R",
+      "official_aal_abbrev": "CIPD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4022,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 7.2,
+        "y": -43.1,
+        "z": 20.5
+      },
+      "representative_point_mni": {
+        "x": 8.0,
+        "y": -44.0,
+        "z": 20.0
+      },
+      "representative_voxel_ijk": {
+        "i": 41,
+        "j": 41,
+        "k": 46
+      },
+      "voxel_count": 335,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 74,
+      "name_en": "right lateral occipital",
+      "name_cn": "右侧枕外侧",
+      "laterality": "right",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "Occipital_Mid_R",
+      "phase1_confidence": 0.7,
+      "phase1_mni_centroid": {
+        "x": 32,
+        "y": -82,
+        "z": 16
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [],
+      "proposed_aal_label": 5202,
+      "official_aal_name": "Occipital_Mid_R",
+      "official_aal_abbrev": "O2D",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 5202,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 37.1,
+        "y": -81.0,
+        "z": 18.1
+      },
+      "representative_point_mni": {
+        "x": 38.0,
+        "y": -80.0,
+        "z": 18.0
+      },
+      "representative_voxel_ijk": {
+        "i": 26,
+        "j": 23,
+        "k": 45
+      },
+      "voxel_count": 2098,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 75,
+      "name_en": "right lateral orbitofrontal",
+      "name_cn": "右眶额外侧",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "OFClat_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 28,
+        "y": 40,
+        "z": -14
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: OFClat_R → Frontal_Mid_Orb_R"
+      ],
+      "proposed_aal_label": 2212,
+      "official_aal_name": "Frontal_Mid_Orb_R",
+      "official_aal_abbrev": "F2OD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2212,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 32.9,
+        "y": 51.3,
+        "z": -12.1
+      },
+      "representative_point_mni": {
+        "x": 32.0,
+        "y": 52.0,
+        "z": -12.0
+      },
+      "representative_voxel_ijk": {
+        "i": 29,
+        "j": 89,
+        "k": 30
+      },
+      "voxel_count": 1015,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 76,
+      "name_en": "right lingual gyrus",
+      "name_cn": "右舌回",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Lingual_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 16,
+        "y": -60,
+        "z": -4
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 5022,
+      "official_aal_name": "Lingual_R",
+      "official_aal_abbrev": "LINGD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 5022,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 16.1,
+        "y": -68.1,
+        "z": -5.2
+      },
+      "representative_point_mni": {
+        "x": 16.0,
+        "y": -68.0,
+        "z": -6.0
+      },
+      "representative_voxel_ijk": {
+        "i": 37,
+        "j": 29,
+        "k": 33
+      },
+      "voxel_count": 2300,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 77,
+      "name_en": "right medial orbitofrontal",
+      "name_cn": "右眶额内侧",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "OFCmed_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 10,
+        "y": 44,
+        "z": -16
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: OFCmed_R → Frontal_Med_Orb_R"
+      ],
+      "proposed_aal_label": 2612,
+      "official_aal_name": "Frontal_Med_Orb_R",
+      "official_aal_abbrev": "FMOD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2612,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 7.8,
+        "y": 50.4,
+        "z": -8.5
+      },
+      "representative_point_mni": {
+        "x": 8.0,
+        "y": 50.0,
+        "z": -8.0
+      },
+      "representative_voxel_ijk": {
+        "i": 41,
+        "j": 88,
+        "k": 32
+      },
+      "voxel_count": 856,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 78,
+      "name_en": "right middle temporal",
+      "name_cn": "右中颞叶",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Temporal_Mid_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 56,
+        "y": -32,
+        "z": -8
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 8202,
+      "official_aal_name": "Temporal_Mid_R",
+      "official_aal_abbrev": "T2D",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 8202,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 57.2,
+        "y": -38.6,
+        "z": -2.8
+      },
+      "representative_point_mni": {
+        "x": 58.0,
+        "y": -38.0,
+        "z": -2.0
+      },
+      "representative_voxel_ijk": {
+        "i": 16,
+        "j": 44,
+        "k": 35
+      },
+      "voxel_count": 4409,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 79,
+      "name_en": "right parahippocampal",
+      "name_cn": "右海马旁",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "ParaHippocampal_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 22,
+        "y": -14,
+        "z": -28
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 4112,
+      "official_aal_name": "ParaHippocampal_R",
+      "official_aal_abbrev": "PARA_HIPPOD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4112,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 25.1,
+        "y": -16.3,
+        "z": -21.7
+      },
+      "representative_point_mni": {
+        "x": 24.0,
+        "y": -16.0,
+        "z": -22.0
+      },
+      "representative_voxel_ijk": {
+        "i": 33,
+        "j": 55,
+        "k": 25
+      },
+      "voxel_count": 1132,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 80,
+      "name_en": "right paracentral",
+      "name_cn": "右旁中央",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Paracentral_Lobule_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 8,
+        "y": -24,
+        "z": 68
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 6402,
+      "official_aal_name": "Paracentral_Lobule_R",
+      "official_aal_abbrev": "LPCD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 6402,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 7.1,
+        "y": -32.9,
+        "z": 66.8
+      },
+      "representative_point_mni": {
+        "x": 8.0,
+        "y": -32.0,
+        "z": 66.0
+      },
+      "representative_voxel_ijk": {
+        "i": 41,
+        "j": 47,
+        "k": 69
+      },
+      "voxel_count": 836,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 81,
+      "name_en": "right pars opercularis",
+      "name_cn": "右鳃盖部",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Frontal_Inf_Oper_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 48,
+        "y": 16,
+        "z": 16
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 2302,
+      "official_aal_name": "Frontal_Inf_Oper_R",
+      "official_aal_abbrev": "F3OPD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2302,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 49.9,
+        "y": 13.7,
+        "z": 20.2
+      },
+      "representative_point_mni": {
+        "x": 50.0,
+        "y": 14.0,
+        "z": 20.0
+      },
+      "representative_voxel_ijk": {
+        "i": 20,
+        "j": 70,
+        "k": 46
+      },
+      "voxel_count": 1399,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 82,
+      "name_en": "right pars orbitalis",
+      "name_cn": "右眶部",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Frontal_Inf_Orb_2_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 40,
+        "y": 32,
+        "z": -12
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: Frontal_Inf_Orb_2_R → Frontal_Inf_Orb_R"
+      ],
+      "proposed_aal_label": 2322,
+      "official_aal_name": "Frontal_Inf_Orb_R",
+      "official_aal_abbrev": "F3OD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2322,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 40.9,
+        "y": 31.0,
+        "z": -13.3
+      },
+      "representative_point_mni": {
+        "x": 40.0,
+        "y": 30.0,
+        "z": -14.0
+      },
+      "representative_voxel_ijk": {
+        "i": 25,
+        "j": 78,
+        "k": 29
+      },
+      "voxel_count": 1707,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 83,
+      "name_en": "right pars triangularis",
+      "name_cn": "右三角部",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Frontal_Inf_Tri_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 44,
+        "y": 28,
+        "z": 12
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 2312,
+      "official_aal_name": "Frontal_Inf_Tri_R",
+      "official_aal_abbrev": "F3TD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2312,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 50.1,
+        "y": 28.9,
+        "z": 12.8
+      },
+      "representative_point_mni": {
+        "x": 50.0,
+        "y": 28.0,
+        "z": 12.0
+      },
+      "representative_voxel_ijk": {
+        "i": 20,
+        "j": 77,
+        "k": 42
+      },
+      "voxel_count": 2151,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 84,
+      "name_en": "right pericalcarine",
+      "name_cn": "右骨膜",
+      "laterality": "right",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "Calcarine_R",
+      "phase1_confidence": 0.7,
+      "phase1_mni_centroid": {
+        "x": 12,
+        "y": -70,
+        "z": 10
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [],
+      "proposed_aal_label": 5002,
+      "official_aal_name": "Calcarine_R",
+      "official_aal_abbrev": "V1D",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 5002,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 15.7,
+        "y": -74.4,
+        "z": 8.0
+      },
+      "representative_point_mni": {
+        "x": 16.0,
+        "y": -74.0,
+        "z": 8.0
+      },
+      "representative_voxel_ijk": {
+        "i": 37,
+        "j": 26,
+        "k": 40
+      },
+      "voxel_count": 1861,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 85,
+      "name_en": "right postcentral",
+      "name_cn": "右后中央",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Postcentral_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 44,
+        "y": -22,
+        "z": 52
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 6002,
+      "official_aal_name": "Postcentral_R",
+      "official_aal_abbrev": "PAD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 6002,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 41.2,
+        "y": -26.8,
+        "z": 51.3
+      },
+      "representative_point_mni": {
+        "x": 42.0,
+        "y": -26.0,
+        "z": 52.0
+      },
+      "representative_voxel_ijk": {
+        "i": 24,
+        "j": 50,
+        "k": 62
+      },
+      "voxel_count": 3823,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 86,
+      "name_en": "right posterior cingulate",
+      "name_cn": "右后扣带",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Cingulate_Post_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 8,
+        "y": -40,
+        "z": 28
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: Cingulate_Post_R → Cingulum_Post_R"
+      ],
+      "proposed_aal_label": 4022,
+      "official_aal_name": "Cingulum_Post_R",
+      "official_aal_abbrev": "CIPD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4022,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 7.2,
+        "y": -43.1,
+        "z": 20.5
+      },
+      "representative_point_mni": {
+        "x": 8.0,
+        "y": -44.0,
+        "z": 20.0
+      },
+      "representative_voxel_ijk": {
+        "i": 41,
+        "j": 41,
+        "k": 46
+      },
+      "voxel_count": 335,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 87,
+      "name_en": "right precentral",
+      "name_cn": "右中心前",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Precentral_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 36,
+        "y": -14,
+        "z": 56
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 2002,
+      "official_aal_name": "Precentral_R",
+      "official_aal_abbrev": "FAD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2002,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 41.1,
+        "y": -9.5,
+        "z": 50.8
+      },
+      "representative_point_mni": {
+        "x": 42.0,
+        "y": -10.0,
+        "z": 50.0
+      },
+      "representative_voxel_ijk": {
+        "i": 24,
+        "j": 58,
+        "k": 61
+      },
+      "voxel_count": 3381,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 88,
+      "name_en": "right precuneus",
+      "name_cn": "右楔前叶",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Precuneus_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 10,
+        "y": -56,
+        "z": 48
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 6302,
+      "official_aal_name": "Precuneus_R",
+      "official_aal_abbrev": "PQD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 6302,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 9.7,
+        "y": -57.3,
+        "z": 42.4
+      },
+      "representative_point_mni": {
+        "x": 10.0,
+        "y": -58.0,
+        "z": 42.0
+      },
+      "representative_voxel_ijk": {
+        "i": 40,
+        "j": 34,
+        "k": 57
+      },
+      "voxel_count": 3265,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 89,
+      "name_en": "right rostral anterior cingulate",
+      "name_cn": "右喙前扣带",
+      "laterality": "right",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "ACC_pre_R",
+      "phase1_confidence": 0.7,
+      "phase1_mni_centroid": {
+        "x": 6,
+        "y": 40,
+        "z": 12
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: ACC_pre_R → Cingulum_Ant_R"
+      ],
+      "proposed_aal_label": 4002,
+      "official_aal_name": "Cingulum_Ant_R",
+      "official_aal_abbrev": "CIAD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 4002,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 8.1,
+        "y": 35.7,
+        "z": 14.4
+      },
+      "representative_point_mni": {
+        "x": 8.0,
+        "y": 36.0,
+        "z": 14.0
+      },
+      "representative_voxel_ijk": {
+        "i": 41,
+        "j": 81,
+        "k": 43
+      },
+      "voxel_count": 1313,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 90,
+      "name_en": "right rostral middle frontal",
+      "name_cn": "右喙中额叶",
+      "laterality": "right",
+      "phase1_mapping_status": "approximate",
+      "phase1_aal3_name": "Frontal_Mid_2_R",
+      "phase1_confidence": 0.7,
+      "phase1_mni_centroid": {
+        "x": 36,
+        "y": 32,
+        "z": 32
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: Frontal_Mid_2_R → Frontal_Mid_R"
+      ],
+      "proposed_aal_label": 2202,
+      "official_aal_name": "Frontal_Mid_R",
+      "official_aal_abbrev": "F2D",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2202,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 37.4,
+        "y": 31.8,
+        "z": 32.8
+      },
+      "representative_point_mni": {
+        "x": 38.0,
+        "y": 32.0,
+        "z": 32.0
+      },
+      "representative_voxel_ijk": {
+        "i": 26,
+        "j": 79,
+        "k": 52
+      },
+      "voxel_count": 5104,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 91,
+      "name_en": "right superior frontal",
+      "name_cn": "右上额叶",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Frontal_Sup_2_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 24,
+        "y": 32,
+        "z": 44
+      },
+      "mapping_method": "verified_alias",
+      "mapping_status": "verified_alias",
+      "validation_issues": [
+        "AAL3→AAL1 name mapping: Frontal_Sup_2_R → Frontal_Sup_R"
+      ],
+      "proposed_aal_label": 2102,
+      "official_aal_name": "Frontal_Sup_R",
+      "official_aal_abbrev": "F1D",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 2102,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 21.6,
+        "y": 29.9,
+        "z": 42.5
+      },
+      "representative_point_mni": {
+        "x": 22.0,
+        "y": 30.0,
+        "z": 44.0
+      },
+      "representative_voxel_ijk": {
+        "i": 34,
+        "j": 78,
+        "k": 58
+      },
+      "voxel_count": 4056,
+      "mapping_confidence": 0.8
+    },
+    {
+      "region_id": null,
+      "label_value": 92,
+      "name_en": "right superior parietal",
+      "name_cn": "右上顶叶",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Parietal_Sup_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 28,
+        "y": -52,
+        "z": 56
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 6102,
+      "official_aal_name": "Parietal_Sup_R",
+      "official_aal_abbrev": "P1D",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 6102,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 25.8,
+        "y": -60.4,
+        "z": 60.7
+      },
+      "representative_point_mni": {
+        "x": 26.0,
+        "y": -60.0,
+        "z": 60.0
+      },
+      "representative_voxel_ijk": {
+        "i": 32,
+        "j": 33,
+        "k": 66
+      },
+      "voxel_count": 2222,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 93,
+      "name_en": "right superior temporal",
+      "name_cn": "右颞上叶",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Temporal_Sup_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 52,
+        "y": -14,
+        "z": 4
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 8112,
+      "official_aal_name": "Temporal_Sup_R",
+      "official_aal_abbrev": "T1D",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 8112,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 57.8,
+        "y": -23.0,
+        "z": 5.4
+      },
+      "representative_point_mni": {
+        "x": 58.0,
+        "y": -24.0,
+        "z": 6.0
+      },
+      "representative_voxel_ijk": {
+        "i": 16,
+        "j": 51,
+        "k": 39
+      },
+      "voxel_count": 3141,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 94,
+      "name_en": "right supramarginal",
+      "name_cn": "右超边缘",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "SupraMarginal_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 56,
+        "y": -32,
+        "z": 32
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 6212,
+      "official_aal_name": "SupraMarginal_R",
+      "official_aal_abbrev": "GSMD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 6212,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 57.3,
+        "y": -32.8,
+        "z": 33.1
+      },
+      "representative_point_mni": {
+        "x": 58.0,
+        "y": -32.0,
+        "z": 34.0
+      },
+      "representative_voxel_ijk": {
+        "i": 16,
+        "j": 47,
+        "k": 53
+      },
+      "voxel_count": 1974,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 95,
+      "name_en": "right transverse temporal",
+      "name_cn": "右颞横叶",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Heschl_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 44,
+        "y": -22,
+        "z": 12
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 8102,
+      "official_aal_name": "Heschl_R",
+      "official_aal_abbrev": "HESCHLD",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 8102,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 45.9,
+        "y": -18.1,
+        "z": 9.0
+      },
+      "representative_point_mni": {
+        "x": 46.0,
+        "y": -18.0,
+        "z": 10.0
+      },
+      "representative_voxel_ijk": {
+        "i": 22,
+        "j": 54,
+        "k": 41
+      },
+      "voxel_count": 249,
+      "mapping_confidence": 1.0
+    },
+    {
+      "region_id": null,
+      "label_value": 96,
+      "name_en": "right insula",
+      "name_cn": "右脑岛",
+      "laterality": "right",
+      "phase1_mapping_status": "exact",
+      "phase1_aal3_name": "Insula_R",
+      "phase1_confidence": 1.0,
+      "phase1_mni_centroid": {
+        "x": 36,
+        "y": 6,
+        "z": 4
+      },
+      "mapping_method": "verified_exact",
+      "mapping_status": "verified_exact",
+      "validation_issues": [],
+      "proposed_aal_label": 3002,
+      "official_aal_name": "Insula_R",
+      "official_aal_abbrev": "IND",
+      "coordinate_status": "verified",
+      "coordinate_source": "AAL_SPM12_label_mask",
+      "atlas": "AAL",
+      "atlas_label": 3002,
+      "coordinate_space": "MNI",
+      "center_of_mass_mni": {
+        "x": 38.7,
+        "y": 5.0,
+        "z": 0.8
+      },
+      "representative_point_mni": {
+        "x": 38.0,
+        "y": 6.0,
+        "z": 2.0
+      },
+      "representative_voxel_ijk": {
+        "i": 26,
+        "j": 66,
+        "k": 37
+      },
+      "voxel_count": 1770,
+      "mapping_confidence": 1.0
+    }
+  ]
+}

@@ -1,0 +1,998 @@
+[
+  {
+    "index": 1,
+    "name": "Precentral_L",
+    "abbr": "Precentral_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 2,
+    "name": "Precentral_R",
+    "abbr": "Precentral_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 3,
+    "name": "Frontal_Sup_2_L",
+    "abbr": "Frontal_Sup_2_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 4,
+    "name": "Frontal_Sup_2_R",
+    "abbr": "Frontal_Sup_2_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 5,
+    "name": "Frontal_Mid_2_L",
+    "abbr": "Frontal_Mid_2_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 6,
+    "name": "Frontal_Mid_2_R",
+    "abbr": "Frontal_Mid_2_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 7,
+    "name": "Frontal_Inf_Oper_L",
+    "abbr": "Frontal_Inf_Oper_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 8,
+    "name": "Frontal_Inf_Oper_R",
+    "abbr": "Frontal_Inf_Oper_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 9,
+    "name": "Frontal_Inf_Tri_L",
+    "abbr": "Frontal_Inf_Tri_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 10,
+    "name": "Frontal_Inf_Tri_R",
+    "abbr": "Frontal_Inf_Tri_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 11,
+    "name": "Frontal_Inf_Orb_2_L",
+    "abbr": "Frontal_Inf_Orb_2_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 12,
+    "name": "Frontal_Inf_Orb_2_R",
+    "abbr": "Frontal_Inf_Orb_2_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 13,
+    "name": "Rolandic_Oper_L",
+    "abbr": "Rolandic_Oper_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 14,
+    "name": "Rolandic_Oper_R",
+    "abbr": "Rolandic_Oper_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 15,
+    "name": "Supp_Motor_Area_L",
+    "abbr": "Supp_Motor_Area_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 16,
+    "name": "Supp_Motor_Area_R",
+    "abbr": "Supp_Motor_Area_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 17,
+    "name": "Olfactory_L",
+    "abbr": "Olfactory_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 18,
+    "name": "Olfactory_R",
+    "abbr": "Olfactory_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 19,
+    "name": "Frontal_Sup_Medial_L",
+    "abbr": "Frontal_Sup_Medial_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 20,
+    "name": "Frontal_Sup_Medial_R",
+    "abbr": "Frontal_Sup_Medial_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 21,
+    "name": "Frontal_Med_Orb_L",
+    "abbr": "Frontal_Med_Orb_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 22,
+    "name": "Frontal_Med_Orb_R",
+    "abbr": "Frontal_Med_Orb_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 23,
+    "name": "Rectus_L",
+    "abbr": "Rectus_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 24,
+    "name": "Rectus_R",
+    "abbr": "Rectus_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 25,
+    "name": "OFCmed_L",
+    "abbr": "OFCmed_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 26,
+    "name": "OFCmed_R",
+    "abbr": "OFCmed_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 27,
+    "name": "OFCant_L",
+    "abbr": "OFCant_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 28,
+    "name": "OFCant_R",
+    "abbr": "OFCant_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 29,
+    "name": "OFCpost_L",
+    "abbr": "OFCpost_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 30,
+    "name": "OFCpost_R",
+    "abbr": "OFCpost_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 31,
+    "name": "OFClat_L",
+    "abbr": "OFClat_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 32,
+    "name": "OFClat_R",
+    "abbr": "OFClat_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 33,
+    "name": "Insula_L",
+    "abbr": "Insula_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 34,
+    "name": "Insula_R",
+    "abbr": "Insula_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 37,
+    "name": "Cingulate_Mid_L",
+    "abbr": "Cingulate_Mid_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 38,
+    "name": "Cingulate_Mid_R",
+    "abbr": "Cingulate_Mid_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 39,
+    "name": "Cingulate_Post_L",
+    "abbr": "Cingulate_Post_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 40,
+    "name": "Cingulate_Post_R",
+    "abbr": "Cingulate_Post_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 41,
+    "name": "Hippocampus_L",
+    "abbr": "Hippocampus_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 42,
+    "name": "Hippocampus_R",
+    "abbr": "Hippocampus_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 43,
+    "name": "ParaHippocampal_L",
+    "abbr": "ParaHippocampal_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 44,
+    "name": "ParaHippocampal_R",
+    "abbr": "ParaHippocampal_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 45,
+    "name": "Amygdala_L",
+    "abbr": "Amygdala_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 46,
+    "name": "Amygdala_R",
+    "abbr": "Amygdala_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 47,
+    "name": "Calcarine_L",
+    "abbr": "Calcarine_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 48,
+    "name": "Calcarine_R",
+    "abbr": "Calcarine_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 49,
+    "name": "Cuneus_L",
+    "abbr": "Cuneus_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 50,
+    "name": "Cuneus_R",
+    "abbr": "Cuneus_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 51,
+    "name": "Lingual_L",
+    "abbr": "Lingual_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 52,
+    "name": "Lingual_R",
+    "abbr": "Lingual_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 53,
+    "name": "Occipital_Sup_L",
+    "abbr": "Occipital_Sup_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 54,
+    "name": "Occipital_Sup_R",
+    "abbr": "Occipital_Sup_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 55,
+    "name": "Occipital_Mid_L",
+    "abbr": "Occipital_Mid_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 56,
+    "name": "Occipital_Mid_R",
+    "abbr": "Occipital_Mid_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 57,
+    "name": "Occipital_Inf_L",
+    "abbr": "Occipital_Inf_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 58,
+    "name": "Occipital_Inf_R",
+    "abbr": "Occipital_Inf_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 59,
+    "name": "Fusiform_L",
+    "abbr": "Fusiform_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 60,
+    "name": "Fusiform_R",
+    "abbr": "Fusiform_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 61,
+    "name": "Postcentral_L",
+    "abbr": "Postcentral_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 62,
+    "name": "Postcentral_R",
+    "abbr": "Postcentral_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 63,
+    "name": "Parietal_Sup_L",
+    "abbr": "Parietal_Sup_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 64,
+    "name": "Parietal_Sup_R",
+    "abbr": "Parietal_Sup_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 65,
+    "name": "Parietal_Inf_L",
+    "abbr": "Parietal_Inf_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 66,
+    "name": "Parietal_Inf_R",
+    "abbr": "Parietal_Inf_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 67,
+    "name": "SupraMarginal_L",
+    "abbr": "SupraMarginal_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 68,
+    "name": "SupraMarginal_R",
+    "abbr": "SupraMarginal_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 69,
+    "name": "Angular_L",
+    "abbr": "Angular_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 70,
+    "name": "Angular_R",
+    "abbr": "Angular_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 71,
+    "name": "Precuneus_L",
+    "abbr": "Precuneus_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 72,
+    "name": "Precuneus_R",
+    "abbr": "Precuneus_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 73,
+    "name": "Paracentral_Lobule_L",
+    "abbr": "Paracentral_Lobule_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 74,
+    "name": "Paracentral_Lobule_R",
+    "abbr": "Paracentral_Lobule_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 75,
+    "name": "Caudate_L",
+    "abbr": "Caudate_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 76,
+    "name": "Caudate_R",
+    "abbr": "Caudate_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 77,
+    "name": "Putamen_L",
+    "abbr": "Putamen_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 78,
+    "name": "Putamen_R",
+    "abbr": "Putamen_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 79,
+    "name": "Pallidum_L",
+    "abbr": "Pallidum_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 80,
+    "name": "Pallidum_R",
+    "abbr": "Pallidum_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 83,
+    "name": "Heschl_L",
+    "abbr": "Heschl_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 84,
+    "name": "Heschl_R",
+    "abbr": "Heschl_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 85,
+    "name": "Temporal_Sup_L",
+    "abbr": "Temporal_Sup_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 86,
+    "name": "Temporal_Sup_R",
+    "abbr": "Temporal_Sup_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 87,
+    "name": "Temporal_Pole_Sup_L",
+    "abbr": "Temporal_Pole_Sup_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 88,
+    "name": "Temporal_Pole_Sup_R",
+    "abbr": "Temporal_Pole_Sup_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 89,
+    "name": "Temporal_Mid_L",
+    "abbr": "Temporal_Mid_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 90,
+    "name": "Temporal_Mid_R",
+    "abbr": "Temporal_Mid_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 91,
+    "name": "Temporal_Pole_Mid_L",
+    "abbr": "Temporal_Pole_Mid_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 92,
+    "name": "Temporal_Pole_Mid_R",
+    "abbr": "Temporal_Pole_Mid_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 93,
+    "name": "Temporal_Inf_L",
+    "abbr": "Temporal_Inf_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 94,
+    "name": "Temporal_Inf_R",
+    "abbr": "Temporal_Inf_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 95,
+    "name": "Cerebellum_Crus1_L",
+    "abbr": "Cerebellum_Crus1_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 96,
+    "name": "Cerebellum_Crus1_R",
+    "abbr": "Cerebellum_Crus1_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 97,
+    "name": "Cerebellum_Crus2_L",
+    "abbr": "Cerebellum_Crus2_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 98,
+    "name": "Cerebellum_Crus2_R",
+    "abbr": "Cerebellum_Crus2_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 99,
+    "name": "Cerebellum_3_L",
+    "abbr": "Cerebellum_3_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 100,
+    "name": "Cerebellum_3_R",
+    "abbr": "Cerebellum_3_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 101,
+    "name": "Cerebellum_4_5_L",
+    "abbr": "Cerebellum_4_5_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 102,
+    "name": "Cerebellum_4_5_R",
+    "abbr": "Cerebellum_4_5_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 103,
+    "name": "Cerebellum_6_L",
+    "abbr": "Cerebellum_6_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 104,
+    "name": "Cerebellum_6_R",
+    "abbr": "Cerebellum_6_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 105,
+    "name": "Cerebellum_7b_L",
+    "abbr": "Cerebellum_7b_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 106,
+    "name": "Cerebellum_7b_R",
+    "abbr": "Cerebellum_7b_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 107,
+    "name": "Cerebellum_8_L",
+    "abbr": "Cerebellum_8_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 108,
+    "name": "Cerebellum_8_R",
+    "abbr": "Cerebellum_8_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 109,
+    "name": "Cerebellum_9_L",
+    "abbr": "Cerebellum_9_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 110,
+    "name": "Cerebellum_9_R",
+    "abbr": "Cerebellum_9_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 111,
+    "name": "Cerebellum_10_L",
+    "abbr": "Cerebellum_10_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 112,
+    "name": "Cerebellum_10_R",
+    "abbr": "Cerebellum_10_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 113,
+    "name": "Vermis_1_2",
+    "abbr": "Vermis_1_2",
+    "hemisphere": null
+  },
+  {
+    "index": 114,
+    "name": "Vermis_3",
+    "abbr": "Vermis_3",
+    "hemisphere": null
+  },
+  {
+    "index": 115,
+    "name": "Vermis_4_5",
+    "abbr": "Vermis_4_5",
+    "hemisphere": null
+  },
+  {
+    "index": 116,
+    "name": "Vermis_6",
+    "abbr": "Vermis_6",
+    "hemisphere": null
+  },
+  {
+    "index": 117,
+    "name": "Vermis_7",
+    "abbr": "Vermis_7",
+    "hemisphere": null
+  },
+  {
+    "index": 118,
+    "name": "Vermis_8",
+    "abbr": "Vermis_8",
+    "hemisphere": null
+  },
+  {
+    "index": 119,
+    "name": "Vermis_9",
+    "abbr": "Vermis_9",
+    "hemisphere": null
+  },
+  {
+    "index": 120,
+    "name": "Vermis_10",
+    "abbr": "Vermis_10",
+    "hemisphere": null
+  },
+  {
+    "index": 121,
+    "name": "Thal_AV_L",
+    "abbr": "Thal_AV_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 122,
+    "name": "Thal_AV_R",
+    "abbr": "Thal_AV_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 123,
+    "name": "Thal_LP_L",
+    "abbr": "Thal_LP_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 124,
+    "name": "Thal_LP_R",
+    "abbr": "Thal_LP_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 125,
+    "name": "Thal_VA_L",
+    "abbr": "Thal_VA_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 126,
+    "name": "Thal_VA_R",
+    "abbr": "Thal_VA_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 127,
+    "name": "Thal_VL_L",
+    "abbr": "Thal_VL_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 128,
+    "name": "Thal_VL_R",
+    "abbr": "Thal_VL_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 129,
+    "name": "Thal_VPL_L",
+    "abbr": "Thal_VPL_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 130,
+    "name": "Thal_VPL_R",
+    "abbr": "Thal_VPL_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 131,
+    "name": "Thal_IL_L",
+    "abbr": "Thal_IL_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 132,
+    "name": "Thal_IL_R",
+    "abbr": "Thal_IL_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 133,
+    "name": "Thal_Re_L",
+    "abbr": "Thal_Re_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 134,
+    "name": "Thal_Re_R",
+    "abbr": "Thal_Re_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 135,
+    "name": "Thal_MDm_L",
+    "abbr": "Thal_MDm_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 136,
+    "name": "Thal_MDm_R",
+    "abbr": "Thal_MDm_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 137,
+    "name": "Thal_MDl_L",
+    "abbr": "Thal_MDl_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 138,
+    "name": "Thal_MDl_R",
+    "abbr": "Thal_MDl_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 139,
+    "name": "Thal_LGN_L",
+    "abbr": "Thal_LGN_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 140,
+    "name": "Thal_LGN_R",
+    "abbr": "Thal_LGN_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 141,
+    "name": "Thal_MGN_L",
+    "abbr": "Thal_MGN_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 142,
+    "name": "Thal_MGN_R",
+    "abbr": "Thal_MGN_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 143,
+    "name": "Thal_PuI_L",
+    "abbr": "Thal_PuI_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 144,
+    "name": "Thal_PuI_R",
+    "abbr": "Thal_PuI_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 145,
+    "name": "Thal_PuM_L",
+    "abbr": "Thal_PuM_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 146,
+    "name": "Thal_PuM_R",
+    "abbr": "Thal_PuM_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 147,
+    "name": "Thal_PuA_L",
+    "abbr": "Thal_PuA_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 148,
+    "name": "Thal_PuA_R",
+    "abbr": "Thal_PuA_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 149,
+    "name": "Thal_PuL_L",
+    "abbr": "Thal_PuL_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 150,
+    "name": "Thal_PuL_R",
+    "abbr": "Thal_PuL_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 151,
+    "name": "ACC_sub_L",
+    "abbr": "ACC_sub_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 152,
+    "name": "ACC_sub_R",
+    "abbr": "ACC_sub_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 153,
+    "name": "ACC_pre_L",
+    "abbr": "ACC_pre_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 154,
+    "name": "ACC_pre_R",
+    "abbr": "ACC_pre_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 155,
+    "name": "ACC_sup_L",
+    "abbr": "ACC_sup_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 156,
+    "name": "ACC_sup_R",
+    "abbr": "ACC_sup_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 157,
+    "name": "N_Acc_L",
+    "abbr": "N_Acc_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 158,
+    "name": "N_Acc_R",
+    "abbr": "N_Acc_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 159,
+    "name": "VTA_L",
+    "abbr": "VTA_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 160,
+    "name": "VTA_R",
+    "abbr": "VTA_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 161,
+    "name": "SN_pc_L",
+    "abbr": "SN_pc_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 162,
+    "name": "SN_pc_R",
+    "abbr": "SN_pc_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 163,
+    "name": "SN_pr_L",
+    "abbr": "SN_pr_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 164,
+    "name": "SN_pr_R",
+    "abbr": "SN_pr_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 165,
+    "name": "Red_N_L",
+    "abbr": "Red_N_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 166,
+    "name": "Red_N_R",
+    "abbr": "Red_N_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 167,
+    "name": "LC_L",
+    "abbr": "LC_L",
+    "hemisphere": "L"
+  },
+  {
+    "index": 168,
+    "name": "LC_R",
+    "abbr": "LC_R",
+    "hemisphere": "R"
+  },
+  {
+    "index": 169,
+    "name": "Raphe_D",
+    "abbr": "Raphe_D",
+    "hemisphere": null
+  },
+  {
+    "index": 170,
+    "name": "Raphe_M",
+    "abbr": "Raphe_M",
+    "hemisphere": null
+  }
+]
