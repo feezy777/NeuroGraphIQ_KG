@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -666,4 +668,175 @@ async def get_circuit_graph(
         circuit_ids = sorted(edge.pop("_circuit_ids"))
         edges.append({**edge, "circuit_ids": circuit_ids})
     return GraphDataResponse(nodes=nodes, edges=edges)
+
+
+# ── Clinical Report Generation ──────────────────────────────────────────────
+
+class ReportRequest(BaseModel):
+    summary: str
+    circuits: list[dict] = []
+    graph_nodes: int = 0
+    graph_edges: int = 0
+
+
+class ReportResponse(BaseModel):
+    report_markdown: str
+    generated_at: str
+
+
+REPORT_PROMPT = """You are a senior clinical neurologist writing a patient-facing brain health analysis report in Chinese. The report MUST be based on the patient's symptoms AND the actual brain circuits/regions matched by the NeuroGraphIQ knowledge graph.
+
+## Patient's Clinical Summary
+{summary}
+
+## Brain Circuits Matched by NeuroGraphIQ System
+The system identified the following brain circuits as relevant to this patient. Each circuit involves specific brain regions connected in sequence. You MUST reference these circuits and regions in your analysis:
+{circuit_list}
+
+## Brain Network Data
+The matched circuit network involves {node_count} brain regions with {edge_count} connections between them.
+
+WRITING RULES:
+1. Write in Chinese, patient-facing but professionally detailed
+2. NO markdown artifacts: no "---", no "***", no "**" wrapping entire lines. Use plain section headers with 【】 brackets instead of # marks
+3. NO scores, NO match percentages, NO technical confidence numbers
+4. MUST reference the actual circuit names and brain regions from the system data above
+5. For each brain circuit mentioned, explain in plain language what it does and how the patient's symptoms relate to its dysfunction
+6. Include a simple ASCII diagram showing the key brain regions and their connections (use text characters like ───, ▲, ▼, ◄, ► to draw the circuit flow)
+7. Use the patient summary to connect specific symptoms to specific brain regions/circuits
+
+STRUCTURE (use 【】 for headers):
+【一、症状分析】Describe each symptom and which brain regions/circuits are involved
+【二、大脑回路分析】For each key circuit: name it, explain its normal function, how it's affected, which regions are involved
+  Include this ASCII circuit diagram: show the basal ganglia motor loop with key regions
+【三、神经递质与脑电活动】How dopamine, acetylcholine etc are affected in these circuits
+【四、循环系统与脑脊液】Blood supply, venous drainage, glymphatic clearance
+【五、外周器官与神经影响】Gut, heart, skin, autonomic nerves
+【六、综合总结与建议】Patient-friendly summary and lifestyle/medical recommendations
+
+The report should be detailed enough to fill 2 A4 pages. Include at least one text-based brain circuit diagram."""
+
+
+@router.post("/report", response_model=ReportResponse)
+async def generate_clinical_report(body: ReportRequest):
+    """Generate a comprehensive clinical analysis report using DeepSeek."""
+    if not body.summary.strip():
+        raise HTTPException(status_code=400, detail="Summary is required")
+
+    circuit_lines = []
+    for i, c in enumerate(body.circuits[:12], 1):
+        name = c.get("circuit_name", c.get("name", "Unknown"))
+        ctype = c.get("circuit_type", "")
+        desc = c.get("description", "")
+        steps = c.get("step_count", 0)
+        funcs = c.get("function_count", 0)
+        matched = c.get("matched_functions", [])
+        step_details = c.get("steps", [])
+        # Build rich circuit description with step details
+        step_info = ""
+        if step_details:
+            step_names = [s.get("step_name", "?") for s in step_details[:8]]
+            step_info = f" | 步骤: {' → '.join(step_names)}"
+        func_info = f" | 功能: {', '.join(matched[:5])}" if matched else ""
+        desc_info = f" | 描述: {desc[:120]}" if desc else ""
+        circuit_lines.append(
+            f"{i}. 【{name}】类型:{ctype or '未知'}{desc_info}{func_info}{step_info}"
+        )
+
+    prompt = REPORT_PROMPT.format(
+        summary=body.summary,
+        circuit_list="\n".join(circuit_lines) or "No circuits matched",
+        node_count=body.graph_nodes,
+        edge_count=body.graph_edges,
+    )
+
+    try:
+        cfg = get_deepseek_runtime_config()
+        provider = get_llm_provider("deepseek")
+        resp = await provider.complete_text(
+            model=cfg.default_model,
+            system_prompt="You are a clinical neuroscientist. Output ONLY clean markdown, no JSON wrapper.",
+            user_prompt=prompt,
+            temperature=0.3,
+            max_tokens=6000,
+            timeout_seconds=180,
+        )
+        if not resp.transport_ok or not resp.raw_text:
+            raise HTTPException(status_code=502, detail=f"LLM call failed: {resp.error}")
+
+        report = resp.raw_text.strip()
+        if report.startswith("```"):
+            report = report.split("\n", 1)[1]
+            if report.endswith("```"):
+                report = report[:-3]
+        return ReportResponse(
+            report_markdown=report,
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("[symptom-query][report] generation failed")
+        raise HTTPException(status_code=500, detail=f"Report generation failed: {exc}") from exc
+
+
+@router.post("/report/pdf")
+async def generate_clinical_report_pdf(body: ReportRequest):
+    """Generate professional A4 PDF report and return as downloadable file."""
+    if not body.summary.strip():
+        raise HTTPException(status_code=400, detail="Summary required")
+
+    # ── Generate markdown via DeepSeek (same as /report) ────────────────
+    circuit_lines = []
+    for i, c in enumerate(body.circuits[:12], 1):
+        name = c.get("circuit_name", c.get("name", "Unknown"))
+        ctype = c.get("circuit_type", "")
+        desc = c.get("description", "")
+        matched = c.get("matched_functions", [])
+        step_details = c.get("steps", [])
+        step_info = ""
+        if step_details:
+            step_names = [s.get("step_name", "?") for s in step_details[:8]]
+            step_info = f" | steps: {' > '.join(step_names)}"
+        func_info = f" | functions: {', '.join(matched[:5])}" if matched else ""
+        desc_info = f" | {desc[:120]}" if desc else ""
+        circuit_lines.append(
+            f"{i}. {name} [{ctype or 'unknown'}]{desc_info}{func_info}{step_info}"
+        )
+
+    prompt = REPORT_PROMPT.format(
+        summary=body.summary,
+        circuit_list="\n".join(circuit_lines) or "No circuits matched",
+        node_count=body.graph_nodes,
+        edge_count=body.graph_edges,
+    )
+
+    try:
+        cfg = get_deepseek_runtime_config()
+        provider = get_llm_provider("deepseek")
+        resp = await provider.complete_text(
+            model=cfg.default_model,
+            system_prompt="You are a clinical neuroscientist. Output ONLY clean markdown, no JSON wrapper.",
+            user_prompt=prompt, temperature=0.3, max_tokens=6000, timeout_seconds=180,
+        )
+        if not resp.transport_ok or not resp.raw_text:
+            raise HTTPException(status_code=502, detail=f"LLM failed: {resp.error}")
+        report = resp.raw_text.strip()
+        if report.startswith("```"): report = report.split("\n", 1)[1]
+        if report.endswith("```"): report = report[:-3]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # ── Build professional PDF ──────────────────────────────────────────
+    from app.services.report_pdf_builder import generate_report_pdf
+
+    buf = generate_report_pdf(report, body.circuits)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=brain_analysis_report.pdf"},
+    )
 

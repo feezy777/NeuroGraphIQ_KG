@@ -1,0 +1,224 @@
+{
+  "summary": "Patient presents with a 6-month history of progressive parkinsonism including resting tremor, bradykinesia, rigidity, REM sleep behavior disorder, hyposmia, constipation, low mood, anhedonia, fatigue. Highly suggestive of early Parkinson disease.",
+  "functions": [
+    "bradykinesia",
+    "resting tremor",
+    "motor",
+    "dopamine",
+    "basal_ganglia",
+    "substantia_nigra",
+    "extrapyramidal",
+    "rigidity",
+    "hypokinesia",
+    "akinesia",
+    "parkinsonism"
+  ],
+  "categories": [
+    "motor"
+  ],
+  "primary_category": "motor",
+  "circuits": [
+    {
+      "id": "19f31694-6d4b-43f3-a308-00cf44b43854",
+      "name": "cortical_subcortical_motor_pathway",
+      "type": "motor_circuit",
+      "score": 1.0,
+      "matched_functions": [
+        "basal_ganglia_thalamic_relay",
+        "cortical_relay",
+        "motor_command",
+        "motor_output",
+        "subcortical_relay"
+      ],
+      "description": "皮层-基底节运动回路：皮层起始通过皮层中继投射到皮层下中继，再投射到基底节/丘脑，最终到运动输出；同时皮层起始直接投射到多个运动相关区域。",
+      "step_count": 5,
+      "function_count": 5
+    },
+    {
+      "id": "134596a0-a76c-4f47-9053-529e419b8692",
+      "name": "right basal ganglia circuit",
+      "type": "unknown",
+      "score": 1.0,
+      "matched_functions": [
+        "motor control and learning"
+      ],
+      "description": "The right basal ganglia circuit, including the caudate, putamen, and pallidum, is involved in motor control and learning.",
+      "step_count": 4,
+      "function_count": 1
+    },
+    {
+      "id": "24a04d77-efb8-4c35-bc83-dd92e102386d",
+      "name": "right basal ganglia motor circuit",
+      "type": "unknown",
+      "score": 1.0,
+      "matched_functions": [
+        "motor control"
+      ],
+      "description": "Right basal ganglia circuit including caudate, putamen, pallidum, and thalamus proper, involved in motor control and learning.",
+      "step_count": 3,
+      "function_count": 1
+    },
+    {
+      "id": "317cc40d-6848-472f-91db-9f73ea6ee02c",
+      "name": "left motor control circuit",
+      "type": "unknown",
+      "score": 1.0,
+      "matched_functions": [
+        "motor control"
+      ],
+      "description": "Left hemisphere motor circuit including primary motor cortex, somatosensory cortex, basal ganglia (caudate, putamen, pallidum), and thalamus, forming a cortico-basal ganglia-thalamo-cortical loop for voluntary movement control.",
+      "step_count": 6,
+      "function_count": 1
+    },
+    {
+      "id": "8c3825f4-1943-4335-81fd-5dd454c1681b",
+      "name": "right motor control circuit",
+      "type": "unknown",
+      "score": 1.0,
+      "matched_functions": [
+        "motor control"
+      ],
+      "description": "Right hemisphere motor circuit analogous to left, including primary motor cortex, somatosensory cortex, basal ganglia (caudate, putamen, pallidum), and thalamus, involved in execution of voluntary movements.",
+      "step_count": 8,
+      "function_count": 1
+    },
+    {
+      "id": "bf557dd9-def6-4164-9efa-7f42555cc6e4",
+      "name": "left basal ganglia motor circuit",
+      "type": "unknown",
+      "score": 1.0,
+      "matched_functions": [
+        "motor control"
+      ],
+      "description": "The left basal ganglia motor circuit involves the caudate, putamen, and pallidum, and is crucial for the regulation of voluntary movement.",
+      "step_count": 4,
+      "function_count": 1
+    },
+    {
+      "id": "f49288ef-383d-432e-be50-eed5c55af102",
+      "name": "right sensorimotor circuit",
+      "type": "unknown",
+      "score": 1.0,
+      "matched_functions": [
+        "motor control",
+        "somatosensory processing"
+      ],
+      "description": "The right precentral gyrus (primary motor cortex) and right postcentral gyrus (primary somatosensory cortex) are adjacent and functionally connected for sensorimotor integration, enabling motor control and somatosensory processing.",
+      "step_count": 2,
+      "function_count": 2
+    },
+    {
+      "id": "89a87c7a-3361-4fb2-b345-d6c2c9f08821",
+      "name": "cortico-striatal_loop",
+      "type": "motor_circuit",
+      "score": 1.0,
+      "matched_functions": [
+        "action_selection",
+        "basal_ganglia_output",
+        "cortical_input_to_striatum",
+        "thalamic_relay"
+      ],
+      "description": "左中央前（运动皮质）投射到左尾状核（纹状体），参与基底节运动环路，涉及运动控制和学习的反馈回路。",
+      "step_count": 4,
+      "function_count": 4
+    },
+    {
+      "id": "7152c0a7-a404-40bd-a043-590e97d3d7fd",
+      "name": "left frontal eye field circuit",
+      "type": "unknown",
+      "score": 1.0,
+      "matched_functions": [
+        "saccadic eye movements and spatial attention"
+      ],
+      "description": "A circuit involving the left frontal eye field (FEF), precentral gyrus, and precuneus, responsible for saccadic eye movements and spatial attention.",
+      "step_count": 2,
+      "function_count": 1
+    },
+    {
+      "id": "17f639ab-e24f-4f79-821e-6882250c6204",
+      "name": "cerebellar vermal motor coordination circuit",
+      "type": "unknown",
+      "score": 1.0,
+      "matched_functions": [
+        "motor coordination",
+        "motor coordination and learning",
+        "motor learning",
+        "eye movement"
+      ],
+      "description": "The cerebellar vermis, including lobules I-V, VI-VII, and VIII-X, is involved in motor coordination, eye movement control, and motor learning. This circuit integrates sensory and motor information to fine-tune movements and maintain balance.",
+      "step_count": 2,
+      "function_count": 4
+    },
+    {
+      "id": "28ac89d1-96ec-4cc2-a688-540e3fe747ae",
+      "name": "left cerebellum white matter-right cerebellum white matter circuit",
+      "type": "unknown",
+      "score": 1.0,
+      "matched_functions": [
+        "motor coordination and learning"
+      ],
+      "description": "Connects left and right cerebellar white matter, facilitating interhemispheric communication for motor coordination and learning.",
+      "step_count": 1,
+      "function_count": 1
+    },
+    {
+      "id": "430fdb66-ab28-4517-8705-d3d737cccea3",
+      "name": "cerebello_thalamo_cortical_loop",
+      "type": "motor_circuit",
+      "score": 1.0,
+      "matched_functions": [
+        "cerebellar_output_relay",
+        "motor_adjustment",
+        "motor_error_computation",
+        "thalamocortical_relay"
+      ],
+      "description": "小脑前叶经丘脑向运动皮质发送纠错信号，形成皮质-脑桥-小脑-丘脑-皮质环路的一部分，参与运动学习与协调。",
+      "step_count": 4,
+      "function_count": 4
+    },
+    {
+      "id": "4f0f6c69-90f2-48e2-8dbb-e94af44f53a9",
+      "name": "cortical_thalamic_motor_pathway",
+      "type": "motor_circuit",
+      "score": 1.0,
+      "matched_functions": [
+        "motor_execution",
+        "motor_integration",
+        "motor_planning"
+      ],
+      "description": "皮层-丘脑运动通路，多个皮层区域投射到丘脑运动核团，再输出到多个运动相关区域，参与运动计划、整合和执行。",
+      "step_count": 3,
+      "function_count": 3
+    },
+    {
+      "id": "65b5d516-04f3-4a0e-99ac-c3cc7d97458f",
+      "name": "thalamic_exit_pathway",
+      "type": "motor_circuit",
+      "score": 1.0,
+      "matched_functions": [
+        "motor_execution",
+        "motor_planning"
+      ],
+      "description": "从丘脑到多个下游区域的运动输出通路，参与运动计划和执行。",
+      "step_count": 2,
+      "function_count": 2
+    },
+    {
+      "id": "a210c33d-ebfd-44db-8fa8-5d1e8fcb8f97",
+      "name": "corticocortical_motor_pathway",
+      "type": "motor_circuit",
+      "score": 1.0,
+      "matched_functions": [
+        "motor_execution",
+        "motor_planning"
+      ],
+      "description": "This circuit involves region 59cc54de receiving inputs from multiple cortical areas and projecting to several targets, suggesting a role in motor planning and execution.",
+      "step_count": 2,
+      "function_count": 2
+    }
+  ],
+  "graph_summary": {
+    "node_count": 14,
+    "edge_count": 21
+  }
+}

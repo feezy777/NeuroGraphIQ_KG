@@ -4,6 +4,7 @@ import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
 import { useI18n } from '../i18n-context'
 import { postJson } from '../api/client'
 import { SymptomCircuitGraph } from './symptom-query/SymptomCircuitGraph'
+import { ClinicalReportModal } from './symptom-query/ClinicalReportModal'
 import { normalizeSymptomGraph } from './symptom-query/normalizeSymptomGraph'
 import type { NormalizedEdge, RawGraphData } from './symptom-query/symptomGraphTypes'
 
@@ -27,6 +28,7 @@ export function SymptomQueryPage() {
   const [graph, setGraph] = useState<RawGraphData | null>(null)
   const [selectedStepIndex, setSelectedStepIndex] = useState<number | null>(null)
   const [selectedGraphEdge, setSelectedGraphEdge] = useState<NormalizedEdge | null>(null)
+  const [reportOpen, setReportOpen] = useState(false)
 
   const [phase, setPhase] = useState<'idle'|'chatting'|'summarizing'|'analyzing'|'results'>('idle')
   const [messages, setMessages] = useState<{role:string;content:string}[]>([])
@@ -204,6 +206,15 @@ export function SymptomQueryPage() {
           ))}
         </div>
       )}
+      {phase === 'results' && (
+        <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="btn btn-primary"
+            onClick={() => setReportOpen(true)}
+            disabled={!summary || circuits.length === 0}
+          >📄 生成报告</button>
+          {circuits.length === 0 && <span style={{fontSize:12,color:'#888'}}>需先完成回路分析后才能生成报告</span>}
+        </div>
+      )}
       {phase === 'results' && circuits.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 260px) minmax(420px, 1fr) minmax(220px, 250px)', gap: 12, height: 'calc(100vh - 250px)', minHeight: 560 }}>
           {/* Left: circuit list */}
@@ -326,6 +337,15 @@ export function SymptomQueryPage() {
         </div>
       )}
       {phase === 'results' && circuits.length === 0 && stdFunctions.length > 0 && <div style={{ color: '#94a3b8', fontSize: 14, textAlign: 'center', padding: 40 }}>未找到匹配回路</div>}
+
+      <ClinicalReportModal
+        open={reportOpen}
+        summary={summary}
+        circuits={circuits as any}
+        graphNodes={graph?.nodes?.length ?? 0}
+        graphEdges={graph?.edges?.length ?? 0}
+        onClose={() => setReportOpen(false)}
+      />
     </div>
   )
 }

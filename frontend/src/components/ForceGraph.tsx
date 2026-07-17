@@ -402,6 +402,21 @@ export function drawGraph(
   sim.force('charge', d3.forceManyBody().strength(-600))
   sim.force('center', d3.forceCenter(W / 2, H / 2))
   sim.force('collision', d3.forceCollide(25))
+
+  // Pre-compute layout synchronously WITHOUT DOM updates for speed,
+  // then render once at final positions. This avoids 300 per-tick SVG updates.
+  sim.stop()
+  for (let i = 0; i < 300; i++) sim.tick()
+
+  // Apply final positions to SVG in a single pass
+  link
+    .attr('x1', (d: any) => d.source.x)
+    .attr('y1', (d: any) => d.source.y)
+    .attr('x2', (d: any) => d.target.x)
+    .attr('y2', (d: any) => d.target.y)
+  ng.attr('transform', (d: any) => `translate(${d.x},${d.y})`)
+
+  // Live updates only for drag interactions
   sim.on('tick', () => {
     link
       .attr('x1', (d: any) => d.source.x)
@@ -410,10 +425,6 @@ export function drawGraph(
       .attr('y2', (d: any) => d.target.y)
     ng.attr('transform', (d: any) => `translate(${d.x},${d.y})`)
   })
-
-  // Run simulation longer for better spread
-  sim.alpha(1).restart()
-  for (let i = 0; i < 300; i++) sim.tick()
 
   // Drag
   ng.call(
@@ -428,7 +439,7 @@ export function drawGraph(
         d.fx = ev.x
         d.fy = ev.y
       })
-      .on('end', (ev: any, d: any) => {
+      .on('end', (ev: any, _d: any) => {
         if (!ev.active) sim.alphaTarget(0)
       }) as any,
   )
