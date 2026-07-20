@@ -17,6 +17,7 @@ from app.database import get_db
 from app.models.llm_extraction import LlmExtractionRun
 from app.models.mirror_kg import MirrorRegionCircuit
 from app.models.mirror_macro_clinical import MirrorCircuitFunction, MirrorCircuitStep
+from app.models.candidate import CandidateBrainRegion
 from app.services.llm_providers import get_llm_provider
 from app.services.settings_service import get_deepseek_runtime_config
 
@@ -36,12 +37,19 @@ class SymptomSearchRequest(BaseModel):
     categories: list[str] = []
     mode: str = "exploratory"
     granularity_level: str = "macro"
+    implicated_regions: list[str] = []
+    neurotransmitters: list[str] = []
+    pathway_level: str = "unknown"
 
 
 class SymptomAnalyzeResponse(BaseModel):
     functions: list[str]
     categories: list[str] = []
     primary_category: str = "other"
+    syndrome: str = ""
+    implicated_regions: list[str] = []
+    neurotransmitters: list[str] = []
+    pathway_level: str = "unknown"
 
 
 class CircuitResult(BaseModel):
@@ -67,16 +75,20 @@ class SymptomSearchResponse(BaseModel):
 
 # ── Analyze — LLM symptom → functions ──────────────────────────────────────
 
-ANALYZE_PROMPT = """You are a clinical neuroscientist. Convert the patient's symptom description into standardized brain function terms with categories.
+ANALYZE_PROMPT = """You are a senior clinical neurologist. Analyze the patient's symptoms and output structured data for brain circuit matching.
 
-Categories: motor, sensory, cognitive, emotional, autonomic, memory, language, attention, other
+Output ONLY this JSON:
+{{
+  "syndrome": "most likely clinical syndrome (e.g. Parkinsonism, Essential Tremor, Corticobasal Syndrome)",
+  "functions": ["standardized function terms for circuit search"],
+  "categories": ["motor","sensory","cognitive","emotional","autonomic","memory","language","attention"],
+  "primary_category": "primary domain",
+  "implicated_regions": ["brain regions implicated (e.g. substantia_nigra, striatum, thalamus, cerebellum)"],
+  "neurotransmitters": ["affected systems (e.g. dopamine, acetylcholine, serotonin, norepinephrine, glutamate, GABA)"],
+  "pathway_level": "cortical|subcortical|brainstem|spinal|peripheral"
+}}
 
-FOCUSED mode: return 1-2 most specific, high-confidence function terms. Be conservative.
-EXPLORATORY mode: return 3-5 function terms covering different possibilities. Be comprehensive.
-
-Output ONLY this JSON object:
-{{"functions":["term1","term2"],"categories":["motor","sensory"],"primary_category":"motor"}}
-
+FOCUSED: 1-2 functions, 2-3 regions. EXPLORATORY: 3-5 functions, 3-5 regions.
 Patient: {symptom}
 Mode: {mode}"""
 
@@ -90,39 +102,33 @@ async def analyze_symptom(body: SymptomAnalyzeRequest):
     try:
         resp = await provider.complete_json(
             model=cfg.default_model,
-            system_prompt="You are a clinical neuroscientist. Reply ONLY a JSON array of strings.",
-            user_prompt=prompt,
-            temperature=0.1,
+            system_prompt="You are a clinical neuroscientist. Output ONLY a JSON object with syndrome, functions, categories, primary_category, implicated_regions, neurotransmitters, pathway_level.",
+            user_prompt=prompt, temperature=0.1,
         )
         import ast as _ast, json as _json
         parsed = resp.parsed_json
-        # DeepSeek JSON mode wraps array in {"_array": [...]}
-        if isinstance(parsed, dict) and "_array" in parsed:
-            parsed = parsed["_array"]
-        # DeepSeek may return a JSON/Python string instead of parsed object
+        if isinstance(parsed, dict) and "_array" in parsed: parsed = parsed["_array"]
         if isinstance(parsed, str):
-            for parser in (_json.loads, _ast.literal_eval):
-                try:
-                    parsed = parser(parsed)
-                    break
-                except Exception:
-                    continue
-        if isinstance(parsed, list):
-            functions = [str(f) for f in parsed[:5]]
-            categories = ["other"] * len(functions)
-            primary = "other"
-        elif isinstance(parsed, dict):
-            functions = [str(f) for f in (parsed.get("functions") or [])][:5]
-            categories = [str(c) for c in (parsed.get("categories") or [])][:len(functions)]
-            primary = str(parsed.get("primary_category", categories[0] if categories else "other"))
+            for p in (_json.loads, _ast.literal_eval):
+                try: parsed = p(parsed); break
+                except: continue
+        if isinstance(parsed, dict):
+            funcs = [str(f) for f in (parsed.get("functions") or [])[:8]]
+            cats = [str(c).lower() for c in (parsed.get("categories") or [])][:len(funcs)]
+            primary = str(parsed.get("primary_category", cats[0] if cats else "other"))
+            syndrome = str(parsed.get("syndrome", ""))
+            regions = [str(r).lower().replace(" ", "_") for r in (parsed.get("implicated_regions") or [])]
+            nts = [str(n).lower() for n in (parsed.get("neurotransmitters") or [])]
+            pathway = str(parsed.get("pathway_level", "subcortical"))
+        elif isinstance(parsed, list):
+            funcs = [str(f) for f in parsed[:5]]; cats = ["other"]*len(funcs); primary = "other"
+            syndrome = ""; regions = []; nts = []; pathway = "unknown"
         else:
-            functions = [body.symptom]
-            categories = ["other"]
-            primary = "other"
-        # Ensure categories match function count
-        while len(categories) < len(functions):
-            categories.append("other")
-        return SymptomAnalyzeResponse(functions=functions, categories=categories, primary_category=primary)
+            funcs = [body.symptom]; cats = ["other"]; primary = "other"
+            syndrome = ""; regions = []; nts = []; pathway = "unknown"
+        while len(cats) < len(funcs): cats.append("other")
+        return SymptomAnalyzeResponse(functions=funcs, categories=cats, primary_category=primary,
+            syndrome=syndrome, implicated_regions=regions, neurotransmitters=nts, pathway_level=pathway)
     except Exception:
         logger.exception("Symptom analyze failed")
         return SymptomAnalyzeResponse(functions=[body.symptom], categories=["other"], primary_category="other")
@@ -198,33 +204,101 @@ async def search_circuits(
         if fn_term and fn_term not in d["matched_functions"]:
             d["matched_functions"].append(fn_term)
 
-    # Weighted relevance scoring per circuit
+    # ── Professional Multi-Dimensional Clinical Scoring ──────────────────────
+    # Dimensions: Semantic (30) + Anatomical (25) + Evidence (20) + Density (15) + Pathway (10)
+    # Max score = 100
+
+    implicated_regions = set(r.lower().replace(" ", "_") for r in (body.implicated_regions or []))
+    implicated_nts = set(n.lower() for n in (body.neurotransmitters or []))
+    pathway_level = (body.pathway_level or "unknown").lower()
+
+    # Collect all circuit IDs for batch queries
+    all_cids = [uuid.UUID(cid) for cid in circuit_data]
+
+    # ── Batch: count steps per circuit (for pathway scoring) ────────────
+    step_counts: dict[uuid.UUID, int] = {}
+    if all_cids:
+        sc_rows = (await session.execute(
+            select(MirrorCircuitStep.circuit_id, func.count())
+            .where(MirrorCircuitStep.circuit_id.in_(all_cids))
+            .group_by(MirrorCircuitStep.circuit_id)
+        )).fetchall()
+        step_counts = {row[0]: row[1] for row in sc_rows}
+
+    # ── Batch: get step region names for anatomical matching ────────────
+    step_regions: dict[uuid.UUID, list[str]] = {}
+    if all_cids and implicated_regions:
+        sr_rows = (await session.execute(
+            select(MirrorCircuitStep.circuit_id, CandidateBrainRegion.en_name)
+            .join(CandidateBrainRegion, CandidateBrainRegion.id == MirrorCircuitStep.region_candidate_id)
+            .where(MirrorCircuitStep.circuit_id.in_(all_cids))
+        )).fetchall()
+        for cid, ename in sr_rows:
+            step_regions.setdefault(cid, []).append((ename or "").lower().replace(" ", "_"))
+
+    # ── Batch: connection confidence for evidence scoring ──────────────
+    cm_rows = (await session.execute(text("""
+        SELECT mcm.circuit_id, AVG(mrc.confidence)
+        FROM mirror_circuit_projection_memberships mcm
+        JOIN mirror_region_connections mrc ON mrc.id = mcm.projection_id
+        WHERE mcm.circuit_id = ANY(:cids) AND mrc.confidence IS NOT NULL
+        GROUP BY mcm.circuit_id
+    """), {"cids": all_cids})).fetchall()
+    conn_confidence: dict[uuid.UUID, float] = {row[0]: float(row[1] or 0.5) for row in cm_rows}
+
+    # ── Score each circuit ──────────────────────────────────────────────
     scored = []
     for cid, d in circuit_data.items():
         uid = uuid.UUID(cid)
-        # Count total functions for density
+
+        # Total function count
         func_count = await session.scalar(
             select(func.count()).select_from(MirrorCircuitFunction).where(
                 MirrorCircuitFunction.circuit_id == uid
             )
         ) or 1
-        # Category match: how many of this circuit's function domains match symptom categories
-        circuit_cats = set()
-        for fd in d["fn_domains"]:
-            for sc in symptom_cats:
-                if sc in fd or fd in sc:
-                    circuit_cats.add(sc)
-        d["matched_categories"] = list(circuit_cats)
-        cat_bonus = min(30, len(circuit_cats) * 10)  # 0-30
-        sim_score = min(50, d["sim"] * 50)            # 0-50
-        density = min(20, len(d["matched_functions"]) / max(func_count, 1) * 20)  # 0-20
-        relevance = cat_bonus + sim_score + density
+
+        # 1. SEMANTIC RELEVANCE (0-30): how well functions match symptom terms
+        semantic = min(30, d["sim"] * 35)
+
+        # 2. ANATOMICAL SPECIFICITY (0-25): do circuit regions overlap with implicated regions?
+        anatomical = 0
+        circ_regions = step_regions.get(uid, [])
+        if implicated_regions and circ_regions:
+            matched_regions = sum(1 for cr in circ_regions if any(ir in cr or cr in ir for ir in implicated_regions))
+            anatomical = min(25, int(matched_regions / max(len(implicated_regions), 1) * 25))
+
+        # 3. EVIDENCE QUALITY (0-20): average connection confidence in this circuit
+        avg_conf = conn_confidence.get(uid, 0.5)
+        evidence = min(20, int(avg_conf * 20))
+
+        # 4. FUNCTIONAL DENSITY (0-15): how focused is this circuit on matched terms?
+        matched_frac = len(d["matched_functions"]) / max(func_count, 1)
+        density = min(15, int(matched_frac * 20))
+
+        # 5. PATHWAY SPECIFICITY (0-10): reward well-defined pathways, penalize vague
+        pathway_score = 5  # baseline
+        name = (d["circuit_name"] or "").lower()
+        if any(kw in name for kw in ("basal_ganglia", "cortico_striatal", "thalamocortical", "nigrostriatal", "cerebello_thalamo")):
+            pathway_score = 10  # gold-standard defined pathway
+        elif any(kw in name for kw in ("unknown", "unspecified", "generic")):
+            pathway_score = 1   # penalize vague circuits
+        n_steps = step_counts.get(uid, 0)
+        if n_steps >= 4: pathway_score += 1  # well-defined, multi-step circuit
+        if n_steps <= 1: pathway_score = max(1, pathway_score - 2)
+
+        # Compute total clinical relevance score (max 100)
+        relevance = semantic + anatomical + evidence + density + pathway_score
         d["relevance"] = round(relevance, 1)
         d["func_count"] = func_count
+        d["score_breakdown"] = {
+            "semantic": semantic, "anatomical": anatomical, "evidence": evidence,
+            "density": density, "pathway": pathway_score,
+        }
         scored.append(d)
 
-    # Mode-based threshold: focused is stricter, exploratory is broader
-    threshold = 12 if body.mode == "focused" else 3
+    # Mode-based threshold
+    threshold = 25 if body.mode == "focused" else 8
     scored = [d for d in scored if d["relevance"] >= threshold]
     scored.sort(key=lambda d: d["relevance"], reverse=True)
 
@@ -677,6 +751,10 @@ class ReportRequest(BaseModel):
     circuits: list[dict] = []
     graph_nodes: int = 0
     graph_edges: int = 0
+    syndrome: str = ""
+    implicated_regions: list[str] = []
+    neurotransmitters: list[str] = []
+    pathway_level: str = ""
 
 
 class ReportResponse(BaseModel):
@@ -684,37 +762,37 @@ class ReportResponse(BaseModel):
     generated_at: str
 
 
-REPORT_PROMPT = """You are a senior clinical neurologist writing a patient-facing brain health analysis report in Chinese. The report MUST be based on the patient's symptoms AND the actual brain circuits/regions matched by the NeuroGraphIQ knowledge graph.
+REPORT_PROMPT = """You are a senior clinical neurologist writing a patient-facing brain health analysis report in Chinese.
 
-## Patient's Clinical Summary
-{summary}
+## Patient Clinical Data
+Summary: {summary}
+AI Diagnosis: {syndrome}
+Implicated Brain Regions: {regions}
+Affected Neurotransmitter Systems: {nts}
+Pathway Level: {pathway}
 
-## Brain Circuits Matched by NeuroGraphIQ System
-The system identified the following brain circuits as relevant to this patient. Each circuit involves specific brain regions connected in sequence. You MUST reference these circuits and regions in your analysis:
+## Brain Circuits Matched by System
 {circuit_list}
-
-## Brain Network Data
-The matched circuit network involves {node_count} brain regions with {edge_count} connections between them.
+Network: {node_count} regions, {edge_count} connections.
 
 WRITING RULES:
-1. Write in Chinese, patient-facing but professionally detailed
-2. NO markdown artifacts: no "---", no "***", no "**" wrapping entire lines. Use plain section headers with 【】 brackets instead of # marks
-3. NO scores, NO match percentages, NO technical confidence numbers
-4. MUST reference the actual circuit names and brain regions from the system data above
-5. For each brain circuit mentioned, explain in plain language what it does and how the patient's symptoms relate to its dysfunction
-6. Include a simple ASCII diagram showing the key brain regions and their connections (use text characters like ───, ▲, ▼, ◄, ► to draw the circuit flow)
-7. Use the patient summary to connect specific symptoms to specific brain regions/circuits
+1. Chinese, patient-facing, professional detail
+2. NO markdown artifacts (---, ***, ** wrapping lines). Use 【】 for section headers
+3. NO scores, match percentages, confidence numbers
+4. Reference actual circuit names and brain regions from the system data
+5. Integrate the AI diagnosis ({syndrome}) and implicated regions ({regions}) into the analysis
+6. Explain neurotransmitter involvement ({nts}) in plain language
+7. Connect each symptom to specific circuits and regions
 
-STRUCTURE (use 【】 for headers):
-【一、症状分析】Describe each symptom and which brain regions/circuits are involved
-【二、大脑回路分析】For each key circuit: name it, explain its normal function, how it's affected, which regions are involved
-  Include this ASCII circuit diagram: show the basal ganglia motor loop with key regions
-【三、神经递质与脑电活动】How dopamine, acetylcholine etc are affected in these circuits
-【四、循环系统与脑脊液】Blood supply, venous drainage, glymphatic clearance
-【五、外周器官与神经影响】Gut, heart, skin, autonomic nerves
-【六、综合总结与建议】Patient-friendly summary and lifestyle/medical recommendations
+STRUCTURE:
+【一、临床分析】Integrate the syndrome diagnosis, clinical summary, and key symptoms. Reference the implicated brain regions.
+【二、大脑回路分析】For top circuits: name, normal function, how affected, involved regions. Include circuit flow diagram.
+【三、神经递质与脑电活动】Cover {nts} systems. Explain EEG correlates.
+【四、循环系统与脑脊液】Blood supply, drainage, glymphatic clearance relevant to affected regions.
+【五、外周器官与神经影响】Gut, heart, skin, autonomic nerves.
+【六、综合总结与建议】Patient-friendly summary, medical/lifestyle recommendations.
 
-The report should be detailed enough to fill 2 A4 pages. Include at least one text-based brain circuit diagram."""
+Output ONLY valid markdown. Use 【】 for headers. No JSON wrapper."""
 
 
 @router.post("/report", response_model=ReportResponse)
@@ -745,6 +823,10 @@ async def generate_clinical_report(body: ReportRequest):
 
     prompt = REPORT_PROMPT.format(
         summary=body.summary,
+        syndrome=body.syndrome or "待确认",
+        regions=", ".join(body.implicated_regions) if body.implicated_regions else "待分析",
+        nts=", ".join(body.neurotransmitters) if body.neurotransmitters else "待分析",
+        pathway=body.pathway_level or "unknown",
         circuit_list="\n".join(circuit_lines) or "No circuits matched",
         node_count=body.graph_nodes,
         edge_count=body.graph_edges,
@@ -806,6 +888,10 @@ async def generate_clinical_report_pdf(body: ReportRequest):
 
     prompt = REPORT_PROMPT.format(
         summary=body.summary,
+        syndrome=body.syndrome or "待确认",
+        regions=", ".join(body.implicated_regions) if body.implicated_regions else "待分析",
+        nts=", ".join(body.neurotransmitters) if body.neurotransmitters else "待分析",
+        pathway=body.pathway_level or "unknown",
         circuit_list="\n".join(circuit_lines) or "No circuits matched",
         node_count=body.graph_nodes,
         edge_count=body.graph_edges,

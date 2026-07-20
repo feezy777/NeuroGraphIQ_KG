@@ -29,6 +29,10 @@ export function SymptomQueryPage() {
   const [selectedStepIndex, setSelectedStepIndex] = useState<number | null>(null)
   const [selectedGraphEdge, setSelectedGraphEdge] = useState<NormalizedEdge | null>(null)
   const [reportOpen, setReportOpen] = useState(false)
+  const [clinSyndrome, setClinSyndrome] = useState('')
+  const [clinRegions, setClinRegions] = useState<string[]>([])
+  const [clinNeurotransmitters, setClinNeurotransmitters] = useState<string[]>([])
+  const [clinPathway, setClinPathway] = useState('')
 
   const [phase, setPhase] = useState<'idle'|'chatting'|'summarizing'|'analyzing'|'results'>('idle')
   const [messages, setMessages] = useState<{role:string;content:string}[]>([])
@@ -73,16 +77,22 @@ export function SymptomQueryPage() {
     setPhase('analyzing'); setError(null); setGraph(null); setSelectedCircuitId(null); setSelectedStepIndex(null); setSelectedGraphEdge(null)
     setCircuits([]); setStdFunctions([])
     try {
-      const ar = await postJson<{functions:string[];categories:string[];primary_category:string}>('/api/symptom-query/analyze', { symptom: summary.trim(), mode })
+      const ar = await postJson<{functions:string[];categories:string[];primary_category:string;syndrome:string;implicated_regions:string[];neurotransmitters:string[];pathway_level:string}>('/api/symptom-query/analyze', { symptom: summary.trim(), mode })
       if (analysisRunRef.current !== runId) return
       const funcs = ar.functions || []; const cats = ar.categories || []
       setStdFunctions(funcs)
+      setClinSyndrome(ar.syndrome || '')
+      setClinRegions(ar.implicated_regions || [])
+      setClinNeurotransmitters(ar.neurotransmitters || [])
+      setClinPathway(ar.pathway_level || '')
       const er = await postJson<{expanded:string[]}>('/api/symptom-query/expand', { functions: funcs })
       if (analysisRunRef.current !== runId) return
-      // Combine expanded terms + original functions for maximum coverage
       const allFuncs = [...new Set([...(er.expanded || []), ...funcs])]
       const sr = await postJson<{circuits:CircuitResult[]}>('/api/symptom-query/search', {
         functions: allFuncs, categories: cats, mode, granularity_level: granularity,
+        implicated_regions: ar.implicated_regions || [],
+        neurotransmitters: ar.neurotransmitters || [],
+        pathway_level: ar.pathway_level || 'unknown',
       })
       if (analysisRunRef.current !== runId) return
       const found = sr.circuits || []; setCircuits(found)
@@ -344,6 +354,11 @@ export function SymptomQueryPage() {
         circuits={circuits as any}
         graphNodes={graph?.nodes?.length ?? 0}
         graphEdges={graph?.edges?.length ?? 0}
+        graphData={graph}
+        syndrome={clinSyndrome}
+        implicatedRegions={clinRegions}
+        neurotransmitters={clinNeurotransmitters}
+        pathwayLevel={clinPathway}
         onClose={() => setReportOpen(false)}
       />
     </div>

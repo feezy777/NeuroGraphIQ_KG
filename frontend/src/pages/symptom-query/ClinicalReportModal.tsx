@@ -1,8 +1,11 @@
 /**
- * ClinicalReportModal.tsx —炫酷的AI报告生成弹窗，集成进度条和回路展示。
+ * ClinicalReportModal.tsx — AI报告生成弹窗，集成进度条、回路图和影响路径。
  */
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { postJson } from '../../api/client'
+import { SymptomCircuitGraph } from './SymptomCircuitGraph'
+import { normalizeSymptomGraph } from './normalizeSymptomGraph'
+import type { RawGraphData } from './symptomGraphTypes'
 import './ClinicalReportModal.css'
 
 interface CircuitInfo {
@@ -22,6 +25,11 @@ interface Props {
   circuits: CircuitInfo[]
   graphNodes: number
   graphEdges: number
+  graphData: RawGraphData | null
+  syndrome: string
+  implicatedRegions: string[]
+  neurotransmitters: string[]
+  pathwayLevel: string
   onClose: () => void
 }
 
@@ -33,7 +41,7 @@ const STAGES: Stage[] = [
   { key: 'render', label: '最终排版渲染', icon: '✨' },
 ]
 
-export function ClinicalReportModal({ open, summary, circuits, graphNodes, graphEdges, onClose }: Props) {
+export function ClinicalReportModal({ open, summary, circuits, graphNodes, graphEdges, graphData, syndrome, implicatedRegions, neurotransmitters, pathwayLevel, onClose }: Props) {
   const [stage, setStage] = useState(0)
   const [progress, setProgress] = useState(0)
   const [reportHtml, setReportHtml] = useState('')
@@ -76,15 +84,33 @@ export function ClinicalReportModal({ open, summary, circuits, graphNodes, graph
       })),
       graph_nodes: graphNodes,
       graph_edges: graphEdges,
+      syndrome,
+      implicated_regions: implicatedRegions,
+      neurotransmitters,
+      pathway_level: pathwayLevel,
     }).then(resp => {
       finishProgress()
-      // Convert markdown-like report to styled HTML
       let body = resp.report_markdown
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/\n\n/g, '</p><p>')
-        .replace(/^【(.+)】$/gm, '<h2>$1</h2>')
+        // Clean artifacts
+        .replace(/^[-*_]{3,}\s*$/gm, '')
+        .replace(/\\\*\*\*/g, '')
+        // Bold/italic
+        .replace(/\*\*\*(.+?)\*\*\*/g, '<strong>$1</strong>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        // Section headers FIRST (before paragraph conversion): wrap in <h2>
+        .replace(/^(【[^】]+】)\s*$/gm, '<h2>$1</h2>')
+        // Sub-headers
+        .replace(/^##\s+(.+)$/gm, '<h3>$1</h3>')
+        // Bullet lists
         .replace(/^- (.+)$/gm, '<li>$1</li>')
-        .replace(/^```([\s\S]*?)```/gm, '<pre>$1</pre>')
+        .replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
+        // Code blocks
+        .replace(/```([\s\S]*?)```/g, '<pre>$1</pre>')
+        // Numbered items
+        .replace(/^(\d+)\.\s+(.+)$/gm, '<p><strong>$1.</strong> $2</p>')
+        // Paragraphs LAST
+        .replace(/\n\n/g, '</p><p>')
       setReportHtml(body)
     }).catch(e => {
       if (timerRef.current) clearInterval(timerRef.current)
@@ -200,8 +226,76 @@ export function ClinicalReportModal({ open, summary, circuits, graphNodes, graph
         {/* Report content */}
         {done && (
           <div className="report-content-container">
-            <div className="report-content-body" ref={reportRef}
-              dangerouslySetInnerHTML={{ __html: reportHtml }} />
+            {/* Split at section 二 to insert graph */}
+            {(() => {
+              const graphBlock = circuits.length > 0 && graphData ? (() => {
+                const top = circuits[0]
+                const model = normalizeSymptomGraph(graphData, new Set(circuits.slice(0,1).map(c => c.id)))
+                const regionNames = model.nodes?.map((n: any) => n.label || n.name_en || '').filter(Boolean) || []
+                return (
+                  <div className="circuit-graph-section">
+                    <h3>核心回路: {top.circuit_name}</h3>
+                    {top.circuit_type && <span className="circuit-type-badge">{top.circuit_type}</span>}
+
+                    <div className="circuit-explain">
+                      <p><strong>{top.circuit_name}</strong> 是系统中与当前症状匹配度最高的神经回路（评分 {((top.match_score || 0) * 100).toFixed(0)} 分）。</p>
+                      {top.description && <p>{top.description}</p>}
+                      <p>该回路由 <strong>{top.step_count || 0} 个步骤</strong>组成，涉及 <strong>{regionNames.length} 个脑区</strong>，包含 <strong>{top.function_count || 0} 个功能模块</strong>。以下图谱展示该回路的完整连接结构，您可以拖拽、缩放查看每个脑区的具体位置和连接关系。</p>
+                      {regionNames.length > 0 && (
+                        <p>涉及脑区: {regionNames.map((r: string) => <code key={r}>{r}</code>)}</p>
+                      )}
+                    </div>
+
+                    <div className="circuit-graph-wrapper"
+                      ref={(el) => {
+                        if (!el) return
+                        // Let D3 handle zoom, but prevent parent scroll
+                        const onWheel = (e: WheelEvent) => {
+                          e.stopPropagation()
+                        }
+                        el.addEventListener('wheel', onWheel, { passive: false })
+                      }}>
+                      <SymptomCircuitGraph
+                        model={model}
+                        selectedCircuitId={top.id}
+                        selectedCircuit={top as any}
+                        selectedStepIndex={null}
+                        onStepHover={() => {}}
+                        onStepSelect={() => {}}
+                        onEdgeSelect={() => {}}
+                      />
+                    </div>
+
+                    <div className="circuit-stats">
+                      <span>{top.step_count || 0} 步骤</span>
+                      <span>{top.function_count || 0} 功能</span>
+                      <span>{regionNames.length} 脑区</span>
+                      <span>{model.edges?.length || 0} 连接</span>
+                    </div>
+                  </div>
+                )
+              })() : null
+
+              // Split BEFORE section 三 — insert graph between 二 and 三
+              const splitAt = /(?=<h2>【三[、,，])/
+              let parts = reportHtml.split(splitAt)
+              // Fallback: try raw markdown
+              if (parts.length === 1) {
+                const raw = reportHtml.split(/(?=【三[、,，])/)
+                if (raw.length > 1) parts = raw
+              }
+              return (
+                <>
+                  <div className="report-content-body" ref={reportRef}
+                    dangerouslySetInnerHTML={{ __html: (parts?.[0]) || reportHtml }} />
+                  {graphBlock}
+                  {parts?.[1] && (
+                    <div className="report-content-body"
+                      dangerouslySetInnerHTML={{ __html: parts[1] }} />
+                  )}
+                </>
+              )
+            })()}
           </div>
         )}
       </div>

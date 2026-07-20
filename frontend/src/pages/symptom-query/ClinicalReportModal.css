@@ -117,3 +117,46 @@
 .report-content-body::-webkit-scrollbar { width: 5px }
 .report-content-body::-webkit-scrollbar-track { background: transparent }
 .report-content-body::-webkit-scrollbar-thumb { background: #d9d9d9; border-radius: 3px }
+
+/* Circuit graph section */
+.circuit-graph-section {
+  margin: 20px 0; padding: 16px;
+  background: #fafbfc; border: 1px solid #e5e6e8; border-radius: 8px;
+}
+.circuit-graph-section h3 {
+  font-size: 15px; color: #1d2129; margin: 0 0 6px;
+}
+.circuit-type-badge {
+  display: inline-block; font-size: 11px; background: #e6f4ff;
+  color: #1677ff; padding: 2px 8px; border-radius: 3px; margin-bottom: 12px;
+}
+.circuit-explain {
+  margin-bottom: 14px; font-size: 13px; color: #444; line-height: 1.9;
+}
+.circuit-explain p { margin: 6px 0 }
+.circuit-explain code {
+  display: inline-block; font-size: 11px; background: #f0f5ff;
+  padding: 1px 6px; border-radius: 3px; margin: 2px 4px 2px 0; color: #1677ff;
+}
+.circuit-graph-wrapper {
+  height: 420px; border: 1px solid #e5e6e8; border-radius: 8px;
+  overflow: hidden; background: #fff; position: relative;
+}
+.circuit-graph-wrapper:hover {
+  /* When hovering the graph, parent should not scroll */
+}
+.circuit-graph-wrapper svg {
+  /* D3 SVG gets zoom, parent does NOT */
+}
+.circuit-graph-wrapper::after {
+  content: '拖拽平移 · 滚轮缩放 · 点击查看脑区';
+  position: absolute; top: 8px; left: 12px; z-index: 10;
+  font-size: 10px; color: #bbb; pointer-events: none;
+}
+.circuit-stats {
+  margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap;
+}
+.circuit-stats span {
+  padding: 5px 12px; background: #f0f5ff; border-radius: 6px;
+  font-size: 12px; color: #1677ff; font-weight: 500;
+}
