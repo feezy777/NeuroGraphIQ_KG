@@ -560,6 +560,14 @@ class MolecularCircuitExtractionRequest(BaseModel):
 | 10 | 候选池写入 + 幂等性 | 集成 |
 | 11 | Major/Sub 粒度回路提取不受影响 | 回归 |
 | 12 | 相同输入重复运行一致性 | 集成 |
+| 13 | subject/object 均能回查 574 候选脑区 | 集成 |
+| 14 | 所有关系回查原始 edge_id | 集成 |
+| 15 | 所有关系回查 circuit_id + step_order | 集成 |
+| 16 | provenance 完整率 100% | 集成 |
+| 17 | DeepSeek 虚构脑区/连接被拦截 | 单元 |
+| 18 | 字段缺失无依据默认值被拦截 | 单元 |
+| 19 | 幂等写入：重试不重复 | 集成 |
+| 20 | 数据中心/回路主表/步骤表数量对账 | 集成 |
 
 验收指标：
 - 图构建 < 10s
@@ -568,13 +576,143 @@ class MolecularCircuitExtractionRequest(BaseModel):
 - 所有类型检查通过
 - 不影响其他粒度
 
-## 13. 文件清单
+## 12. 数据中心字段完整写入
+
+通过图算法校验、DeepSeek 语义判定和 Quality Gate 的 Molecular 回路，不仅要写入回路候选主表和步骤表，还要按照现有数据中心的数据结构生成完整的关系记录。
+
+### 12.1 审计要求
+
+先审计数据中心实际数据库字段名、API schema、状态枚举和现有写入方式。界面中的 "confidence（Mirror）""evidence_text（Mirror）" 可能是展示名称，必须使用后端真实字段，不得自行创建重复字段。
+
+### 12.2 回路步骤 → 数据中心关系记录
+
+每个通过校验的回路步骤生成一条数据中心关系记录。例如 A → B → C → A 应生成：A→B、B→C、C→A。
+
+脑区相关字段必须从系统现有候选脑区表读取，使用候选脑区表中的正式 `region_id`、中文名、英文名、实体类型和其他标准字段。禁止直接使用 DeepSeek 返回的自由文本名称作为正式脑区字段，禁止创建候选脑区表中不存在的新脑区。
+
+### 12.3 字段填写规则
+
+| # | 字段 | 规则 |
+|---|------|------|
+| 1 | `id` | 使用项目现有 ID 生成机制；由数据库/UUID 生成器生成；禁止使用数组下标或可能重复的临时编号 |
+| 2 | `subject_type` | 使用候选脑区表和数据中心现有的正式脑区实体类型；不得另行创造新枚举 |
+| 3 | `subject_id` | 当前回路步骤中 source 脑区对应的候选脑区正式 ID；必须能唯一匹配 574 个候选脑区之一 |
+| 4 | `subject_label` | 从候选脑区表读取标准显示名称；不使用 DeepSeek 自行改写的名称覆盖正式名称 |
+| 5 | `predicate` | 优先继承 64,313 条原始连接中的正式关系类型；不得把所有边统一写成 `related_to`；不得由 LLM 创造新的关系类型 |
+| 6 | `object_type` | 使用候选脑区表和数据中心现有的正式脑区实体类型 |
+| 7 | `object_id` | 当前回路步骤中 target 脑区对应的候选脑区正式 ID |
+| 8 | `object_label` | 从候选脑区表读取目标脑区标准名称；不使用 DeepSeek 自由生成名称覆盖 |
+| 9 | `confidence` | 填写原始连接记录中的基础置信度；如一条边有多条原始记录，按系统已有聚合规则计算；禁止让 DeepSeek 替代；原始连接确实无置信度时保留 null 进入人工复核 |
+| 10 | `evidence_count` | 优先使用原始连接记录的证据数量；从关联证据表确定性统计；不允许 DeepSeek 估算；数值必须与实际可追溯证据记录一致 |
+| 11 | `created_at` | 使用数据中心现有时间生成规则；不复制原始连接的旧时间 |
+| 12 | `mirror_status` | 使用现有状态枚举；本阶段生成的数据均属于镜像候选数据，不得标记为正式数据 |
+| 13 | `review_status` | 高置信度+Quality Gate 通过→待审核；中低置信度→人工复核；拓扑/字段校验失败→拒绝；必须映射为项目当前已有枚举 |
+| 14 | `validation_status` | Quality Gate 全部通过后填写验证通过状态；任一项失败不得标记通过 |
+| 15 | `promotion_status` | 不得自动正式入库；默认使用未晋升状态；即使置信度很高也不得自动标记已晋升 |
+| 16 | `mirror_confidence` | 使用后端实际对应字段；填写 DeepSeek 对当前回路步骤的语义判断置信度(0~1)；与原始连接 `confidence` 分开保存 |
+| 17 | `mirror_evidence_text` | 使用后端实际对应字段；DeepSeek 基于当前输入数据形成的简洁语义解释；不得伪造论文标题/DOI/实验结论；原始证据文本与 Mirror 解释必须分开保存 |
+| 18 | `provenance` | 结构化来源信息，至少包含: `extraction_run_id`, `workflow_type`, `pack_id`, `candidate_id`, `circuit_id`, `canonical_key`, `step_order`, `edge_id`, `source_connection_record_id`, `source_region_record_id`, `target_region_record_id`, `functional_modules`, `topology_type`, `anatomical_pattern`, `graph_algorithm`, `prompt_version`, `model`, `quality_gate_version`, `raw_response_reference`, `created_by` |
+
+### 12.4 新增文件
+
+| 文件 | 用途 |
+|------|------|
+| `backend/app/services/molecular_circuit_datacenter_writer.py` | 数据中心关系记录写入 + 字段映射 |
+| `backend/app/services/molecular_circuit_datacenter_validator.py` | Data Center Record Quality Gate |
+
+## 13. 脑区字段权威来源
+
+候选脑区表是 Molecular 脑区实体的唯一权威来源。
+
+写入前必须建立 `regionById`、`regionByCanonicalName`、`regionAliasIndex`，但最终关联只能以正式脑区 ID 确认。
+
+规则：
+1. source 和 target 都必须在 574 个候选脑区中存在
+2. ID 匹配成功后，subject_label 和 object_label 从候选脑区表重新读取
+3. 原始连接名称/DeepSeek 名称与候选脑区名称不一致时，以候选脑区表为准
+4. 名称差异写入 `provenance` 或 `validation_issues`
+5. 不允许只根据名称创建脑区
+6. 不允许多个未知脑区共用一个 `unknown_region`
+7. 任一端无法匹配候选脑区时，该步骤进入 `failed_items`，不得写入数据中心
+8. 不得在本工作流中修改候选脑区表内容
+
+## 14. 字段完整性门 (Data Center Record Quality Gate)
+
+写入数据中心前增加专门的校验。至少验证：
+
+- `id` 非空且唯一
+- `subject_type`/`object_type` 合法
+- `subject_id`/`object_id` 存在
+- `subject_label`/`object_label` 非空
+- `predicate` 合法（不为 `related_to` 等无意义默认值）
+- `confidence` 为 null 或 0~1 合法数值
+- `evidence_count` 为非负整数
+- `created_at` 有效
+- 所有状态字段符合现有枚举
+- `mirror_confidence` 为 0~1
+- `mirror_evidence_text` 非空或明确标记缺失原因
+- `provenance` 包含全部必要追溯字段
+- source 与 target 和原始 edge_id 完全一致
+- 同一 run 重试不会重复写入相同步骤
+
+**禁止为了"填满字段"而伪造内容。** 字段无法可靠获得时：
+- Schema 允许为空→保留 null，记录 `missing_fields`
+- Schema 不允许为空→不得写入有效候选池，进入人工复核或失败清单
+- 不得使用"未知""暂无""0.5"等无依据默认值绕过校验
+
+## 15. 幂等写入与事务
+
+回路候选主记录、回路步骤记录和数据中心关系记录必须在可控事务中写入。
+
+幂等键至少包含：`extraction_run_id` + `canonical_key` + `step_order` + `edge_id` + `subject_id` + `predicate` + `object_id`。
+
+- 失败重试、任务恢复和重复提交不得产生重复记录
+- 单条步骤写入失败时：不得造成半条记录；应记录具体失败字段和错误原因；不得导致已完成的其他包结果丢失；回路主记录与步骤记录的一致性必须可校验
+
+## 16. 最终验收统计
+
+任务汇总中增加：
+
+| 指标 | 说明 |
+|------|------|
+| 生成回路候选数 | total circuits |
+| 生成步骤总数 | total steps |
+| 成功写入数据中心关系数 | records written to datacenter |
+| 字段全部完整的关系数 | records with all fields |
+| 可空字段缺失的关系数 | records with nullable fields missing |
+| 因脑区无法匹配而拒绝的步骤数 | region match failures |
+| 因 predicate 非法而拒绝的步骤数 | illegal predicate |
+| 因证据字段缺失进入人工复核数量 | manual review for missing evidence |
+| 因状态字段非法而失败的数量 | illegal status enum |
+| 重复关系拦截数量 | duplicate intercepts |
+| `provenance` 完整率 | % with full provenance |
+| subject/object 与候选脑区表一致率 | % region match |
+| 原始 confidence 覆盖率 | % with source confidence |
+| Mirror confidence 覆盖率 | % with mirror confidence |
+| evidence_count 覆盖率 | % with evidence count |
+| Mirror evidence_text 覆盖率 | % with mirror evidence text |
+
+**验收要求：**
+1. 写入数据中心的 subject 和 object 均能回查到 574 个候选脑区
+2. 所有关系均能回查原始 edge_id
+3. 所有关系均能回查所属 circuit_id 和 step_order
+4. 所有关系均具备完整 provenance
+5. 不存在 DeepSeek 虚构脑区
+6. 不存在 DeepSeek 虚构连接
+7. 不存在字段缺失但被静默填入无依据默认值
+8. 不写入正式库
+9. 不影响 Major、Sub 及其他粒度现有数据
+10. 数据中心、回路候选主表和步骤表之间数量关系可以对账
+
+## 17. 文件清单（更新）
 
 ```
 新: backend/app/services/molecular_circuit_graph_engine.py
 新: backend/app/services/molecular_circuit_module_classifier.py
 新: backend/app/services/molecular_circuit_prompt_builder.py
 新: backend/app/services/molecular_circuit_quality_gate.py
+新: backend/app/services/molecular_circuit_datacenter_writer.py
+新: backend/app/services/molecular_circuit_datacenter_validator.py
 新: backend/app/services/molecular_circuit_extraction_service.py
 新: backend/app/routers/molecular_circuit_extraction.py
 新: backend/app/schemas/molecular_circuit_extraction.py
