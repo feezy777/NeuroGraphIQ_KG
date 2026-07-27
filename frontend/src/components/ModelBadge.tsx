@@ -35,8 +35,8 @@ function resolveModelInfo(provider?: string, modelName?: string): ModelInfo | nu
 }
 
 interface ModelBadgeProps {
-  provider?: string
-  modelName?: string
+  provider?: string | null
+  modelName?: string | null
 }
 
 export function ModelBadge({ provider, modelName }: ModelBadgeProps) {

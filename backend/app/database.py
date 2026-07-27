@@ -23,6 +23,8 @@ def _create_engine_and_factory(database_url: str) -> tuple[AsyncEngine, async_se
         database_url,
         echo=settings.db_echo,
         pool_pre_ping=True,
+        pool_size=20,
+        max_overflow=10,
     )
     factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     return engine, factory

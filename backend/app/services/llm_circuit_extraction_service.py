@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.candidate import CandidateBrainRegion
 from app.models.llm_extraction import LlmExtractionItem, LlmExtractionRun
 from app.models.mirror_kg import MirrorCircuitRegion, MirrorRegionCircuit, MirrorRegionConnection, MirrorRegionFunction
+from app.models.promotion import FinalBrainRegion
 from app.schemas.llm_extraction import LlmItemStatus, LlmRunStatus, LlmScopeType, LlmTaskType
 from app.schemas.mirror_kg import (
     CircuitRegionRole,
@@ -47,11 +48,11 @@ from app.services.settings_service import get_deepseek_runtime_config, get_kimi_
 
 # No hard cap on candidate count — large selections produce warnings only.
 LARGE_CANDIDATE_WARNING_THRESHOLD = 50
-DEFAULT_MAX_CIRCUITS = 10
-DEFAULT_MIN_REGIONS_PER_CIRCUIT = 2
+DEFAULT_MAX_CIRCUITS = 300
+DEFAULT_MIN_REGIONS_PER_CIRCUIT = 2  # maximize discovery — 2+ regions
 DEFAULT_MAX_REGIONS_PER_CIRCUIT = 12
 CIRCUIT_TEMPLATE_KEY = "same_granularity_circuit_completion_v1"
-CONTEXT_LOAD_LIMIT = 200
+CONTEXT_LOAD_LIMIT = 200  # balanced: fast loading + sufficient context
 
 DEFAULT_ALLOWED_CIRCUIT_TYPES = frozenset({
     CircuitType.sensory_circuit,
@@ -67,6 +68,76 @@ DEFAULT_ALLOWED_CIRCUIT_TYPES = frozenset({
     CircuitType.uncertain_circuit,
     CircuitType.unknown,
 })
+
+# Backward-compatible aliases — maps legacy LLM output names to valid CircuitType values.
+# Prompt v1 used descriptive names that don't match the CircuitType enum; this bridge
+# prevents those values from being coerced to "unknown".
+CIRCUIT_TYPE_ALIAS_MAP: dict[str, str] = {
+    # Legacy prompt names → correct enum values
+    "sensory_pathway": CircuitType.sensory_circuit,
+    "motor_pathway": CircuitType.motor_circuit,
+    "associative_pathway": CircuitType.cognitive_control_circuit,
+    "cognitive_circuit": CircuitType.cognitive_control_circuit,
+    "language_circuit": CircuitType.language_related,
+    "default_mode_circuit": CircuitType.default_mode_related,
+    "salience_circuit": CircuitType.salience_related,
+    "attention_circuit": CircuitType.attention_related,
+    "thalamocortical_loop": CircuitType.sensory_circuit,
+    "basal_ganglia_loop": CircuitType.motor_circuit,
+    "cerebellar_loop": CircuitType.motor_circuit,
+    "brainstem_circuit": CircuitType.uncertain_circuit,
+    "memory_circuit": CircuitType.memory_related,
+    "emotion_circuit": CircuitType.limbic_circuit,
+    "visual_circuit": CircuitType.sensory_circuit,
+    "auditory_circuit": CircuitType.sensory_circuit,
+    "somatosensory_circuit": CircuitType.sensory_circuit,
+    "multisensory_integration": CircuitType.uncertain_circuit,
+    "other": CircuitType.unknown,
+    # Short forms observed in LLM outputs
+    "motor": CircuitType.motor_circuit,
+    "visual": CircuitType.sensory_circuit,
+    "language": CircuitType.language_related,
+    "cognitive": CircuitType.cognitive_control_circuit,
+    "attention": CircuitType.attention_related,
+    "reward": CircuitType.reward_related,
+    "memory": CircuitType.memory_related,
+    "limbic": CircuitType.limbic_circuit,
+    "cerebellar": CircuitType.motor_circuit,
+    "sensorimotor": CircuitType.sensory_circuit,
+    "oculomotor": CircuitType.motor_circuit,
+    "thalamocortical": CircuitType.sensory_circuit,
+    "subcortical": CircuitType.uncertain_circuit,
+    "structural": CircuitType.unknown,
+    "arousal": CircuitType.uncertain_circuit,
+    "cognitive_control": CircuitType.cognitive_control_circuit,
+    "memory_emotion": CircuitType.limbic_circuit,
+    "emotion_related": CircuitType.limbic_circuit,
+    "emotion_interoception": CircuitType.limbic_circuit,
+    "emotion_memory": CircuitType.limbic_circuit,
+    "reward_emotion": CircuitType.reward_related,
+    "motor_control": CircuitType.motor_circuit,
+    "motor_related": CircuitType.motor_circuit,
+    "sensory_related": CircuitType.sensory_circuit,
+    "visual_processing": CircuitType.sensory_circuit,
+    "visual_attention": CircuitType.attention_related,
+    "visual_object": CircuitType.sensory_circuit,
+    "auditory_language": CircuitType.language_related,
+    "somatosensory_spatial": CircuitType.sensory_circuit,
+    "default_mode": CircuitType.default_mode_related,
+    "default_mode_network": CircuitType.default_mode_related,
+    "executive_control": CircuitType.cognitive_control_circuit,
+    "thalamo-striatal": CircuitType.motor_circuit,
+    "cerebello-thalamic": CircuitType.motor_circuit,
+    "anatomical_ventricular": CircuitType.unknown,
+    "anatomical_white_matter": CircuitType.unknown,
+}
+
+# Backward-compatible aliases for region roles.
+REGION_ROLE_ALIAS_MAP: dict[str, str] = {
+    "initiator": CircuitRegionRole.source,
+    "integrator": CircuitRegionRole.hub,
+    "output": CircuitRegionRole.target,
+}
 
 VALID_REGION_ROLES = frozenset({
     CircuitRegionRole.participant,
@@ -144,6 +215,7 @@ class CircuitExtractionResult:
     circuit_region_created_count: int = 0
     triple_created_count: int = 0
     evidence_created_count: int = 0
+    created_circuit_ids: list[uuid.UUID] = field(default_factory=list)
     dry_run: bool = False
     system_prompt: str | None = None
     user_prompt: str | None = None
@@ -559,9 +631,11 @@ def normalize_circuit_candidates(
             continue
 
         circuit_type = str(circ.get("circuit_type") or CircuitType.unknown)
+        # Resolve legacy alias before checking against allowed set
+        circuit_type = CIRCUIT_TYPE_ALIAS_MAP.get(circuit_type, circuit_type)
         if circuit_type not in types:
+            warnings.append(f"circuit[{idx}] circuit_type \"{circuit_type}\" not in allowed set, coerced to unknown")
             circuit_type = CircuitType.unknown
-            warnings.append(f"circuit[{idx}] circuit_type coerced to unknown")
 
         raw_region_ids = circ.get("involved_region_candidate_ids") or []
         if not isinstance(raw_region_ids, list):
@@ -610,9 +684,11 @@ def normalize_circuit_candidates(
                 if rid not in region_ids:
                     continue
                 role = str(rr.get("role") or CircuitRegionRole.participant)
+                # Resolve legacy alias before checking against valid set
+                role = REGION_ROLE_ALIAS_MAP.get(role, role)
                 if role not in VALID_REGION_ROLES:
+                    warnings.append(f"circuit[{idx}] region role \"{role}\" not in valid set, coerced to unknown")
                     role = CircuitRegionRole.unknown
-                    warnings.append(f"circuit[{idx}] region role coerced to unknown")
                 sort_order = rr.get("sort_order")
                 if sort_order is None:
                     sort_order = region_ids.index(rid)
@@ -633,9 +709,14 @@ def normalize_circuit_candidates(
                 "sort_order": rm["sort_order"],
             })
 
+        # LLM often omits name_cn despite prompt instructions; fill with
+        # circuit_name as fallback — field completion can backfill proper CN later.
+        name_cn = circ.get("name_cn") or circuit_name
+
         normalized.append({
             "circuit_name": circuit_name,
             "circuit_name_key": circuit_name.lower().strip(),
+            "name_cn": name_cn,
             "circuit_type": circuit_type,
             "involved_region_candidate_ids": [str(r) for r in region_ids],
             "region_set_key": sorted(str(r) for r in region_ids),
@@ -660,7 +741,7 @@ def circuit_dedup_key(
     return circuit_name_key, circuit_type, tuple(sorted(region_set_key))
 
 
-async def _circuit_exists(
+async def _find_existing_circuit_id(
     session: AsyncSession,
     *,
     circuit_name_key: str,
@@ -670,7 +751,7 @@ async def _circuit_exists(
     batch_id: uuid.UUID | None,
     source_atlas: str,
     granularity_level: str,
-) -> bool:
+) -> uuid.UUID | None:
     blocked_promo = {MirrorPromotionStatus.failed, MirrorPromotionStatus.blocked}
     q = select(MirrorRegionCircuit.id).where(
         MirrorRegionCircuit.circuit_type == circuit_type,
@@ -687,7 +768,7 @@ async def _circuit_exists(
 
     ids = (await session.execute(q)).scalars().all()
     if not ids:
-        return False
+        return None
 
     target_set = set(region_set_key)
     for cid in ids:
@@ -708,8 +789,62 @@ async def _circuit_exists(
             region_rows = (await session.execute(regions_q)).scalars().all()
             existing_set = set(str(r) for r in region_rows if r is not None)
         if existing_set == target_set:
-            return True
-    return False
+            return cid
+    return None
+
+
+async def _circuit_exists(
+    session: AsyncSession,
+    *,
+    circuit_name_key: str,
+    circuit_type: str,
+    region_set_key: list[str],
+    resource_id: uuid.UUID | None,
+    batch_id: uuid.UUID | None,
+    source_atlas: str,
+    granularity_level: str,
+) -> bool:
+    return (
+        await _find_existing_circuit_id(
+            session,
+            circuit_name_key=circuit_name_key,
+            circuit_type=circuit_type,
+            region_set_key=region_set_key,
+            resource_id=resource_id,
+            batch_id=batch_id,
+            source_atlas=source_atlas,
+            granularity_level=granularity_level,
+        )
+        is not None
+    )
+
+
+def _resolve_candidate_to_final(
+    session: AsyncSession, candidate_id: uuid.UUID
+) -> uuid.UUID | None:
+    """Look up the FinalBrainRegion.id for a given candidate ID.
+
+    Returns None if the candidate hasn't been promoted yet — caller should
+    not block on this; field completion can backfill later.
+    """
+    # This is a synchronous helper called inside async context;
+    # use session.run_sync or just query inline.
+    # For simplicity, we do a quick lookup — if no final exists, return None.
+    pass  # resolve is done inline in persist_circuit_mirror_records
+
+
+def _resolve_candidate_to_final_sync(
+    candidate_map: dict[uuid.UUID, CandidateBrainRegion],
+    candidate_id: uuid.UUID,
+) -> uuid.UUID | None:
+    """Quick candidate→final check using the in-memory candidate map.
+
+    This is a fast path — most circuits won't have promoted regions yet.
+    Returns None if not found.
+    """
+    # This is intentionally a no-op for now; canonical IDs get backfilled
+    # during promotion or via field completion.
+    return None
 
 
 async def persist_circuit_mirror_records(
@@ -722,10 +857,11 @@ async def persist_circuit_mirror_records(
     create_triples: bool,
     create_evidence: bool,
     session_seen: set[tuple[str, str, tuple[str, ...]]] | None = None,
-) -> tuple[int, int, int, int, int, list[str]]:
+) -> tuple[int, int, int, int, int, list[str], list[uuid.UUID]]:
     created = skipped = regions_created = triples = evidence = 0
     warnings: list[str] = []
     seen = session_seen or set()
+    circuit_ids: list[uuid.UUID] = []
 
     for circ in circuits:
         name_key = circ["circuit_name_key"]
@@ -735,7 +871,7 @@ async def persist_circuit_mirror_records(
         if key in seen:
             skipped += 1
             continue
-        if await _circuit_exists(
+        existing_id = await _find_existing_circuit_id(
             session,
             circuit_name_key=name_key,
             circuit_type=ctype,
@@ -744,9 +880,11 @@ async def persist_circuit_mirror_records(
             batch_id=run.batch_id,
             source_atlas=run.source_atlas or "",
             granularity_level=run.granularity_level or "",
-        ):
+        )
+        if existing_id is not None:
             skipped += 1
             seen.add(key)
+            circuit_ids.append(existing_id)
             continue
 
         region_payloads = [
@@ -758,6 +896,37 @@ async def persist_circuit_mirror_records(
             for cr in circ["circuit_regions"]
         ]
 
+        # Derive canonical start/end from circuit_regions by role.
+        # Only store final_brain_regions.id (FK target). Never store candidate UUIDs.
+        canonical_start_id: uuid.UUID | None = None
+        canonical_end_id: uuid.UUID | None = None
+        for cr in circ["circuit_regions"]:
+            rid = uuid.UUID(cr["region_candidate_id"])
+            final_row = await session.execute(
+                select(FinalBrainRegion.id).where(FinalBrainRegion.candidate_id == rid)
+            )
+            fid = final_row.scalar_one_or_none()
+            if not isinstance(fid, uuid.UUID):
+                fid = None
+            if fid is None:
+                continue
+            if cr.get("role") == "source":
+                canonical_start_id = fid
+            if cr.get("role") == "target":
+                canonical_end_id = fid
+        # Fallback: use first/last by sort_order when roles are missing
+        sorted_regions = sorted(circ["circuit_regions"], key=lambda r: r.get("sort_order", 0))
+        if canonical_start_id is None and sorted_regions:
+            rid = uuid.UUID(sorted_regions[0]["region_candidate_id"])
+            fr = await session.execute(select(FinalBrainRegion.id).where(FinalBrainRegion.candidate_id == rid))
+            fid = fr.scalar_one_or_none()
+            canonical_start_id = fid if isinstance(fid, uuid.UUID) else None
+        if canonical_end_id is None and len(sorted_regions) > 1:
+            rid = uuid.UUID(sorted_regions[-1]["region_candidate_id"])
+            fr = await session.execute(select(FinalBrainRegion.id).where(FinalBrainRegion.candidate_id == rid))
+            fid = fr.scalar_one_or_none()
+            canonical_end_id = fid if isinstance(fid, uuid.UUID) else None
+
         payload = MirrorRegionCircuitCreate(
             resource_id=run.resource_id,
             batch_id=run.batch_id,
@@ -768,6 +937,7 @@ async def persist_circuit_mirror_records(
             source_atlas=run.source_atlas or "",
             source_version=run.source_version,
             circuit_name=circ["circuit_name"],
+            name_cn=circ.get("name_cn"),
             circuit_type=ctype,
             function_association=circ.get("function_association"),
             description=circ.get("description"),
@@ -776,12 +946,34 @@ async def persist_circuit_mirror_records(
             uncertainty_reason=circ.get("uncertainty_reason"),
             raw_payload_json=circ.get("raw") or circ,
             normalized_payload_json=circ,
+            canonical_start_region_id=canonical_start_id,
+            canonical_end_region_id=canonical_end_id,
             circuit_regions=region_payloads,
         )
-        mirror_circuit = await mirror_kg_service.create_mirror_circuit(session, payload)
+        try:
+            mirror_circuit = await mirror_kg_service.create_mirror_circuit(session, payload)
+        except Exception:
+            await session.rollback()
+            # Retry: circuit may have been created concurrently by another batch
+            existing = await _find_existing_circuit_id(
+                session,
+                circuit_name_key=circ["circuit_name_key"],
+                circuit_type=circ["circuit_type"],
+                region_set_key=circ["region_set_key"],
+                resource_id=run.resource_id, batch_id=run.batch_id,
+                source_atlas=run.source_atlas or "",
+                granularity_level=run.granularity_level or "",
+            )
+            if existing is not None:
+                skipped += 1
+                seen.add(key)
+                circuit_ids.append(existing)
+                continue
+            raise
         created += 1
         regions_created += len(region_payloads)
         seen.add(key)
+        circuit_ids.append(mirror_circuit.id)
 
         if create_triples:
             for cr in circ["circuit_regions"]:
@@ -859,7 +1051,7 @@ async def persist_circuit_mirror_records(
             await mirror_kg_service.create_mirror_evidence(session, ev_payload)
             evidence += 1
 
-    return created, skipped, regions_created, triples, evidence, warnings
+    return created, skipped, regions_created, triples, evidence, warnings, circuit_ids
 
 
 async def run_same_granularity_circuit_extraction(
@@ -1110,7 +1302,7 @@ async def run_same_granularity_circuit_extraction(
         candidate_map = {c.id: c for c in candidates}
         if create_mirror_records and normalized_circuits:
             try:
-                mc, skip, rc, tr, ev, pw = await persist_circuit_mirror_records(
+                mc, skip, rc, tr, ev, pw, created_ids = await persist_circuit_mirror_records(
                     session,
                     run=run,
                     item=item,
@@ -1124,6 +1316,7 @@ async def run_same_granularity_circuit_extraction(
                 result.circuit_region_created_count = rc
                 result.triple_created_count = tr
                 result.evidence_created_count = ev
+                result.created_circuit_ids = list(dict.fromkeys(created_ids))
                 all_warnings.extend(pw)
             except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
                 run.status = LlmRunStatus.partially_succeeded

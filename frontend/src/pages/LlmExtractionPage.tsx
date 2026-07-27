@@ -3,7 +3,7 @@ import { ChevronLeft, Sparkles, AlertTriangle } from 'lucide-react'
 import { PageHeader } from '../components/PageHeader'
 import { DataTable, type Column } from '../components/DataTable'
 import { StatusBadge } from '../components/StatusBadge'
-import { useGlobalGranularity } from '../hooks/useGlobalGranularity'
+import { useGlobalGranularity, granularityToFamily } from '../hooks/useGlobalGranularity'
 import { KeyValuePanel } from '../components/KeyValuePanel'
 import { ActionButton } from '../components/ActionButton'
 import { ConfirmDialog } from '../components/ConfirmDialog'
@@ -6043,7 +6043,7 @@ export function LlmExtractionPage() {
   const poolScope: PoolScope = useMemo(() => ({
     sourceAtlas: sess.source_atlas || 'AAL3',
     granularityLevel: granularity || 'macro',
-    granularityFamily: sess.granularity_family || 'macro_clinical',
+    granularityFamily: sess.granularity_family || granularityToFamily(granularity),
   }), [sess.source_atlas, granularity, sess.granularity_family])
 
   const {
@@ -6078,7 +6078,7 @@ export function LlmExtractionPage() {
     const payloadScope: PoolScope = {
       sourceAtlas: sess.source_atlas || 'AAL3',
       granularityLevel: granularity || 'macro',
-      granularityFamily: sess.granularity_family || 'macro_clinical',
+      granularityFamily: sess.granularity_family || granularityToFamily(granularity),
     }
     if (import.meta.env.DEV) {
       console.info('[LlmExtractionPage] setupExtractionPool', {
@@ -6486,6 +6486,8 @@ export function LlmExtractionPage() {
         )}
         {!legacyFinalTab && activeDataTab === 'candidates' && candidateSource === 'connection' && (
           <ConnectionCandidatesTab
+            sourceAtlas={sess.source_atlas || undefined}
+            granularityLevel={granularity || undefined}
             pooledIds={connPooledIds}
             onSelectionChange={ids => {
               console.log('[llm-conn-selection] selection changed:', { count: ids.length, sample: ids.slice(0, 2).map((s: string) => s.slice(0, 12)) })

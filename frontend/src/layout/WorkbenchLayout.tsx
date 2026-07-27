@@ -1,4 +1,4 @@
-import React, { useState, useCallback, memo } from 'react'
+import React, { memo } from 'react'
 import {
   LayoutDashboard,
   Database,
@@ -20,8 +20,6 @@ import { useWorkbenchLog } from '../logging/useWorkbenchLog'
 import { GranularitySwitcher } from '../components/GranularitySwitcher'
 import { BottomLogConsole } from '../components/BottomLogConsole'
 import { TaskCenterDropdown } from '../components/TaskCenterDropdown'
-import type { BgTask } from '../hooks/useBackgroundTasks'
-import { listFieldCompletionRuns, listCompositeWorkflowRuns } from '../api/endpoints'
 import { useTaskDetailModal } from '../components/TaskDetailModal'
 
 const NAV_ITEMS = [
@@ -53,34 +51,6 @@ export function WorkbenchLayout({ currentPath, children }: WorkbenchLayoutProps)
   const navigate = (path: string) => { window.location.hash = `#${path}` }
   const { openTask } = useTaskDetailModal()
 
-  // Dropdown: fetch-on-open only, no polling
-  const [ddTasks, setDdTasks] = useState<BgTask[]>([])
-  const [ddLoading, setDdLoading] = useState(false)
-
-  const fetchDropdownTasks = useCallback(async () => {
-    setDdLoading(true)
-    try {
-      const [fcRes, cwRes] = await Promise.allSettled([
-        listFieldCompletionRuns({ limit: 50 }),
-        listCompositeWorkflowRuns({ limit: 50 }),
-      ])
-      const merged: BgTask[] = []
-      if (fcRes.status === 'fulfilled') {
-        for (const r of fcRes.value.items) {
-          merged.push({ id: r.id, type: 'field_completion', status: r.status, targetType: r.target_type, targetCount: r.target_count, label: `字段补全 · ${r.target_type}`, provider: r.provider ?? undefined, modelName: r.model_name ?? undefined, createdAt: r.created_at, startedAt: r.started_at, completedAt: r.completed_at })
-        }
-      }
-      if (cwRes.status === 'fulfilled') {
-        for (const r of cwRes.value.items) {
-          merged.push({ id: r.id, type: 'composite_workflow', status: r.status, targetType: r.workflow_type ?? undefined, targetCount: r.candidate_count, label: `LLM 提取 · ${r.workflow_type}`, provider: r.provider ?? undefined, modelName: r.model_name ?? undefined, createdAt: r.created_at ?? '', startedAt: r.started_at ?? null, completedAt: r.completed_at ?? null })
-        }
-      }
-      merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      setDdTasks(merged)
-    } catch { /* ignore */ }
-    setDdLoading(false)
-  }, [])
-
   return (
     <div className={`layout${expanded ? ' log-console-expanded' : ' log-console-collapsed'}`}>
       <header className="topbar">
@@ -88,11 +58,8 @@ export function WorkbenchLayout({ currentPath, children }: WorkbenchLayoutProps)
         <span className="topbar-sub">{t('layout.subtitle')}</span>
         <div className="topbar-right">
           <TaskCenterDropdown
-            tasks={ddTasks}
-            loading={ddLoading}
             onViewAll={() => navigate('/task-center')}
             onViewTask={openTask}
-            onOpen={fetchDropdownTasks}
           />
           <GranularitySwitcher />
           <span className="topbar-version">v3.2.9-mvp1</span>

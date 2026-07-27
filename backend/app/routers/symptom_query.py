@@ -755,6 +755,8 @@ class ReportRequest(BaseModel):
     implicated_regions: list[str] = []
     neurotransmitters: list[str] = []
     pathway_level: str = ""
+    graph_image: str = ""  # base64 PNG of the circuit graph
+    report_markdown: str = ""  # reuse modal report; skip LLM when set
 
 
 class ReportResponse(BaseModel):
@@ -762,37 +764,41 @@ class ReportResponse(BaseModel):
     generated_at: str
 
 
-REPORT_PROMPT = """You are a senior clinical neurologist writing a patient-facing brain health analysis report in Chinese.
+REPORT_PROMPT = """你是一位有临床经验的神经科医生，正在为患者撰写一份脑部健康分析报告。文风要像真人医生当面讲解：该专业的地方用准确术语并随手解释，该大白话的地方就用生活化表达，读起来自然、连贯，不要像机器拼凑。
 
-## Patient Clinical Data
-Summary: {summary}
-AI Diagnosis: {syndrome}
-Implicated Brain Regions: {regions}
-Affected Neurotransmitter Systems: {nts}
-Pathway Level: {pathway}
+## 患者临床数据
+主诉摘要: {summary}
+系统提示诊断倾向: {syndrome}
+相关脑区: {regions}
+相关神经递质系统: {nts}
+通路层级: {pathway}
 
-## Brain Circuits Matched by System
+## 系统匹配到的脑回路
 {circuit_list}
-Network: {node_count} regions, {edge_count} connections.
+网络规模: {node_count} 个脑区节点，{edge_count} 条连接。
 
-WRITING RULES:
-1. Chinese, patient-facing, professional detail
-2. NO markdown artifacts (---, ***, ** wrapping lines). Use 【】 for section headers
-3. NO scores, match percentages, confidence numbers
-4. Reference actual circuit names and brain regions from the system data
-5. Integrate the AI diagnosis ({syndrome}) and implicated regions ({regions}) into the analysis
-6. Explain neurotransmitter involvement ({nts}) in plain language
-7. Connect each symptom to specific circuits and regions
+## 文风要求
+1. 全程中文；像医生写给患者看的说明，不要公文腔，不要堆砌空话。
+2. 专业处要专业：回路名称、脑区、递质、机制用准确说法，必要时用括号补一句白话解释。
+3. 总结与建议处要大白话：说清楚“这意味着什么、日常可以怎么做”，避免恐吓语气。
+4. 禁止输出分数、匹配百分比、置信度等机器指标。
+5. 禁止 markdown 花活（不要 ---、***、整行 ** 包裹）。小节标题只用【】。
+6. 建议条目用规范编号：1. 2. 3.（可以保留），不要用 - 或 • 当条目符号。
+7. 必须点名引用系统给出的真实回路名与脑区，把症状和回路对应起来讲清楚。
+8. 段落完整成句，不要把句号、顿号单独拆到下一行，也不要在文字前乱加符号。
+9. 禁止使用 markdown 加粗符号（不要写 ** 或 ***）。需要强调时直接用中文表述。
+10. 脑区/回路只用中文常用名；不要写英文蛇形命名（如 thalamocortical_sensory_pathway、pericranial_muscles），也不要在中文名后跟这类英文代码。
+11. 不要输出多余的】或半截标题符号。
 
-STRUCTURE:
-【一、临床分析】Integrate the syndrome diagnosis, clinical summary, and key symptoms. Reference the implicated brain regions.
-【二、大脑回路分析】For top circuits: name, normal function, how affected, involved regions. Include circuit flow diagram.
-【三、神经递质与脑电活动】Cover {nts} systems. Explain EEG correlates.
-【四、循环系统与脑脊液】Blood supply, drainage, glymphatic clearance relevant to affected regions.
-【五、外周器官与神经影响】Gut, heart, skin, autonomic nerves.
-【六、综合总结与建议】Patient-friendly summary, medical/lifestyle recommendations.
+## 结构（必须按此六节）
+【一、临床分析】结合诊断倾向与主诉，用医生口吻说明目前更像哪类问题，点出相关脑区。
+【二、大脑回路分析】挑最相关的回路：叫什么、平时干什么、现在可能哪里不顺、涉及哪些脑区；写清楚回路走向。
+【三、神经递质与脑电活动】围绕 {nts} 说明可能怎么参与；脑电相关用通俗比喻带过即可。
+【四、循环系统与脑脊液】结合受累脑区，简要谈供血、代谢清除与睡眠的关系。
+【五、外周器官与神经影响】肠道、心脏、自主神经等与症状可能的相互影响，点到为止。
+【六、综合总结与建议】先用大白话收束，再分“医疗建议”和“生活方式建议”，用 1. 2. 3. 列出可执行条目。
 
-Output ONLY valid markdown. Use 【】 for headers. No JSON wrapper."""
+只输出正文，不要 JSON，不要代码块。"""
 
 
 @router.post("/report", response_model=ReportResponse)
@@ -837,7 +843,7 @@ async def generate_clinical_report(body: ReportRequest):
         provider = get_llm_provider("deepseek")
         resp = await provider.complete_text(
             model=cfg.default_model,
-            system_prompt="You are a clinical neuroscientist. Output ONLY clean markdown, no JSON wrapper.",
+            system_prompt="你是有临床经验的神经科医生。用中文写患者可读的分析报告：专业处准确，建议处大白话，像当面讲解。只输出正文，不要 JSON。",
             user_prompt=prompt,
             temperature=0.3,
             max_tokens=6000,
@@ -865,64 +871,119 @@ async def generate_clinical_report(body: ReportRequest):
 @router.post("/report/pdf")
 async def generate_clinical_report_pdf(body: ReportRequest):
     """Generate professional A4 PDF report and return as downloadable file."""
-    if not body.summary.strip():
+    if not body.summary.strip() and not (body.report_markdown or "").strip():
         raise HTTPException(status_code=400, detail="Summary required")
 
-    # ── Generate markdown via DeepSeek (same as /report) ────────────────
-    circuit_lines = []
-    for i, c in enumerate(body.circuits[:12], 1):
-        name = c.get("circuit_name", c.get("name", "Unknown"))
-        ctype = c.get("circuit_type", "")
-        desc = c.get("description", "")
-        matched = c.get("matched_functions", [])
-        step_details = c.get("steps", [])
-        step_info = ""
-        if step_details:
-            step_names = [s.get("step_name", "?") for s in step_details[:8]]
-            step_info = f" | steps: {' > '.join(step_names)}"
-        func_info = f" | functions: {', '.join(matched[:5])}" if matched else ""
-        desc_info = f" | {desc[:120]}" if desc else ""
-        circuit_lines.append(
-            f"{i}. {name} [{ctype or 'unknown'}]{desc_info}{func_info}{step_info}"
+    # Prefer markdown already shown in the modal (avoids second LLM call + content drift)
+    report = (body.report_markdown or "").strip()
+    if report.startswith("```"):
+        report = report.split("\n", 1)[1]
+        if report.endswith("```"):
+            report = report[:-3]
+
+    if not report:
+        # ── Generate markdown via DeepSeek (same as /report) ────────────────
+        circuit_lines = []
+        for i, c in enumerate(body.circuits[:12], 1):
+            name = c.get("circuit_name", c.get("name", "Unknown"))
+            ctype = c.get("circuit_type", "")
+            desc = c.get("description", "")
+            matched = c.get("matched_functions", [])
+            step_details = c.get("steps", [])
+            step_info = ""
+            if step_details:
+                step_names = [s.get("step_name", "?") for s in step_details[:8]]
+                step_info = f" | steps: {' > '.join(step_names)}"
+            func_info = f" | functions: {', '.join(matched[:5])}" if matched else ""
+            desc_info = f" | {desc[:120]}" if desc else ""
+            circuit_lines.append(
+                f"{i}. {name} [{ctype or 'unknown'}]{desc_info}{func_info}{step_info}"
+            )
+
+        prompt = REPORT_PROMPT.format(
+            summary=body.summary,
+            syndrome=body.syndrome or "待确认",
+            regions=", ".join(body.implicated_regions) if body.implicated_regions else "待分析",
+            nts=", ".join(body.neurotransmitters) if body.neurotransmitters else "待分析",
+            pathway=body.pathway_level or "unknown",
+            circuit_list="\n".join(circuit_lines) or "No circuits matched",
+            node_count=body.graph_nodes,
+            edge_count=body.graph_edges,
         )
 
-    prompt = REPORT_PROMPT.format(
-        summary=body.summary,
-        syndrome=body.syndrome or "待确认",
-        regions=", ".join(body.implicated_regions) if body.implicated_regions else "待分析",
-        nts=", ".join(body.neurotransmitters) if body.neurotransmitters else "待分析",
-        pathway=body.pathway_level or "unknown",
-        circuit_list="\n".join(circuit_lines) or "No circuits matched",
-        node_count=body.graph_nodes,
-        edge_count=body.graph_edges,
+        try:
+            cfg = get_deepseek_runtime_config()
+            provider = get_llm_provider("deepseek")
+            resp = await provider.complete_text(
+                model=cfg.default_model,
+                system_prompt="你是有临床经验的神经科医生。用中文写患者可读的分析报告：专业处准确，建议处大白话，像当面讲解。只输出正文，不要 JSON。",
+                user_prompt=prompt, temperature=0.3, max_tokens=6000, timeout_seconds=180,
+            )
+            if not resp.transport_ok or not resp.raw_text:
+                raise HTTPException(status_code=502, detail=f"LLM failed: {resp.error}")
+            report = resp.raw_text.strip()
+            if report.startswith("```"): report = report.split("\n", 1)[1]
+            if report.endswith("```"): report = report[:-3]
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # ── Build professional PDF ──────────────────────────────────────────
+    import importlib, app.services.report_pdf_builder as rpb
+    importlib.reload(rpb)
+    graph_b64 = getattr(body, 'graph_image', None) or ''
+    buf = rpb.generate_report_pdf(report, body.circuits, graph_b64)
+
+    safe_syndrome = (body.syndrome or "analysis").strip().replace(" ", "_").replace("/", "_")[:40] or "brain"
+    fname = f"NeuroGraphIQ_{safe_syndrome}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.pdf"
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename*={fname}"},
     )
+
+
+# ── Circuit Description — LLM generates patient-friendly circuit explanation ──
+
+class CircuitDescribeRequest(BaseModel):
+    circuit_name: str
+    circuit_type: str = ""
+    steps: list[dict] = []
+    functions: list[str] = []
+    syndrome: str = ""
+
+
+class CircuitDescribeResponse(BaseModel):
+    description: str
+
+
+@router.post("/circuit-describe", response_model=CircuitDescribeResponse)
+async def describe_circuit(body: CircuitDescribeRequest):
+    """Generate a patient-friendly description of a brain circuit."""
+    step_names = " → ".join([s.get("step_name", "?") for s in body.steps[:8]]) if body.steps else "unknown"
+    funcs = ", ".join(body.functions[:5]) if body.functions else "general brain functions"
+    prompt = f"""You are a clinical neuroscientist explaining brain circuits to a patient. Write a clear, friendly description (2-3 sentences) in Chinese for the following circuit:
+
+Circuit: {body.circuit_name}
+Type: {body.circuit_type}
+Path: {step_names}
+Functions: {funcs}
+Clinical Context: {body.syndrome or 'brain health'}
+
+Explain what this circuit does normally, why it matters for this patient's symptoms, and which key brain regions are involved. Use simple, reassuring language. Output ONLY the description text, no JSON wrapper."""
 
     try:
         cfg = get_deepseek_runtime_config()
         provider = get_llm_provider("deepseek")
         resp = await provider.complete_text(
             model=cfg.default_model,
-            system_prompt="You are a clinical neuroscientist. Output ONLY clean markdown, no JSON wrapper.",
-            user_prompt=prompt, temperature=0.3, max_tokens=6000, timeout_seconds=180,
+            system_prompt="You are a clinical neuroscientist. Write in Chinese. Be patient-friendly and reassuring. Output plain text only.",
+            user_prompt=prompt, temperature=0.5, max_tokens=500, timeout_seconds=30,
         )
-        if not resp.transport_ok or not resp.raw_text:
-            raise HTTPException(status_code=502, detail=f"LLM failed: {resp.error}")
-        report = resp.raw_text.strip()
-        if report.startswith("```"): report = report.split("\n", 1)[1]
-        if report.endswith("```"): report = report[:-3]
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    # ── Build professional PDF ──────────────────────────────────────────
-    from app.services.report_pdf_builder import generate_report_pdf
-
-    buf = generate_report_pdf(report, body.circuits)
-
-    return StreamingResponse(
-        buf,
-        media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=brain_analysis_report.pdf"},
-    )
-
+        desc = (resp.raw_text or "").strip()
+        return CircuitDescribeResponse(description=desc)
+    except Exception:
+        return CircuitDescribeResponse(
+            description=f"{body.circuit_name}是大脑中一条重要的神经回路，负责协调{funcs}等功能。该回路涉及多个脑区的协同工作，与您的症状密切相关。"
+        )

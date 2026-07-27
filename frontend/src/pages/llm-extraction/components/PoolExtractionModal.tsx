@@ -8,6 +8,11 @@ import {
   runCircuitExtraction,
   getCircuitExtractionRun,
   cancelCircuitExtractionRun,
+  startMolecularCircuitExtraction,
+  getMolecularCircuitProgress,
+  cancelMolecularCircuitRun,
+  pauseMolecularCircuitRun,
+  resumeMolecularCircuitRun,
   cancelCompositeWorkflow,
   pauseCompositeWorkflow,
   resumeCompositeWorkflow,
@@ -129,6 +134,21 @@ function resolveCompositeWorkflowType(workflowType: string): string | null {
 function isCircuitPackWorkflow(workflowType: string, preset?: import('../taskPresets').TaskPreset | null): boolean {
   if (preset?.endpoint_type === 'circuit_extraction') return true
   return workflowType === 'circuit_with_function_steps' || workflowType === 'composite_circuit_with_function_and_steps'
+}
+
+/** Molecular 粒度走专用 /molecular-circuit API（基于 Mirror 连接构图，不依赖脑区候选池）。 */
+function isMolecularScope(pool: CandidatePool | null | undefined): boolean {
+  const level = String(pool?.granularity_level || '').toLowerCase()
+  const family = String(pool?.granularity_family || '').toLowerCase()
+  return level === 'molecular_attr' || level === 'molecular' || family === 'molecular_attr'
+}
+
+function isMolecularCircuitPath(
+  pool: CandidatePool | null | undefined,
+  workflowType: string,
+  preset?: import('../taskPresets').TaskPreset | null,
+): boolean {
+  return isMolecularScope(pool) && isCircuitPackWorkflow(workflowType, preset)
 }
 
 function isFunctionPoolWorkflow(workflowType: string): boolean {
@@ -589,7 +609,8 @@ export function PoolExtractionModal({
   // ── Start extraction ─────────────────────────────────────────────────────
   const handleStartExtraction = useCallback(async () => {
     const candidateIds = selectedExtractionIds
-    const minCount = preset?.preset_id === 'connection_to_function' ? 1 : 2
+    const molecularCircuit = isMolecularCircuitPath(pool, workflowType, preset)
+    const minCount = molecularCircuit ? 0 : (preset?.preset_id === 'connection_to_function' ? 1 : 2)
     const errorLabel = preset?.preset_id === 'connection_to_function' ? '连接' : '脑区'
     if (candidateIds.length < minCount) {
       setProgress(prev => ({
@@ -608,6 +629,7 @@ export function PoolExtractionModal({
       workflowType,
       provider,
       modelName,
+      molecularCircuit,
       candidateCount: candidateIds.length,
       poolMemberCount: displayMembers.length,
       hasResourceId: !!pool?.resource_id,
@@ -624,6 +646,61 @@ export function PoolExtractionModal({
     }
 
     try {
+      // Molecular 回路：专用 API，从 molecular Mirror 连接构图（不传 candidate_ids）
+      if (molecularCircuit) {
+        setModalState('progress')
+        setProgress(prev => ({
+          ...prev,
+          workflowRunId: '',
+          workflowStatus: 'pending',
+          progressPercent: 0,
+          processedPacks: 0,
+          totalPacks: 0,
+          successPacks: 0,
+          failedPacks: 0,
+          noConnectionPacks: 0,
+          noFindingsPacks: 0,
+          connectionsFound: 0,
+          functionCount: 0,
+          createdCount: 0,
+          errors: [],
+          elapsedSec: 0,
+          startedAt: new Date().toISOString(),
+          lastPauseResponse: '',
+          lastPauseError: '',
+          lastCancelResponse: '',
+          lastCancelError: '',
+        }))
+        const molResp = await startMolecularCircuitExtraction({
+          provider,
+          model_name: modelName || undefined,
+          pack_concurrency: packConcurrency !== 1 ? packConcurrency : undefined,
+          dry_run: dryRun,
+        })
+        if (dryRun) {
+          setProgress(prev => ({
+            ...prev,
+            workflowRunId: molResp.run_id,
+            workflowStatus: 'dry_run',
+            progressPercent: 100,
+            totalPacks: molResp.pack_count || molResp.estimated_candidates || 0,
+            connectionsFound: molResp.candidate_count || molResp.estimated_candidates || 0,
+            elapsedSec: Math.round((Date.now() - startTimeRef.current) / 1000),
+          }))
+          setModalState('result')
+          return
+        }
+        setProgress(prev => ({
+          ...prev,
+          workflowRunId: molResp.run_id,
+          workflowStatus: molResp.status,
+          progressPercent: 0,
+          totalPacks: molResp.pack_count || 0,
+          connectionsFound: molResp.estimated_candidates || molResp.candidate_count || 0,
+        }))
+        return
+      }
+
       if (isFunctionPoolWorkflow(workflowType)) {
         setModalState('progress')
         setProgress(prev => ({
@@ -892,6 +969,15 @@ export function PoolExtractionModal({
     setPausing(true)
     setProgress(prev => ({ ...prev, workflowStatus: 'pause_requested' }))
     try {
+      if (isMolecularCircuitPath(pool, workflowType, preset)) {
+        const resp = await pauseMolecularCircuitRun(wfId)
+        setProgress(prev => ({
+          ...prev,
+          workflowStatus: resolvePolledWorkflowStatus(prev.workflowStatus, resp.status),
+          lastPauseResponse: JSON.stringify(resp),
+        }))
+        return
+      }
       const resp = await pauseCompositeWorkflow(wfId)
       setProgress(prev => ({
         ...prev,
@@ -909,7 +995,7 @@ export function PoolExtractionModal({
       pauseInFlightRef.current = false
       setPausing(false)
     }
-  }, [progress.workflowRunId, progress.workflowStatus])
+  }, [progress.workflowRunId, progress.workflowStatus, pool, workflowType, preset])
 
   const handleResume = useCallback(async () => {
     const wfId = progress.workflowRunId
@@ -919,6 +1005,14 @@ export function PoolExtractionModal({
     }
     setResuming(true)
     try {
+      if (isMolecularCircuitPath(pool, workflowType, preset)) {
+        const resp = await resumeMolecularCircuitRun(wfId)
+        setProgress(prev => ({
+          ...prev,
+          workflowStatus: resp.status === 'running' ? 'running' : prev.workflowStatus,
+        }))
+        return
+      }
       const resp = await resumeCompositeWorkflow(wfId)
       setProgress(prev => ({
         ...prev,
@@ -931,7 +1025,7 @@ export function PoolExtractionModal({
     } finally {
       setResuming(false)
     }
-  }, [progress.workflowRunId])
+  }, [progress.workflowRunId, pool, workflowType, preset])
 
   const handleCancel = useCallback(async () => {
     console.log('[PoolExtractionModal] cancel clicked', {
@@ -956,6 +1050,20 @@ export function PoolExtractionModal({
     setCancelling(true)
     setProgress(prev => ({ ...prev, workflowStatus: 'cancelling' }))
     try {
+      if (isMolecularCircuitPath(pool, workflowType, preset)) {
+        const resp = await cancelMolecularCircuitRun(wfId)
+        cancelledRef.current = true
+        if (pollingRef.current) clearInterval(pollingRef.current)
+        setProgress(prev => ({
+          ...prev,
+          workflowStatus: resp.status,
+          lastCancelResponse: JSON.stringify(resp),
+        }))
+        setCancelling(false)
+        cancelInFlightRef.current = false
+        setModalState('result')
+        return
+      }
       if (isCircuitPackWorkflow(workflowType, preset)) {
         const resp = await cancelCircuitExtractionRun(wfId)
         cancelledRef.current = true
@@ -1001,7 +1109,7 @@ export function PoolExtractionModal({
       cancelInFlightRef.current = false
       setCancelling(false)
     }
-  }, [progress.workflowRunId, progress.workflowStatus])
+  }, [progress.workflowRunId, progress.workflowStatus, pool, workflowType, preset])
 
   // ── Local elapsed timer (runs every 1s independently of API polling) ──────
   useEffect(() => {
@@ -1026,6 +1134,42 @@ export function PoolExtractionModal({
       pollInFlightRef.current = true
 
       try {
+        if (isMolecularCircuitPath(pool, workflowType, preset)) {
+          const mp = await getMolecularCircuitProgress(progress.workflowRunId)
+          const stats = (mp.phase_stats || {}) as Record<string, unknown>
+          const completed = Number(stats.completed_packs ?? 0)
+          const total = Number(stats.total_packs ?? 0) || progress.totalPacks
+          const failed = Number(stats.failed_packs ?? 0)
+          const passed = Number(stats.total_passed ?? 0)
+          const written = Number(stats.datacenter_written ?? 0)
+          const errs = Array.isArray(stats.errors)
+            ? (stats.errors as unknown[]).map(String).filter(Boolean)
+            : []
+          setProgress(prev => ({
+            ...prev,
+            workflowStatus: mp.status,
+            progressPercent: mp.progress_percent ?? 0,
+            processedPacks: completed,
+            totalPacks: total || prev.totalPacks,
+            successPacks: completed,
+            failedPacks: failed,
+            connectionsFound: Number(stats.total_candidates ?? prev.connectionsFound) || prev.connectionsFound,
+            functionCount: passed,
+            createdCount: written,
+            modelCalls: completed,
+            errors: errs.slice(0, 10),
+            estimatedRemainingSec: null,
+            averagePackSec: null,
+          }))
+          if (['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'dry_run'].includes(mp.status)
+              || mp.phase === 'done'
+              || (mp.progress_percent >= 100 && ['succeeded', 'partially_succeeded', 'failed', 'cancelled'].includes(mp.status))) {
+            if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null }
+            setModalState('result')
+          }
+          return
+        }
+
         if (isCircuitPackWorkflow(workflowType, preset)) {
           const cr = await getCircuitExtractionRun(progress.workflowRunId)
           const s = (cr.result_summary_json || {}) as Record<string, number>
@@ -1348,7 +1492,7 @@ export function PoolExtractionModal({
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current)
     }
-  }, [modalState, progress.workflowRunId])
+  }, [modalState, progress.workflowRunId, pool, workflowType, preset])
 
   // ── Reset state helper (shared by close / background close) ──────────────
   const resetModalState = useCallback(() => {
@@ -1388,7 +1532,9 @@ export function PoolExtractionModal({
       cancelledRef.current = true
       if (pollingRef.current) clearInterval(pollingRef.current)
       try {
-        if (isCircuitPackWorkflow(workflowType, preset)) {
+        if (isMolecularCircuitPath(pool, workflowType, preset)) {
+          await cancelMolecularCircuitRun(wfId)
+        } else if (isCircuitPackWorkflow(workflowType, preset)) {
           await cancelCircuitExtractionRun(wfId)
         } else {
           await cancelCompositeWorkflow(wfId, {
@@ -1400,7 +1546,7 @@ export function PoolExtractionModal({
     }
     resetModalState()
     onClose()
-  }, [onClose, resetModalState, progress.workflowRunId, modalState, workflowType, preset])
+  }, [onClose, resetModalState, progress.workflowRunId, modalState, workflowType, preset, pool])
 
   // ── LLM config state (Step 2) — MUST be before early return ─────────────
   const [llmProvider, setLlmProvider] = useState('deepseek')
@@ -1540,10 +1686,17 @@ export function PoolExtractionModal({
                 <span className="label">本次配对</span>
                 <span className="value">{selectedPairCount.toLocaleString()} 对 · 约 {selectedPackEstimate} 包</span>
               </div>
+              {isMolecularCircuitPath(pool, workflowType, preset) && (
+                <div style={{ marginTop: 8, padding: '8px 12px', background: '#eef6ff', borderRadius: 6, fontSize: 12, color: '#1d4ed8' }}>
+                  Molecular 回路将走专用 API（基于 molecular Mirror 连接构图），不依赖脑区候选池勾选。
+                </div>
+              )}
             </>
           ) : (
             <p style={{ color: '#888', fontStyle: 'italic', fontSize: 13 }}>
-              未设置提取池 — 请在外部勾选脑区后点击「设为提取池」，或在此用表格选中替换
+              {isMolecularCircuitPath(pool, workflowType, preset)
+                ? 'Molecular 回路提取无需脑区池 — 将基于 molecular Mirror 连接自动构图。'
+                : '未设置提取池 — 请在外部勾选脑区后点击「设为提取池」，或在此用表格选中替换'}
             </p>
           )}
         </div>
@@ -2199,6 +2352,23 @@ export function PoolExtractionModal({
       })
 
       try {
+        if (isMolecularCircuitPath(pool, workflowType, preset)) {
+          const { startMolecularCircuitExtraction } = await import('../../../api/endpoints')
+          const resp = await startMolecularCircuitExtraction({
+            provider: llmProvider,
+            model_name: llmModel || undefined,
+            pack_concurrency: packConcurrency,
+            dry_run: true,
+          })
+          console.log('[llm-run-config][molecular-dry-run-response]', resp)
+          setDryRunResult({
+            ...resp,
+            estimated_packs: resp.pack_count,
+            estimated_llm_calls: resp.pack_count,
+            pack_count_matched: true,
+          })
+          return
+        }
         const { runCircuitExtraction } = await import('../../../api/endpoints')
         const resp = await runCircuitExtraction(body)
         const match = cfg.estimated_pack_count === resp.estimated_packs
@@ -2341,16 +2511,19 @@ export function PoolExtractionModal({
           {(() => {
             const isConnPool = preset?.input_pool_type === 'connection_pool'
             const isConnToFunc = preset?.preset_id === 'connection_to_function'
-            const minCount = isConnToFunc ? 1 : 2
-            // Connection mode: skip Dry Run entirely (backend graph packing differs from frontend estimate)
-            const needsDryRun = preset?.endpoint_type === 'circuit_extraction' && !isConnToFunc
-            const canStart = isConnPool
+            const molecularCircuit = isMolecularCircuitPath(pool, workflowType, preset)
+            const minCount = molecularCircuit ? 0 : (isConnToFunc ? 1 : 2)
+            // Connection mode / molecular: skip Dry Run gate (molecular uses graph engine packing)
+            const needsDryRun = !molecularCircuit && preset?.endpoint_type === 'circuit_extraction' && !isConnToFunc
+            const canStart = molecularCircuit
+              ? Boolean(llmProvider && llmModel)
+              : isConnPool
               ? (cfg.candidate_ids.length >= minCount && llmProvider && llmModel && cfg.candidates_per_pack >= 5)
               : needsDryRun
                 ? (result && packMatch && cfg.candidate_ids.length >= minCount && llmProvider && llmModel && cfg.candidates_per_pack >= 5 && cfg.shuffle_rounds >= 1)
                 : (cfg.candidate_ids.length >= minCount && llmProvider && llmModel)
             const disabledReasons: string[] = []
-            if (cfg.candidate_ids.length < minCount) disabledReasons.push(isConnPool ? '连接数不足' : '脑区数不足')
+            if (!molecularCircuit && cfg.candidate_ids.length < minCount) disabledReasons.push(isConnPool ? '连接数不足' : '脑区数不足')
             if (!llmProvider || !llmModel) disabledReasons.push('请配置模型')
             if (needsDryRun && !isConnPool) {
               if (!result) disabledReasons.push('请先执行 Dry Run')
@@ -2385,6 +2558,7 @@ export function PoolExtractionModal({
               console.log('[llm-run-config][start-request]', {
                 preset_id: preset?.preset_id,
                 endpoint_type: preset?.endpoint_type,
+                molecularCircuit,
                 input_count: cfg.candidate_ids.length,
                 input_type: isConnPool ? 'connections' : 'regions',
                 candidates_per_pack: cfg.candidates_per_pack,
@@ -2401,6 +2575,36 @@ export function PoolExtractionModal({
                 run_instruction_overlay_length: runInstructionOverlay.length,
               })
               try {
+                if (molecularCircuit) {
+                  const { startMolecularCircuitExtraction } = await import('../../../api/endpoints')
+                  const resp = await startMolecularCircuitExtraction({
+                    provider: llmProvider,
+                    model_name: llmModel || undefined,
+                    pack_concurrency: packConcurrency,
+                    dry_run: false,
+                  })
+                  startTimeRef.current = Date.now()
+                  cancelledRef.current = false
+                  setProgress(prev => ({
+                    ...prev,
+                    workflowRunId: resp.run_id,
+                    workflowStatus: resp.status,
+                    progressPercent: 0,
+                    processedPacks: 0,
+                    totalPacks: resp.pack_count || 0,
+                    successPacks: 0,
+                    failedPacks: 0,
+                    noConnectionPacks: 0,
+                    connectionsFound: resp.estimated_candidates || resp.candidate_count || 0,
+                    functionCount: 0,
+                    createdCount: 0,
+                    errors: [],
+                    elapsedSec: 0,
+                    startedAt: new Date().toISOString(),
+                  }))
+                  setModalState('progress')
+                  return
+                }
                 // connection_to_function: direct projection function extraction (split into packs)
                 if (preset?.preset_id === 'connection_to_function') {
                   const { runProjectionToFunctionsExtraction } = await import('../../../api/endpoints')

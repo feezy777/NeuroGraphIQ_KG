@@ -693,43 +693,54 @@ def _make_item(
 
 
 # ── Model tier priority for mirror_status ────────────────────────────────────
-_MODEL_TIER = {
-    "deepseek-reasoner": ("llm_reasoner", 40),
-    "deepseek-v4-pro": ("llm_v4_pro", 30),
-    "deepseek-chat": ("llm_suggested", 20),
-    "kimi": ("llm_kimi", 10),
+# Status MUST stay within MirrorStatus enum. Priority differentiates models for
+# fill/overwrite decisions; do NOT invent statuses like llm_v4_pro / llm_kimi.
+_MODEL_TIER_PRIORITY = {
+    "deepseek-reasoner": 40,
+    "deepseek-v4-pro": 30,
+    "deepseek-chat": 20,
+    "kimi": 10,
+}
+_LEGACY_STATUS_PRIORITY = {
+    "llm_reasoner": 40,
+    "llm_v4_pro": 30,
+    "llm_kimi": 10,
+    "llm_suggested": 15,
 }
 _DEFAULT_TIER_STATUS = "llm_suggested"
 _DEFAULT_TIER_PRIORITY = 15
 
 
+def _model_priority(model_name: str | None) -> int:
+    if not model_name:
+        return _DEFAULT_TIER_PRIORITY
+    model_lower = model_name.lower()
+    for prefix, pri in _MODEL_TIER_PRIORITY.items():
+        if model_lower == prefix or model_lower.startswith(prefix):
+            return pri
+    if "kimi" in model_lower or "moonshot" in model_lower:
+        return _MODEL_TIER_PRIORITY["kimi"]
+    return _DEFAULT_TIER_PRIORITY
+
+
 def _resolve_model_status(model_name: str | None) -> tuple[str, int]:
     """Return (mirror_status, priority) for a model. Higher priority wins."""
-    if not model_name:
-        return _DEFAULT_TIER_STATUS, _DEFAULT_TIER_PRIORITY
-    model_lower = model_name.lower()
-    # Check exact match first, then prefix match
-    for prefix, (status, pri) in _MODEL_TIER.items():
-        if model_lower == prefix or model_lower.startswith(prefix):
-            return status, pri
-    # Check for kimi prefix
-    if "kimi" in model_lower or "moonshot" in model_lower:
-        return _MODEL_TIER["kimi"]
-    return _DEFAULT_TIER_STATUS, _DEFAULT_TIER_PRIORITY
+    return _DEFAULT_TIER_STATUS, _model_priority(model_name)
 
 
 def _should_update_mirror_status(target: Any, model_name: str | None) -> bool:
     """Only update mirror_status if new model has equal or higher priority than existing."""
-    _, new_pri = _resolve_model_status(model_name)
-    existing = getattr(target, "mirror_status", None) or ""
-    # Map existing status to priority
-    existing_pri = 0
-    for _prefix, (_status, pri) in _MODEL_TIER.items():
-        if existing == _status:
-            existing_pri = pri
-            break
-    if existing_pri == 0:
-        existing_pri = _DEFAULT_TIER_PRIORITY if existing == _DEFAULT_TIER_STATUS else 5
+    new_pri = _model_priority(model_name)
+    raw = getattr(target, "raw_payload_json", None) or {}
+    existing_model = None
+    if isinstance(raw, dict):
+        prov = raw.get("provenance") if isinstance(raw.get("provenance"), dict) else {}
+        existing_model = prov.get("model_name") or raw.get("model_name")
+    if existing_model:
+        existing_pri = _model_priority(str(existing_model))
+    else:
+        existing = getattr(target, "mirror_status", None) or ""
+        existing_pri = _LEGACY_STATUS_PRIORITY.get(existing, 5)
     return new_pri >= existing_pri
 
 

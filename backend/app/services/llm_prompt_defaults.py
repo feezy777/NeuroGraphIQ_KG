@@ -239,64 +239,92 @@ SAME_GRANULARITY_CIRCUIT_COMPLETION_V1 = PromptTemplateDefaults(
     version="v1",
     name="Same-granularity circuit completion v1",
     description="Advisory same-atlas same-granularity circuit candidates with optional connection/function context.",
+    output_schema_json={
+        "circuits": [{
+            "circuit_name": "string",
+            "name_cn": "string (required)",
+            "circuit_type": "string",
+            "involved_region_candidate_ids": ["uuid"],
+            "region_roles": [{"region_candidate_id": "uuid", "role": "string", "sort_order": 0}],
+            "function_association": "string",
+            "description": "string",
+            "confidence": 0.0,
+            "evidence_text": "string",
+            "uncertainty_reason": "string",
+        }],
+    },
     system_prompt=(
-        "你是神经科学知识图谱数据治理助手，专精于脑回路(circuit)识别与建模。你只能输出 JSON。\n\n"
-        "核心原则：\n"
-        "- 你的输出是候选回路建议，不是正式事实，需人工审核\n"
-        "- 禁止跨 atlas/颗粒度推断；不同 atlas 的同名脑区不可自动视为同一实体\n"
-        "- 必须参考提供的连接候选和功能候选作为回路推断依据\n"
-        "- confidence: 0.8+=强证据(多文献+连接支持), 0.5-0.8=中等(有连接或文献), 0.3-0.5=弱证据(间接推断)\n"
-        "- 必须为每个回路输出 confidence/evidence_text/uncertainty_reason\n"
-        "- 人脑中存在大量回路(数百至数千)，尽可能多地识别有效回路\n"
-        "- 回路命名规范：功能描述+解剖路径，如 corticospinal_motor_pathway\n"
-        "- 不得声称已审核"
+        "You are a neuroscience knowledge graph curator specializing in neural circuit identification. "
+        "You output ONLY valid JSON. Never include markdown formatting.\n\n"
+        "CRITICAL RULES:\n"
+        "- MAXIMIZE QUANTITY: identify every possible circuit, including speculative ones\n"
+        "- EVERY connection in the input is a potential circuit — output ALL of them\n"
+        "- 2-region circuits: each connection pair = 1 circuit (source→target)\n"
+        "- Multi-region circuits: chain connections A→B + B→C = 3-region circuit A→B→C\n"
+        "- Low confidence is WELCOME: 0.05-0.3 = speculative, 0.3-0.5 = weak evidence, 0.5+ = moderate\n"
+        "- Never skip a circuit because of low confidence — output it and mark uncertainty_reason\n"
+        "- Circuit naming: use snake_case, descriptive, e.g. thalamocortical_sensory_pathway\n"
+        "- Every circuit MUST include: confidence, evidence_text, uncertainty_reason, name_cn\n"
+        "- name_cn: Chinese translation of the circuit name, e.g. 'corticospinal_motor_pathway' → '皮质脊髓运动通路'\n"
+        "- Do NOT cross atlas/granularity boundaries\n"
+        "- Do NOT claim human review has been performed"
     ),
     user_prompt_template=(
-        "请基于以下脑区候选、连接候选和功能候选，全面识别同颗粒度脑回路。\n\n"
-        "回路类型(circuit_type)：\n"
-        "- sensory_pathway: 感觉通路 (视觉/听觉/体感/味觉/嗅觉)\n"
-        "- motor_pathway: 运动通路 (锥体/锥体外系/小脑回路)\n"
-        "- associative_pathway: 联合通路 (皮质-皮质连接回路)\n"
-        "- limbic_circuit: 边缘回路 (情绪/记忆/奖赏)\n"
-        "- cognitive_circuit: 认知回路 (执行控制/工作记忆/注意)\n"
-        "- language_circuit: 语言回路 (Broca-Wernicke/语义网络)\n"
-        "- default_mode_circuit: 默认网络回路\n"
-        "- salience_circuit: 突显网络回路\n"
-        "- attention_circuit: 注意网络回路\n"
-        "- thalamocortical_loop: 丘脑-皮质环路\n"
-        "- basal_ganglia_loop: 基底节环路 (直接/间接/超直接通路)\n"
-        "- cerebellar_loop: 小脑环路\n"
-        "- brainstem_circuit: 脑干回路 (自主/觉醒/生命维持)\n"
-        "- memory_circuit: 记忆回路 (Papez/Yakovlev/海马-内嗅)\n"
-        "- emotion_circuit: 情绪回路 (杏仁核-前额叶/恐惧/奖赏)\n"
-        "- visual_circuit: 视觉回路 (视网膜-外侧膝状体-皮质/背侧/腹侧通路)\n"
-        "- auditory_circuit: 听觉回路 (耳蜗-脑干-皮质)\n"
-        "- somatosensory_circuit: 体感回路\n"
-        "- multisensory_integration: 多感官整合回路\n"
-        "- other: 其他\n\n"
-        "区域角色(region_roles.role)：\n"
-        "- initiator: 回路起始节点\n"
-        "- relay: 中继站\n"
-        "- integrator: 信息整合节点\n"
-        "- modulator: 调节节点\n"
-        "- output: 输出节点\n"
-        "- participant: 一般参与\n\n"
-        "约束:\n"
-        "- 仅在 source_atlas={{source_atlas}}, granularity_level={{granularity_level}} 内\n"
-        "- 每个回路 {{min_regions_per_circuit}}-{{max_regions_per_circuit}} 个区域\n"
-        "- 最多输出 {{max_circuits}} 个回路\n"
-        "- 优先利用连接候选({{connections_json}})中的连接关系构建回路\n"
-        "- 利用功能候选({{functions_json}})推断回路功能关联\n"
-        "- 连接数量有限时，基于已知神经解剖学知识推断常见回路\n"
-        "- evidence_text 写明回路推断依据\n\n"
-        "候选脑区:\n{{regions_json}}\n\n"
-        "连接候选:\n{{connections_json}}\n\n"
-        "功能候选:\n{{functions_json}}\n\n"
-        '输出纯JSON(不要```json包裹):\n'
-        '{"circuits":[{"circuit_name":"corticospinal_motor_pathway","circuit_type":"motor_pathway",'
-        '"involved_region_candidate_ids":["uuid1","uuid2"],"region_roles":[{"region_candidate_id":"uuid1","role":"initiator","sort_order":0}],'
-        '"function_association":"voluntary_motor_control","description":"初级运动皮质经内囊至脊髓前角",'
-        '"confidence":0.85,"evidence_text":"经典神经解剖学描述...","uncertainty_reason":"偏侧化不完全确定","suggested_triples":[]}]}'
+        "Identify ALL possible neural circuits from the candidate regions and connections below.\n"
+        "OUTPUT AS MANY CIRCUITS AS POSSIBLE — target {{max_circuits}} circuits.\n\n"
+        "CIRCUIT TYPES (use exact values):\n"
+        "- sensory_circuit: visual/auditory/somatosensory/gustatory/olfactory pathways\n"
+        "- motor_circuit: pyramidal/extrapyramidal/cerebellar motor pathways\n"
+        "- limbic_circuit: emotion/memory/reward circuits\n"
+        "- cognitive_control_circuit: executive control/working memory/attention\n"
+        "- default_mode_related: default mode network circuits\n"
+        "- salience_related: salience network circuits\n"
+        "- memory_related: Papez/Yakovlev/hippocampal-entorhinal circuits\n"
+        "- reward_related: mesolimbic dopamine pathways\n"
+        "- language_related: Broca-Wernicke/semantic networks\n"
+        "- attention_related: attention network circuits\n"
+        "- uncertain_circuit: uncertain classification\n"
+        "- unknown: truly unknown\n\n"
+        "REGION ROLES (use exact values):\n"
+        "- source: circuit origin/driver\n"
+        "- target: circuit destination/terminal\n"
+        "- hub: central integrative node\n"
+        "- relay: relay/intermediate station\n"
+        "- modulator: modulatory node\n"
+        "- participant: general participant\n\n"
+        "METHOD:\n"
+        "1. For EACH connection in connections_json, create a 2-region circuit immediately\n"
+        "2. Then chain connections: if A→B and B→C exist, create 3+ region circuit A→B→C\n"
+        "3. Categorize each circuit by its likely functional system\n"
+        "4. Generate a Chinese name (name_cn) for each circuit based on its English name\n"
+        "5. Even if evidence is weak, OUTPUT THE CIRCUIT with low confidence (0.05-0.3)\n\n"
+        "CONSTRAINTS:\n"
+        "- Scope: source_atlas={{source_atlas}}, granularity_level={{granularity_level}}\n"
+        "- {{min_regions_per_circuit}}-{{max_regions_per_circuit}} regions per circuit\n"
+        "- Output target: {{max_circuits}} circuits (strive to reach this!)\n"
+        "- Include 2-region circuits AND multi-region chains — both are valuable\n"
+        "- Same connection can appear in multiple circuits\n"
+        "- Same region can participate in multiple circuits\n"
+        "- If connections are sparse, infer circuits from known neuroanatomy\n"
+        "- evidence_text can be brief, but must indicate reasoning basis\n\n"
+        "INPUT:\n"
+        "Candidate regions:\n{{regions_json}}\n\n"
+        "Connections:\n{{connections_json}}\n\n"
+        "Functions:\n{{functions_json}}\n\n"
+        "OUTPUT pure JSON (no markdown). Required fields per circuit object:\n"
+        "circuit_name, name_cn, circuit_type, involved_region_candidate_ids, region_roles,\n"
+        "function_association, description, confidence, evidence_text, uncertainty_reason\n\n"
+        "EXAMPLE:\n"
+        '{"circuits":['
+        '{"circuit_name":"corticospinal_motor_pathway","name_cn":"皮质脊髓运动通路","circuit_type":"motor_circuit",'
+        '"involved_region_candidate_ids":["uuid1","uuid2"],"region_roles":[{"region_candidate_id":"uuid1","role":"source","sort_order":0},{"region_candidate_id":"uuid2","role":"target","sort_order":1}],'
+        '"function_association":"voluntary_motor_control","description":"Primary motor cortex to spinal cord via internal capsule",'
+        '"confidence":0.85,"evidence_text":"Classic neuroanatomy; well-documented pyramidal tract","uncertainty_reason":"lateralization may be incomplete","suggested_triples":[]},'
+        '{"circuit_name":"layer4_to_layer5_feedforward","name_cn":"第4层至第5层前馈回路","circuit_type":"sensory_circuit",'
+        '"involved_region_candidate_ids":["uuid3","uuid4"],"region_roles":[{"region_candidate_id":"uuid3","role":"source"},{"region_candidate_id":"uuid4","role":"target"}],'
+        '"function_association":"sensory_processing","description":"Cortical layer 4 to layer 5 feedforward projection",'
+        '"confidence":0.15,"evidence_text":"Inferred from single connection record","uncertainty_reason":"single connection evidence; needs further validation","suggested_triples":[]}'
+        ']}'
     ),
 )
 

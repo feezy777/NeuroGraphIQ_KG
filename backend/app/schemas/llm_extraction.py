@@ -493,11 +493,11 @@ class SameGranularityCircuitExtractionRequest(BaseModel):
     scope: CircuitExtractionScope | None = None
     prompt_template_key: str = "same_granularity_circuit_completion_v1"
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
-    max_tokens: int = Field(default=5000, ge=256, le=8192)
+    max_tokens: int = Field(default=12000, ge=256, le=32768)
     dry_run: bool = False
     max_circuits: int = Field(default=100, ge=1, le=5000)
-    min_regions_per_circuit: int = Field(default=2, ge=2, le=20)
-    max_regions_per_circuit: int = Field(default=12, ge=2, le=20)
+    min_regions_per_circuit: int = Field(default=3, ge=2, le=20)
+    max_regions_per_circuit: int = Field(default=10, ge=2, le=20)
     include_connection_context: bool = True
     include_function_context: bool = True
     connection_ids: list[uuid.UUID] | None = None

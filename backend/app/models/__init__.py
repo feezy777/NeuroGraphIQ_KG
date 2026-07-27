@@ -1,5 +1,9 @@
 from app.models.candidate import CandidateBrainRegion, CandidateGenerationRun
 from app.models.human_review import CandidateReviewRecord
+from app.models.molecular_circuit_candidate import (
+    MirrorMolecularCircuitCandidate,
+    MolecularCircuitCandidateRun,
+)
 from app.models.import_batch import ImportBatch, ImportBatchEvent, ImportBatchFile
 from app.models.import_batch_rollback import ImportBatchRollbackRecord
 from app.models.llm_field_completion import LlmFieldCompletionItem, LlmFieldCompletionRun
@@ -75,6 +79,8 @@ __all__ = [
     "RuleValidationRun",
     "CandidateRuleValidationResult",
     "CandidateReviewRecord",
+    "MolecularCircuitCandidateRun",
+    "MirrorMolecularCircuitCandidate",
     "FinalBrainRegion",
     "PromotionRecord",
     "CandidateLlmExtraction",

@@ -1,15 +1,15 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { useBackgroundTasks, type BgTask } from '../hooks/useBackgroundTasks'
 import { useTaskDetailModal } from '../components/TaskDetailModal'
 import { StatusBadge } from '../components/StatusBadge'
 import { ModelBadge } from '../components/ModelBadge'
 import { CancelConfirmDialog } from '../components/CancelConfirmDialog'
-import { cancelFieldCompletionRun, cancelCompositeWorkflow, cancelCircuitConnectionExtractionRun } from '../api/endpoints'
+import { getTaskDef, cancelTask, TASK_TYPE_OPTIONS } from '../services/taskRegistry'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
 type StatusFilter = 'all' | 'running' | 'pending' | 'paused' | 'succeeded' | 'partial' | 'failed' | 'cancelled'
-type TypeFilter = 'all' | 'composite_workflow' | 'field_completion' | 'circuit_extraction' | 'circuit_connection_extraction'
+type TypeFilter = 'all' | BgTask['type']
 type TimeFilter = 'all' | '1h' | 'today' | '7d'
 type SortOrder = 'newest' | 'updated' | 'longest' | 'errors'
 
@@ -29,7 +29,7 @@ function elapsed(ts: string | null | undefined): number {
   return Math.round((Date.now() - new Date(ts).getTime()) / 1000)
 }
 
-function shortId(id: string): string { return id.length > 10 ? id.slice(0, 10) + '…' : id }
+function shortId(id: string): string { return id.length > 12 ? id.slice(0, 12) + '…' : id }
 
 const STATUS_FILTERS: { key: StatusFilter; label: string; color: string; states: string[] }[] = [
   { key: 'all', label: '全部', color: '#666', states: [] },
@@ -42,12 +42,19 @@ const STATUS_FILTERS: { key: StatusFilter; label: string; color: string; states:
   { key: 'cancelled', label: '已取消', color: '#9ca3af', states: ['cancelled'] },
 ]
 
-function statusToFilter(status: string): StatusFilter {
-  for (const f of STATUS_FILTERS) {
-    if (f.states.includes(status)) return f.key
-  }
-  return 'all'
-}
+const TIME_FILTERS: { key: TimeFilter; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: '1h', label: '最近 1 小时' },
+  { key: 'today', label: '今日' },
+  { key: '7d', label: '最近 7 天' },
+]
+
+const SORT_OPTIONS: { key: SortOrder; label: string }[] = [
+  { key: 'newest', label: '最新创建' },
+  { key: 'updated', label: '最近更新' },
+  { key: 'longest', label: '耗时最长' },
+  { key: 'errors', label: '异常优先' },
+]
 
 function countTasks(tasks: BgTask[], filter: StatusFilter): number {
   if (filter === 'all') return tasks.length
@@ -58,9 +65,8 @@ function countTasks(tasks: BgTask[], filter: StatusFilter): number {
 // ── Component ───────────────────────────────────────────────────────────────
 
 export function BackgroundTaskCenterPage() {
-  const { tasks, loading, error, enablePolling, disablePolling } = useBackgroundTasks(5000)
+  const { tasks, loading, error } = useBackgroundTasks()
   const { openTask } = useTaskDetailModal()
-  useEffect(() => { enablePolling(); return () => disablePolling() }, [enablePolling, disablePolling])
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
@@ -71,27 +77,24 @@ export function BackgroundTaskCenterPage() {
   const [cancelTarget, setCancelTarget] = useState<BgTask | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkCancelling, setBulkCancelling] = useState(false)
+  const [bulkResult, setBulkResult] = useState<string | null>(null)
 
   // Filter + sort
   const filtered = useMemo(() => {
     let list = [...tasks]
 
-    // Status
     if (statusFilter !== 'all') {
       const states = STATUS_FILTERS.find(f => f.key === statusFilter)?.states ?? []
       list = list.filter(t => states.includes(t.status))
     }
-    // Type
     if (typeFilter !== 'all') {
       list = list.filter(t => t.type === typeFilter)
     }
-    // Time
     const now = Date.now()
     if (timeFilter === '1h') list = list.filter(t => new Date(t.createdAt).getTime() > now - 3600000)
     else if (timeFilter === 'today') list = list.filter(t => new Date(t.createdAt).getTime() > now - 86400000)
     else if (timeFilter === '7d') list = list.filter(t => new Date(t.createdAt).getTime() > now - 604800000)
 
-    // Search
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter(t =>
@@ -101,23 +104,54 @@ export function BackgroundTaskCenterPage() {
       )
     }
 
-    // Sort
     if (sortBy === 'newest') list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     else if (sortBy === 'updated') list.sort((a, b) => new Date(b.completedAt ?? b.createdAt).getTime() - new Date(a.completedAt ?? a.createdAt).getTime())
     else if (sortBy === 'longest') list.sort((a, b) => elapsed(b.createdAt) - elapsed(a.createdAt))
     else if (sortBy === 'errors') list.sort((a, b) => {
-      const aErr = a.status === 'failed' || a.status === 'partially_succeeded' ? -1 : 0
-      const bErr = b.status === 'failed' || b.status === 'partially_succeeded' ? -1 : 0
-      return aErr - bErr
+      const isErr = (s: string) => s === 'failed' || s === 'cleanup_failed' || s === 'partially_succeeded'
+      return (isErr(b.status) ? 1 : 0) - (isErr(a.status) ? 1 : 0)
     })
 
     return list
   }, [tasks, statusFilter, typeFilter, timeFilter, sortBy, search])
 
-  const statCards = STATUS_FILTERS.slice(0, 6).map(f => ({
+  const statCards = STATUS_FILTERS.map(f => ({
     ...f,
     count: countTasks(tasks, f.key),
   }))
+
+  const queuedTasks = tasks.filter(t => t.status === 'pending' || t.status === 'queued')
+  const cancellableSelected = [...selectedIds].filter(id => {
+    const t = tasks.find(x => x.id === id)
+    return t && ['pending', 'queued', 'running'].includes(t.status)
+  })
+
+  const handleBulkCancel = async () => {
+    setBulkCancelling(true)
+    setBulkResult(null)
+    let succeeded = 0
+    let failed = 0
+    // Build cancellable task list without non-null assertions
+    const cancellableTasks: BgTask[] = []
+    for (const id of selectedIds) {
+      const t = tasks.find(x => x.id === id)
+      if (t && ['pending', 'queued', 'running'].includes(t.status)) {
+        cancellableTasks.push(t)
+      }
+    }
+    // Parallel cancel — all fire at once
+    const results = await Promise.allSettled(
+      cancellableTasks.map(t => cancelTask(t)),
+    )
+    for (const r of results) {
+      if (r.status === 'fulfilled') succeeded++
+      else failed++
+    }
+    setBulkResult(failed === 0 ? `已取消 ${succeeded} 个任务` : `已取消 ${succeeded} 个，${failed} 个失败`)
+    setSelectedIds(new Set())
+    setBulkCancelling(false)
+    setTimeout(() => setBulkResult(null), 3000)
+  }
 
   return (
     <div className="tc-page">
@@ -128,38 +162,27 @@ export function BackgroundTaskCenterPage() {
           <p className="tc-subtitle">统一管理后台运行中的 LLM 提取及异步任务</p>
         </div>
         <div className="tc-header-actions">
+          {bulkResult && (
+            <span style={{ fontSize: 12, color: bulkResult.includes('失败') ? '#dc2626' : '#16a34a', fontWeight: 600 }}>
+              {bulkResult}
+            </span>
+          )}
           {selectedIds.size > 0 && (
             <>
-              <span style={{ fontSize: 12, color: '#666' }}>已选 {selectedIds.size}</span>
+              <span style={{ fontSize: 12, color: '#666' }}>已选 {selectedIds.size} · 可取消 {cancellableSelected.length}</span>
               <button className="btn" style={{ color: '#dc2626', borderColor: '#dc2626' }}
-                disabled={bulkCancelling}
-                onClick={async () => {
-                  setBulkCancelling(true)
-                  const ids = [...selectedIds]
-                  for (const id of ids) {
-                    const t = tasks.find(x => x.id === id)
-                    if (!t || !['pending','queued','running'].includes(t.status)) continue
-                    try {
-                      if (t.type === 'field_completion') await cancelFieldCompletionRun(t.id)
-                      else if (t.type === 'circuit_connection_extraction') await cancelCircuitConnectionExtractionRun(t.id)
-                      else await cancelCompositeWorkflow(t.id)
-                    } catch {}
-                  }
-                  setSelectedIds(new Set())
-                  setBulkCancelling(false)
-                }}>
-                {bulkCancelling ? '取消中…' : `取消选中 (${selectedIds.size})`}
+                disabled={bulkCancelling || cancellableSelected.length === 0}
+                onClick={handleBulkCancel}>
+                {bulkCancelling ? '取消中…' : `取消选中 (${cancellableSelected.length})`}
               </button>
               <button className="btn" onClick={() => setSelectedIds(new Set())}>清除选择</button>
             </>
           )}
-          <button className="btn" onClick={() => {
-            const queued = tasks.filter(t => t.status === 'pending' || t.status === 'queued')
-            setSelectedIds(new Set(queued.map(t => t.id)))
-          }}>全选排队 ({tasks.filter(t => t.status === 'pending' || t.status === 'queued').length})</button>
+          <button className="btn" onClick={() => setSelectedIds(new Set(queuedTasks.map(t => t.id)))}>
+            全选排队 ({queuedTasks.length})
+          </button>
           <input className="tc-search" placeholder="搜索任务名 / ID / 类型…" value={search}
             onChange={e => setSearch(e.target.value)} />
-          <button className="btn" onClick={() => window.location.reload()}>刷新</button>
         </div>
       </div>
 
@@ -193,28 +216,25 @@ export function BackgroundTaskCenterPage() {
           </FilterGroup>
 
           <FilterGroup title="任务类型">
-            {([
-              { key: 'all' as TypeFilter, label: '全部' },
-              { key: 'composite_workflow' as TypeFilter, label: 'LLM 提取' },
-              { key: 'field_completion' as TypeFilter, label: '字段补全' },
-              { key: 'circuit_extraction' as TypeFilter, label: '回路提取' },
-              { key: 'circuit_connection_extraction' as TypeFilter, label: '回路→连接提取' },
-            ]).map(f => (
-              <button key={f.key}
-                className={`tc-filter-item${typeFilter === f.key ? ' active' : ''}`}
-                onClick={() => setTypeFilter(f.key)}>
-                {f.label}
-              </button>
-            ))}
+            <button
+              className={`tc-filter-item${typeFilter === 'all' ? ' active' : ''}`}
+              onClick={() => setTypeFilter('all')}>
+              全部
+            </button>
+            {TASK_TYPE_OPTIONS.map(f => {
+              const def = getTaskDef(f.key)
+              return (
+                <button key={f.key}
+                  className={`tc-filter-item${typeFilter === f.key ? ' active' : ''}`}
+                  onClick={() => setTypeFilter(f.key)}>
+                  {def.icon} {f.label}
+                </button>
+              )
+            })}
           </FilterGroup>
 
           <FilterGroup title="时间">
-            {([
-              { key: 'all' as TimeFilter, label: '全部' },
-              { key: '1h' as TimeFilter, label: '最近 1 小时' },
-              { key: 'today' as TimeFilter, label: '今日' },
-              { key: '7d' as TimeFilter, label: '最近 7 天' },
-            ]).map(f => (
+            {TIME_FILTERS.map(f => (
               <button key={f.key}
                 className={`tc-filter-item${timeFilter === f.key ? ' active' : ''}`}
                 onClick={() => setTimeFilter(f.key)}>
@@ -224,12 +244,7 @@ export function BackgroundTaskCenterPage() {
           </FilterGroup>
 
           <FilterGroup title="排序">
-            {([
-              { key: 'newest' as SortOrder, label: '最新创建' },
-              { key: 'updated' as SortOrder, label: '最近更新' },
-              { key: 'longest' as SortOrder, label: '耗时最长' },
-              { key: 'errors' as SortOrder, label: '异常优先' },
-            ]).map(f => (
+            {SORT_OPTIONS.map(f => (
               <button key={f.key}
                 className={`tc-filter-item${sortBy === f.key ? ' active' : ''}`}
                 onClick={() => setSortBy(f.key)}>
@@ -305,6 +320,7 @@ function TaskCard({ task, onClick, onViewDrawer, onCancel, selected, onSelect }:
   task: BgTask; onClick: () => void; onViewDrawer: () => void; onCancel: () => void
   selected?: boolean; onSelect?: (id: string, checked: boolean) => void
 }) {
+  const taskDef = getTaskDef(task.type)
   const isRunning = task.status === 'running'
   const isPending = task.status === 'pending' || task.status === 'queued'
   const isPaused = task.status === 'paused' || task.status === 'pause_requested'
@@ -329,7 +345,7 @@ function TaskCard({ task, onClick, onViewDrawer, onCancel, selected, onSelect }:
       <div className="tc-card-main" onClick={onClick}>
         <div className="tc-card-col">
           <div className="tc-card-title">
-            {task.type === 'field_completion' ? '🔧' : task.type === 'circuit_extraction' ? '⭕' : '🔗'} {task.label}
+            {taskDef.icon} {taskDef.label(task)}
           </div>
           <div className="tc-card-meta">
             <code>{shortId(task.id)}</code>
@@ -361,7 +377,7 @@ function TaskCard({ task, onClick, onViewDrawer, onCancel, selected, onSelect }:
             </span>
           )}
           <span className="tc-card-stat">
-            <strong>{task.type === 'field_completion' ? '字段补全' : task.type === 'circuit_connection_extraction' ? '回路→连接提取' : task.type === 'circuit_extraction' ? '回路提取' : 'LLM 提取'}</strong>
+            <strong>{taskDef.label(task).split(' · ')[0]}</strong>
           </span>
         </div>
       </div>
@@ -385,12 +401,13 @@ function TaskCard({ task, onClick, onViewDrawer, onCancel, selected, onSelect }:
 function TaskDetailDrawer({ task, onClose, onOpenModal }: {
   task: BgTask; onClose: () => void; onOpenModal: () => void
 }) {
-  const isRunning = task.status === 'running' || task.status === 'pending'
+  const taskDef = getTaskDef(task.type)
+  const isRunning = task.status === 'running' || task.status === 'pending' || task.status === 'queued'
 
   return (
     <>
       <div className="tc-drawer-header">
-        <h3>{task.type === 'field_completion' ? '🔧 字段补全' : '🔗 LLM 提取'}</h3>
+        <h3>{taskDef.icon} {taskDef.label(task)}</h3>
         <button className="btn-close" onClick={onClose}>✕</button>
       </div>
       <div className="tc-drawer-body">

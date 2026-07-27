@@ -11,6 +11,28 @@ export const GRANULARITY_LEVELS: { key: GranularityLevel; label: string }[] = [
   { key: 'molecular_attr', label: 'Molecular' },
 ]
 
+/** Map workbench granularity_level → Mirror/candidate pool granularity_family */
+export function granularityToFamily(level?: string | null): string {
+  switch (level) {
+    case 'macro':
+      return 'macro_clinical'
+    case 'meso':
+      return 'meso_anatomical'
+    case 'micro':
+    case 'sub_connectivity':
+      return 'sub_connectivity'
+    case 'molecular':
+    case 'molecular_attr':
+      return 'molecular_attr'
+    case 'fine_cyto':
+      return 'fine_cyto'
+    case 'term':
+      return 'terminology'
+    default:
+      return 'macro_clinical'
+  }
+}
+
 function resolveGranularity(): GranularityLevel {
   const q = readHashQueryParams()
   const v = q.granularity_level

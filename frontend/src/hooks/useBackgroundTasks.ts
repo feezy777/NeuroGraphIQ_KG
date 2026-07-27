@@ -1,129 +1,151 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
-  listFieldCompletionRuns, getFieldCompletionRun,
-  listCompositeWorkflowRuns, getCompositeWorkflowRun,
+  listUnifiedTasks,
+  getFieldCompletionRun,
+  getCompositeWorkflowRun,
   getCircuitExtractionRun,
-  listCircuitConnectionExtractionRuns, getCircuitConnectionExtractionRun,
+  getCircuitConnectionExtractionRun,
+  getMolecularCircuitRun,
+  type UnifiedTaskItem,
 } from '../api/endpoints'
-import type { FieldCompletionRun, FieldCompletionRunDetail } from '../api/endpoints'
 
 // ── Unified task type ───────────────────────────────────────────────────────
 
 export interface BgTask {
   id: string
-  type: 'field_completion' | 'composite_workflow' | 'circuit_extraction' | 'circuit_connection_extraction'
+  type: UnifiedTaskItem['type']
   status: string
-  targetType?: string
-  targetCount?: number
+  targetType: string | null
+  targetCount: number | null
   label: string
-  provider?: string
-  modelName?: string
+  provider: string | null
+  modelName: string | null
   createdAt: string
-  startedAt?: string | null
-  completedAt?: string | null
-  detail?: any
+  startedAt: string | null
+  completedAt: string | null
+  detail: any | null
+}
+
+const LIST_LIMIT = 100
+const FAST_POLL_MS = 3000
+const SLOW_POLL_MS = 15000
+
+// ── Normalizer ──────────────────────────────────────────────────────────────
+
+function mapToBgTask(item: UnifiedTaskItem): BgTask {
+  return {
+    id: item.id,
+    type: item.type,
+    status: item.status,
+    targetType: item.target_type,
+    targetCount: item.target_count,
+    label: item.label,
+    provider: item.provider,
+    modelName: item.model_name,
+    createdAt: item.created_at,
+    startedAt: item.started_at,
+    completedAt: item.completed_at,
+    detail: null,
+  }
 }
 
 // ── Hook ────────────────────────────────────────────────────────────────────
 
-export function useBackgroundTasks(pollMs = 3000) {
+/**
+ * Shared hook for both the TaskCenter Page and the Dropdown.
+ *
+ * Polling strategy:
+ *  - If any task is 'running' / 'pending' / 'queued' → 3s interval
+ *  - Otherwise → 15s interval (battery-friendly)
+ *  - Paused when tab is hidden (visibilitychange), resumed on return
+ *  - Deduplication: skips fetch if previous request is still in flight
+ */
+export function useBackgroundTasks() {
   const [tasks, setTasks] = useState<BgTask[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isActiveRef = useRef(true)
-  const needsPollRef = useRef(true)  // poll by default, disable when dropdown closes
+  const inFlightRef = useRef(false)
+  const tasksRef = useRef<BgTask[]>([])
 
-  const enablePolling = useCallback(() => { needsPollRef.current = true }, [])
-  const disablePolling = useCallback(() => { needsPollRef.current = false }, [])
-
-  useEffect(() => {
-    const handleVisibility = () => { isActiveRef.current = !document.hidden }
-    document.addEventListener('visibilitychange', handleVisibility)
-    return () => document.removeEventListener('visibilitychange', handleVisibility)
-  }, [])
+  // Keep ref in sync so scheduleNext always reads latest tasks
+  tasksRef.current = tasks
 
   useEffect(() => {
     let cancelled = false
+    // Reset on every mount (Strict Mode double-mount sets these to false in cleanup)
+    isActiveRef.current = !document.hidden
+
     const fetchAll = async () => {
-      if (!needsPollRef.current || !isActiveRef.current) return
+      // Guard: prevent concurrent fetches. Check+set is synchronous (no await
+      // between) so two calls within the same microtask can't both pass.
+      if (!isActiveRef.current || cancelled) return
+      if (inFlightRef.current) return
+      inFlightRef.current = true
       try {
-        const listCircuitRuns = async () => {
-          const resp = await fetch('/api/llm-extraction/circuit-extraction/runs?limit=200')
-          if (!resp.ok) return { items: [] }
-          return resp.json()
-        }
-        const [fcRes, cwRes, ceRes, cceRes] = await Promise.allSettled([
-          listFieldCompletionRuns({ limit: 50 }),
-          listCompositeWorkflowRuns({ limit: 50 }),
-          listCircuitRuns(),
-          listCircuitConnectionExtractionRuns({ limit: 50 }),
-        ])
-
+        const resp = await listUnifiedTasks({ limit: LIST_LIMIT })
         if (cancelled) return
-        const merged: BgTask[] = []
-
-        if (fcRes.status === 'fulfilled') {
-          for (const r of fcRes.value.items) {
-            merged.push({
-              id: r.id, type: 'field_completion', status: r.status,
-              targetType: r.target_type, targetCount: r.target_count,
-              label: `字段补全 · ${r.target_type}`,
-              provider: r.provider ?? undefined, modelName: r.model_name ?? undefined,
-              createdAt: r.created_at, startedAt: r.started_at, completedAt: r.completed_at,
-              detail: null,
-            })
-          }
-        }
-
-        if (cwRes.status === 'fulfilled') {
-          for (const r of cwRes.value.items) {
-            merged.push({
-              id: r.id, type: 'composite_workflow', status: r.status,
-              targetType: r.workflow_type ?? undefined, targetCount: r.candidate_count,
-              label: `LLM 提取 · ${r.workflow_type}`,
-              provider: r.provider ?? undefined, modelName: r.model_name ?? undefined,
-              createdAt: r.created_at ?? '', startedAt: r.started_at ?? null, completedAt: r.completed_at ?? null,
-              detail: null,
-            })
-          }
-        }
-
-        if (cceRes.status === 'fulfilled' && cceRes.value?.items) {
-          for (const r of cceRes.value.items) {
-            merged.push({
-              id: r.id, type: 'circuit_connection_extraction', status: r.status,
-              targetType: r.mode, targetCount: r.circuit_count,
-              label: `回路→连接提取 · ${r.mode}`,
-              provider: r.provider ?? undefined, modelName: r.model_name ?? undefined,
-              createdAt: r.created_at ?? '', startedAt: r.started_at ?? null, completedAt: r.completed_at ?? null,
-              detail: null,
-            })
-          }
-        }
-
-        merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        setTasks(merged)
+        const mapped = resp.items.map(mapToBgTask)
+        setTasks(mapped)
         setLoading(false)
         setError(null)
       } catch {
-        if (!cancelled) { setLoading(false); setError('无法加载后台任务') }
+        if (!cancelled) {
+          setLoading(false)
+          setError('无法加载后台任务')
+        }
+      } finally {
+        inFlightRef.current = false
       }
     }
 
-    fetchAll()
-    timerRef.current = setInterval(fetchAll, pollMs)
-    return () => { cancelled = true; if (timerRef.current) clearInterval(timerRef.current) }
-  }, [pollMs])
+    const scheduleNext = () => {
+      // Don't schedule if cancelled, hidden, or already scheduled
+      if (cancelled || !isActiveRef.current) return
+      if (timerRef.current) return  // already have a pending timer
+      const hasActive = tasksRef.current.some(
+        t => t.status === 'running' || t.status === 'pending' || t.status === 'queued',
+      )
+      const interval = hasActive ? FAST_POLL_MS : SLOW_POLL_MS
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null
+        fetchAll().then(() => scheduleNext())
+      }, interval)
+    }
 
-  return { tasks, loading, error, enablePolling, disablePolling }
+    // ── Visibility-aware pause / resume ─────────────────────────────────
+    const handleVisibility = () => {
+      isActiveRef.current = !document.hidden
+      if (isActiveRef.current && !cancelled && !timerRef.current) {
+        fetchAll().then(() => scheduleNext())
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+
+    // ── Initial fetch ───────────────────────────────────────────────────
+    fetchAll().then(() => scheduleNext())
+
+    return () => {
+      cancelled = true
+      isActiveRef.current = false
+      inFlightRef.current = false  // release lock so next mount can fetch
+      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null }
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [])  // runs once on mount
+
+  return { tasks, loading, error }
 }
 
 // ── Detail fetcher ──────────────────────────────────────────────────────────
 
 export async function fetchTaskDetail(task: BgTask): Promise<any> {
-  if (task.type === 'field_completion') return getFieldCompletionRun(task.id)
-  if (task.type === 'circuit_extraction') return getCircuitExtractionRun(task.id)
-  if (task.type === 'circuit_connection_extraction') return getCircuitConnectionExtractionRun(task.id)
-  return getCompositeWorkflowRun(task.id)
+  switch (task.type) {
+    case 'field_completion': return getFieldCompletionRun(task.id)
+    case 'circuit_extraction': return getCircuitExtractionRun(task.id)
+    case 'circuit_connection_extraction': return getCircuitConnectionExtractionRun(task.id)
+    case 'molecular_circuit': return getMolecularCircuitRun(task.id)
+    default: return getCompositeWorkflowRun(task.id)
+  }
 }

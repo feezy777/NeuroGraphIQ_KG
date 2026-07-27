@@ -1734,6 +1734,89 @@ export const getCircuitExtractionRun = (runId: string) =>
 export const cancelCircuitExtractionRun = (runId: string) =>
   postJson<CircuitExtractionRunRead>(`/api/llm-extraction/circuit-extraction/runs/${runId}/cancel`)
 
+// ── Molecular Circuit Extraction (granularity = molecular_attr) ─────────────
+
+export interface MolecularCircuitExtractionRequest {
+  provider?: string
+  model_name?: string
+  functional_modules?: string[] | null
+  motif_types?: string[] | null
+  min_path_length?: number
+  max_path_length?: number
+  include_low_confidence?: boolean
+  confidence_floor?: number
+  pack_candidate_limit?: number
+  pack_edge_limit?: number
+  pack_concurrency?: number
+  retry_failed_only?: boolean
+  dry_run?: boolean
+}
+
+export interface MolecularCircuitStartResponse {
+  run_id: string
+  status: string
+  candidate_count: number
+  pack_count: number
+  estimated_candidates: number
+}
+
+export interface MolecularCircuitRunRead {
+  id: string
+  status: string
+  provider: string | null
+  model_name: string | null
+  candidate_count: number | null
+  pack_count: number | null
+  total_raw_topologies: number | null
+  total_passed: number | null
+  total_failed: number | null
+  high_confidence: number
+  medium_confidence: number
+  low_confidence: number
+  progress_json: Record<string, unknown>
+  result_summary_json: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface MolecularCircuitProgressResponse {
+  run_id: string
+  status: string
+  phase: string
+  progress_percent: number
+  phase_stats: Record<string, unknown>
+}
+
+export interface MolecularCircuitActionResponse {
+  run_id: string
+  status: string
+  message: string
+}
+
+export const startMolecularCircuitExtraction = (body: MolecularCircuitExtractionRequest = {}) =>
+  postJson<MolecularCircuitStartResponse>('/api/llm-extraction/molecular-circuit/start', body)
+
+export const listMolecularCircuitRuns = (params?: { status?: string; limit?: number; offset?: number }) =>
+  getJson<{ items: MolecularCircuitRunRead[]; total: number; limit?: number; offset?: number }>(
+    '/api/llm-extraction/molecular-circuit/runs',
+    params,
+  )
+
+export const getMolecularCircuitRun = (runId: string) =>
+  getJson<MolecularCircuitRunRead>(`/api/llm-extraction/molecular-circuit/runs/${runId}`)
+
+export const getMolecularCircuitProgress = (runId: string) =>
+  getJson<MolecularCircuitProgressResponse>(`/api/llm-extraction/molecular-circuit/runs/${runId}/progress`)
+
+export const cancelMolecularCircuitRun = (runId: string) =>
+  postJson<MolecularCircuitActionResponse>(`/api/llm-extraction/molecular-circuit/runs/${runId}/cancel`)
+
+export const pauseMolecularCircuitRun = (runId: string) =>
+  postJson<MolecularCircuitActionResponse>(`/api/llm-extraction/molecular-circuit/runs/${runId}/pause`)
+
+export const resumeMolecularCircuitRun = (runId: string) =>
+  postJson<MolecularCircuitActionResponse>(`/api/llm-extraction/molecular-circuit/runs/${runId}/resume`)
+
 export interface ExtractionPromptTemplate {
   key: string
   title: string
@@ -4698,3 +4781,34 @@ export const getWorkspaceFileDownloadUrl = (id: string) =>
 
 export const attachWorkspaceFileToResource = (id: string, body: WorkspaceFileAttachRequest) =>
   postJson<ResourceFile>(`/api/workspace-files/${id}/attach-to-resource`, body)
+
+// ── Unified Background Tasks ────────────────────────────────────────────────
+
+export interface UnifiedTaskItem {
+  id: string
+  type: 'composite_workflow' | 'field_completion' | 'circuit_extraction' | 'circuit_connection_extraction' | 'molecular_circuit'
+  status: string
+  label: string
+  target_type: string | null
+  target_count: number | null
+  provider: string | null
+  model_name: string | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  meta: Record<string, unknown> | null
+}
+
+export interface UnifiedTaskListResponse {
+  items: UnifiedTaskItem[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export const listUnifiedTasks = (params?: {
+  status?: string
+  type?: string
+  limit?: number
+  offset?: number
+}) => getJson<UnifiedTaskListResponse>('/api/tasks/runs', params)

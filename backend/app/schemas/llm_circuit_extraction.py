@@ -15,8 +15,9 @@ class CircuitExtractionRequest(BaseModel):
     connection_ids: list[uuid.UUID] = Field(default_factory=list,
         description="When provided, extract circuits from existing connections (connection-based mode)")
     pool_id: uuid.UUID | None = None
-    candidates_per_pack: int = Field(default=20, ge=5, le=50)
-    shuffle_rounds: int = Field(default=3, ge=1, le=10, description="每脑区至少出现在 N 个不同包中")
+    candidates_per_pack: int = Field(default=20, ge=5, le=50, description="Larger = fewer packs = lower cost")
+    shuffle_rounds: int = Field(default=2, ge=1, le=20, description="More rounds = more diverse. 2 is sufficient for molecular")
+    max_circuits: int = Field(default=200, ge=10, le=1000, description="Max circuits per LLM call — higher = more discovery")
     temperature: float = Field(default=0.5, ge=0, le=2)
     max_tokens: int = Field(default=16384, ge=256, le=65536)
     pack_concurrency: int = Field(default=2, ge=1, le=8)

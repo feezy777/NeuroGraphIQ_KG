@@ -210,7 +210,23 @@ async def list_runs(
         offset=offset,
     )
     return FieldCompletionRunListResponse(
-        items=[FieldCompletionRunRead.model_validate(r) for r in rows],
+        items=[
+            FieldCompletionRunRead.model_validate(r).model_copy(
+                update={
+                    # request_json can embed full target id lists — drop for list view
+                    "request_json": {},
+                    "summary_json": {
+                        k: (r.summary_json or {}).get(k)
+                        for k in ("succeeded", "failed", "skipped", "updated", "item_count")
+                        if (r.summary_json or {}).get(k) is not None
+                    },
+                    "warnings_json": list(r.warnings_json or [])[:10],
+                    "errors_json": list(r.errors_json or [])[:10],
+                    "selected_fields_json": list(r.selected_fields_json or [])[:30],
+                }
+            )
+            for r in rows
+        ],
         total=total,
     )
 

@@ -752,7 +752,31 @@ async def create_mirror_circuit(
     data["raw_payload_json"] = raw
     row = MirrorRegionCircuit(**data)
     session.add(row)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        # Duplicate name — find by name+granularity, merge by confidence
+        existing = (
+            await session.execute(
+                select(MirrorRegionCircuit).where(
+                    MirrorRegionCircuit.circuit_name == data["circuit_name"],
+                    MirrorRegionCircuit.granularity_level == data.get("granularity_level"),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            new_conf = float(data.get("confidence", 0.5))
+            if new_conf > (existing.confidence or 0):
+                existing.confidence = new_conf
+                existing.description = data.get("description") or existing.description
+                existing.function_association = data.get("function_association") or existing.function_association
+                existing.circuit_type = data.get("circuit_type") or existing.circuit_type
+                session.add(existing)
+                await session.flush()
+            return existing
+        raise  # If still not found, something else is wrong
+
     for idx, cr in enumerate(payload.circuit_regions):
         session.add(
             MirrorCircuitRegion(

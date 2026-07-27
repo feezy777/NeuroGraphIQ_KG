@@ -15,8 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.candidate import CandidateBrainRegion
 from app.models.llm_circuit_extraction import CircuitExtractionRun
-from app.models.mirror_kg import MirrorRegionCircuit
+from app.models.mirror_kg import MirrorCircuitRegion, MirrorRegionCircuit
 from app.models.mirror_macro_clinical import MirrorCircuitStep, MirrorCircuitFunction
+from app.schemas.mirror_kg import MirrorStatus
 from app.schemas.llm_circuit_extraction import (
     CircuitExtractionRequest,
     CircuitExtractionRunRead,
@@ -38,55 +39,15 @@ CIRCUIT_TEMPLATE_KEY = "same_granularity_circuit_completion_v1"
 # AND the nested steps+functions output schema required by the pack service.
 
 _CIRCUIT_USER_PROMPT_EXTENDED = (
-    "请基于以下脑区候选、连接候选和功能候选，全面识别同颗粒度脑回路。\n\n"
-    "回路类型(circuit_type)：\n"
-    "- sensory_pathway: 感觉通路 (视觉/听觉/体感/味觉/嗅觉)\n"
-    "- motor_pathway: 运动通路 (锥体/锥体外系/小脑回路)\n"
-    "- associative_pathway: 联合通路 (皮质-皮质连接回路)\n"
-    "- limbic_circuit: 边缘回路 (情绪/记忆/奖赏)\n"
-    "- cognitive_circuit: 认知回路 (执行控制/工作记忆/注意)\n"
-    "- language_circuit: 语言回路 (Broca-Wernicke/语义网络)\n"
-    "- default_mode_circuit: 默认网络回路\n"
-    "- salience_circuit: 突显网络回路\n"
-    "- attention_circuit: 注意网络回路\n"
-    "- thalamocortical_loop: 丘脑-皮质环路\n"
-    "- basal_ganglia_loop: 基底节环路 (直接/间接/超直接通路)\n"
-    "- cerebellar_loop: 小脑环路\n"
-    "- brainstem_circuit: 脑干回路 (自主/觉醒/生命维持)\n"
-    "- memory_circuit: 记忆回路 (Papez/Yakovlev/海马-内嗅)\n"
-    "- emotion_circuit: 情绪回路 (杏仁核-前额叶/恐惧/奖赏)\n"
-    "- visual_circuit: 视觉回路 (视网膜-外侧膝状体-皮质/背侧/腹侧通路)\n"
-    "- auditory_circuit: 听觉回路 (耳蜗-脑干-皮质)\n"
-    "- somatosensory_circuit: 体感回路\n"
-    "- multisensory_integration: 多感官整合回路\n"
-    "- other: 其他\n\n"
-    "区域角色(step.role)：\n"
-    "- initiator: 回路起始节点\n"
-    "- relay: 中继站\n"
-    "- integrator: 信息整合节点\n"
-    "- output: 输出节点\n"
-    "- participant: 一般参与\n\n"
-    "约束:\n"
-    "- 每个回路需包含 2-8 个脑区\n"
-    "- 优先利用连接候选和功能候选中的关系推断回路\n"
-    "- 连接/功能数据有限时，基于神经解剖知识推断常见回路\n"
-    "- 即使没有连接数据，也必须基于脑区名称和已知神经解剖学大胆推断\n"
-    "- 先列出脑区名，再判断它们可能参与哪些回路\n"
-    "- confidence: 0.8+=强证据, 0.5-0.8=中等, 0.3-0.5=弱证据(间接推断也可输出)\n"
-    "- 人脑中存在大量回路，尽可能多地识别有效回路，至少输出3-5个回路\n"
-    "候选脑区 (JSON数组):\n{regions_json}\n\n"
-    "已知连接 (JSON数组, 可能为空):\n{connections_json}\n\n"
-    "已知功能 (JSON数组, 可能为空):\n{functions_json}\n\n"
-    "输出纯JSON (不要```json包裹):\n"
-    '{{"circuits":[{{"circuit_name":"corticospinal_motor_pathway","circuit_type":"motor_pathway",'
-    '"function_association":"voluntary_motor_control","description":"初级运动皮质经内囊至脊髓前角",'
-    '"confidence":0.85,"evidence_text":"经典神经解剖学描述...","uncertainty_reason":"偏侧化不完全确定",'
-    '"member_region_ids":["uuid1","uuid2"],'
-    '"steps":[{{"step_order":1,"step_name":"皮质脊髓束起始","step_type":"region","role":"initiator",'
-    '"region_id":"uuid1","confidence":0.9,"description":"Betz细胞发出轴突",'
-    '"functions":[{{"function_term_en":"motor_command","function_term_cn":"运动指令","function_domain":"motor",'
-    '"function_role":"generation","effect_type":"excitatory","confidence":0.9,"description":"..."}}]'
-    '}}]}}]}}'
+    "Identify neural circuits from candidate regions and connections. Output {max_circuits} circuits minimum.\n\n"
+    "Types: sensory_circuit|motor_circuit|limbic_circuit|cognitive_control_circuit|memory_related|reward_related|language_related|attention_related|default_mode_related|salience_related|uncertain_circuit|unknown\n"
+    "Roles: source|target|hub|relay|modulator|participant\n"
+    "2-6 regions per circuit. Use connections first, infer from neuroanatomy if sparse. Confidence 0.05-0.3=weak OK.\n\n"
+    "Regions:\n{regions_json}\n\n"
+    "Connections:\n{connections_json}\n\n"
+    "Functions:\n{functions_json}\n\n"
+    "JSON only:"
+    '"member_region_ids":["uuid3","uuid4"],"steps":[]}}]}}'
 )
 
 _BUILD_CIRCUIT_SYSTEM_PROMPT: str | None = None
@@ -139,7 +100,7 @@ async def _build_connections_context(session, candidate_ids: list) -> str:
         q = select(MirrorRegionConnection).where(
             MirrorRegionConnection.source_region_candidate_id.in_(candidate_ids)
             | MirrorRegionConnection.target_region_candidate_id.in_(candidate_ids)
-        ).limit(100)
+        ).limit(500)
         result = await session.execute(q)
         rows = result.scalars().all()
         conns = []
@@ -162,7 +123,7 @@ async def _build_functions_context(session, candidate_ids: list) -> str:
         from app.models.mirror_kg import MirrorRegionFunction
         q = select(MirrorRegionFunction).where(
             MirrorRegionFunction.region_candidate_id.in_(candidate_ids)
-        ).limit(100)
+        ).limit(500)
         result = await session.execute(q)
         rows = result.scalars().all()
         funcs = []
@@ -311,6 +272,165 @@ def _normalize_step_role(raw: str) -> str:
     return _STEP_ROLE_NORMALIZE.get(v, 'unknown')
 
 
+def _meta_from_candidate(cand: Any) -> dict[str, Any]:
+    """Extract provenance fields from a CandidateBrainRegion or region_map dict."""
+    if cand is None:
+        return {
+            "granularity_level": "macro",
+            "granularity_family": None,
+            "source_atlas": "",
+            "source_version": None,
+            "resource_id": None,
+            "batch_id": None,
+        }
+    if isinstance(cand, dict):
+        return {
+            "granularity_level": cand.get("granularity_level") or "macro",
+            "granularity_family": cand.get("granularity_family"),
+            "source_atlas": cand.get("atlas") or cand.get("source_atlas") or "",
+            "source_version": cand.get("source_version"),
+            "resource_id": cand.get("resource_id"),
+            "batch_id": cand.get("batch_id"),
+        }
+    return {
+        "granularity_level": getattr(cand, "granularity_level", None) or "macro",
+        "granularity_family": getattr(cand, "granularity_family", None),
+        "source_atlas": getattr(cand, "source_atlas", None) or "",
+        "source_version": getattr(cand, "source_version", None),
+        "resource_id": getattr(cand, "resource_id", None),
+        "batch_id": getattr(cand, "batch_id", None),
+    }
+
+
+def _build_circuit_orm(
+    *,
+    cdata: dict[str, Any],
+    member_rids: list[Any],
+    meta: dict[str, Any],
+    created_by: str | None = None,
+) -> MirrorRegionCircuit:
+    """Build a MirrorRegionCircuit with full datacenter field coverage."""
+    conf = float(cdata.get("confidence", 0.7))
+    full_name = str(cdata.get("circuit_name", ""))[:512]
+    # Derive canonical start/end from member_region_ids (first=start, last=end)
+    start_rid = member_rids[0] if member_rids else None
+    end_rid = member_rids[-1] if len(member_rids) > 1 else (member_rids[0] if member_rids else None)
+    return MirrorRegionCircuit(
+        circuit_name=full_name,
+        name_cn=str(cdata.get("name_cn", ""))[:512] or full_name,
+        circuit_type=_normalize_circuit_type(str(cdata.get("circuit_type", ""))),
+        function_association=str(cdata.get("function_association", ""))[:512] or None,
+        description=str(cdata.get("description", ""))[:1024] or None,
+        confidence=conf,
+        circuit_strength=float(cdata.get("circuit_strength", conf)),
+        evidence_text=str(cdata.get("evidence_text", ""))[:4000] or None,
+        uncertainty_reason=str(cdata.get("uncertainty_reason", ""))[:2000] or None,
+        granularity_level=meta["granularity_level"],
+        granularity_family=meta.get("granularity_family") or meta["granularity_level"],
+        source_atlas=meta["source_atlas"] or "",
+        source_version=meta.get("source_version"),
+        resource_id=meta.get("resource_id"),
+        batch_id=meta.get("batch_id"),
+        canonical_start_region_id=start_rid,
+        canonical_end_region_id=end_rid,
+        mirror_status=MirrorStatus.llm_suggested,
+        review_status="pending",
+        raw_payload_json=to_jsonable(cdata) if isinstance(cdata, dict) else {},
+        normalized_payload_json=to_jsonable({
+            "member_region_ids": [str(r) for r in member_rids],
+            "circuit_type": cdata.get("circuit_type"),
+            "steps_count": len(cdata.get("steps") or []),
+        }),
+        created_by=created_by,
+    )
+
+
+def _add_circuit_memberships(
+    session: Any,
+    circuit: MirrorRegionCircuit,
+    member_rids: list[Any],
+    steps: list[dict[str, Any]] | None = None,
+) -> None:
+    """Write mirror_circuit_regions membership rows for a circuit."""
+    role_by_rid: dict[str, str] = {}
+    for sdata in steps or []:
+        rid = str(sdata.get("region_id", ""))
+        if rid:
+            role_by_rid[rid] = _normalize_step_role(str(sdata.get("role", "")))
+    for idx, rid in enumerate(member_rids):
+        try:
+            rid_uuid = rid if isinstance(rid, uuid.UUID) else uuid.UUID(str(rid))
+        except (ValueError, TypeError):
+            continue
+        session.add(
+            MirrorCircuitRegion(
+                circuit_id=circuit.id,
+                region_candidate_id=rid_uuid,
+                role=role_by_rid.get(str(rid_uuid), "participant"),
+                sort_order=idx,
+            )
+        )
+
+
+def _build_step_orm(
+    *,
+    circuit: MirrorRegionCircuit,
+    sdata: dict[str, Any],
+    region_candidate_id: uuid.UUID | None,
+) -> MirrorCircuitStep:
+    return MirrorCircuitStep(
+        circuit_id=circuit.id,
+        step_order=int(sdata.get("step_order", 1)),
+        step_name=str(sdata.get("step_name", ""))[:256],
+        step_type=_normalize_step_type(str(sdata.get("step_type", ""))),
+        role=_normalize_step_role(str(sdata.get("role", ""))),
+        description=str(sdata.get("description", ""))[:1024] or None,
+        confidence=float(sdata.get("confidence", 0.7)),
+        evidence_text=str(sdata.get("evidence_text", ""))[:4000] or None,
+        uncertainty_reason=str(sdata.get("uncertainty_reason", ""))[:2000] or None,
+        region_candidate_id=region_candidate_id,
+        granularity_level=circuit.granularity_level,
+        granularity_family=circuit.granularity_family,
+        source_atlas=circuit.source_atlas,
+        source_version=circuit.source_version,
+        resource_id=circuit.resource_id,
+        batch_id=circuit.batch_id,
+        mirror_status=MirrorStatus.llm_suggested,
+        review_status="pending",
+        raw_payload_json=to_jsonable(sdata),
+        created_by=circuit.created_by,
+    )
+
+
+def _build_function_orm(
+    *,
+    circuit: MirrorRegionCircuit,
+    fdata: dict[str, Any],
+) -> MirrorCircuitFunction:
+    return MirrorCircuitFunction(
+        circuit_id=circuit.id,
+        function_term_en=str(fdata.get("function_term_en", ""))[:512],
+        function_term_cn=str(fdata.get("function_term_cn", ""))[:512] or None,
+        function_domain=str(fdata.get("function_domain", ""))[:256] or None,
+        function_role=str(fdata.get("function_role", ""))[:256] or None,
+        effect_type=str(fdata.get("effect_type", ""))[:128] or None,
+        description=str(fdata.get("description", ""))[:1024] or None,
+        confidence=float(fdata.get("confidence", 0.7)),
+        evidence_text=str(fdata.get("evidence_text", ""))[:4000] or None,
+        uncertainty_reason=str(fdata.get("uncertainty_reason", ""))[:2000] or None,
+        granularity_level=circuit.granularity_level,
+        granularity_family=circuit.granularity_family,
+        source_atlas=circuit.source_atlas,
+        source_version=circuit.source_version,
+        resource_id=circuit.resource_id,
+        batch_id=circuit.batch_id,
+        mirror_status=MirrorStatus.llm_suggested,
+        review_status="pending",
+        raw_payload_json=to_jsonable(fdata),
+        created_by=circuit.created_by,
+    )
+
+
 _UUID_FRAGMENT_RE = __import__('re').compile(r'[0-9a-f]{8}', __import__('re').IGNORECASE)
 
 
@@ -357,36 +477,44 @@ def _build_fallback_circuit_name(region_map: dict, region_ids: list) -> str:
 _CONN_CIRCUIT_PROMPT = (
     "You are a neuroscientist analyzing brain connectivity data. "
     "Below is a CONNECTION GRAPH and REGION DETAILS mapping.\n\n"
-    "TASK: Identify brain circuits by finding meaningful paths through this graph.\n\n"
+    "TASK: Identify ALL possible brain circuits by finding meaningful paths through this graph.\n"
+    "MAXIMIZE OUTPUT — every connection should contribute to at least one circuit.\n\n"
     "HOW TO FIND CIRCUITS:\n"
     "1. Multi-hop chains: R1→R2→R3 forms a 3-region pathway\n"
     "2. Hub-and-spoke: one region connects to many → divergent/convergent circuits\n"
     "3. Reciprocal pairs: R1→R2 and R2→R1 → feedback loop\n"
-    "4. Use neuroanatomical knowledge to infer connections not shown in the graph\n\n"
-    "CIRCUIT TYPES: motor_pathway, sensory_pathway, limbic_circuit, cognitive_circuit,\n"
-    "memory_circuit, emotion_circuit, thalamocortical_loop, basal_ganglia_loop,\n"
-    "cerebellar_loop, visual_circuit, auditory_circuit, default_mode_circuit,\n"
-    "salience_circuit, attention_circuit, multisensory_integration, associative_pathway\n\n"
+    "4. 2-region pairs from a single edge are VALID circuits\n"
+    "5. Use neuroanatomical knowledge to infer related multi-region circuits\n\n"
+    "CIRCUIT TYPES (use exact values): sensory_circuit, motor_circuit, limbic_circuit, "
+    "cognitive_control_circuit, default_mode_related, salience_related, memory_related, "
+    "reward_related, language_related, attention_related, uncertain_circuit, unknown\n\n"
     "CRITICAL NAMING RULES:\n"
     "- circuit_name MUST use English region names from the REGION DETAILS 'name' field\n"
-    "- Example: R1=hippocampus,R2=amygdala,R3=prefrontal → name='hippocampal_amygdalar_prefrontal_circuit'\n"
-    "- NEVER use R1/R2 aliases, UUIDs, hex strings, or 'unknown' in circuit_name\n\n"
-    "QUALITY:\n"
-    "- At least 3 circuits per pack (up to 10). Speculative (0.3-0.5) circuits are valuable.\n"
-    "- Use neuroanatomical literature knowledge to enrich descriptions.\n"
-    "- confidence: 0.8+=strong, 0.5-0.8=moderate, 0.3-0.5=speculative.\n"
-    "- Each circuit must have 2-8 member regions.\n\n"
+    "- Example: R1=hippocampus,R2=amygdala → name='hippocampal_amygdalar_memory_circuit'\n"
+    "- NEVER use R1/R2 aliases, UUIDs, hex strings, or 'unknown' in circuit_name\n"
+    "- name_cn: provide Chinese circuit name\n\n"
+    "QUALITY / REQUIRED FIELDS:\n"
+    "- At least 5 circuits per pack when possible (up to 20). Speculative (0.05-0.5) are valuable.\n"
+    "- evidence_text: brief reasoning basis (required)\n"
+    "- uncertainty_reason: when confidence < 0.5 (required for low confidence)\n"
+    "- confidence: 0.8+=strong, 0.5-0.8=moderate, 0.05-0.5=speculative\n"
+    "- Each circuit must have 2-8 member regions\n"
+    "- member_region_ids and step.region_id MUST use aliases like R1, R2\n\n"
     "CONNECTION GRAPH:\n{graph_text}\n\n"
     "REGION DETAILS (use alias for member_region_ids/region_id, use name for circuit_name):\n{regions_json}\n\n"
-    "OUTPUT ONLY VALID JSON:\n"
-    '{{"circuits":[{{"circuit_name":"hippocampal_amygdalar_prefrontal_memory_circuit","circuit_type":"memory_circuit",'
-    '"function_association":"emotional_memory_consolidation",'
-    '"description":"Hippocampus and amygdala interact bidirectionally to consolidate emotional memories",'
-    '"confidence":0.75,"member_region_ids":["R1","R2","R3"],'
+    "OUTPUT ONLY VALID JSON (no markdown, no prose):\n"
+    '{{"circuits":[{{"circuit_name":"hippocampal_amygdalar_memory_circuit","name_cn":"海马杏仁核记忆回路",'
+    '"circuit_type":"memory_related","function_association":"emotional_memory_consolidation",'
+    '"description":"Hippocampus and amygdala interact to consolidate emotional memories",'
+    '"confidence":0.75,"circuit_strength":0.7,'
+    '"evidence_text":"Bidirectional hippocampal-amygdala paths are classic emotional memory circuitry",'
+    '"uncertainty_reason":"layer specificity incomplete",'
+    '"member_region_ids":["R1","R2","R3"],'
     '"steps":[{{"step_order":1,"step_name":"Hippocampus to Amygdala","step_type":"region","role":"source",'
-    '"region_id":"R1","confidence":0.8,"functions":[{{"function_term_en":"memory_encoding",'
-    '"function_term_cn":"memory encoding","function_domain":"memory","function_role":"execution",'
-    '"effect_type":"excitatory","confidence":0.8}}]}}]}}]}}'
+    '"region_id":"R1","confidence":0.8,"evidence_text":"source node of emotional memory path",'
+    '"functions":[{{"function_term_en":"memory_encoding","function_term_cn":"记忆编码",'
+    '"function_domain":"memory","function_role":"execution","effect_type":"excitatory",'
+    '"confidence":0.8,"evidence_text":"encoding role at circuit origin"}}]}}]}}]}}'
 )
 
 
@@ -422,13 +550,19 @@ async def _resolve_connection_graph(session, connection_ids: list) -> dict:
         rq = select(CandidateBrainRegion).where(CandidateBrainRegion.id.in_(region_list))
         rr = await session.execute(rq)
         for c in rr.scalars().all():
-            name = c.cn_name or c.en_name or c.std_name
+            name = c.cn_name or c.en_name or c.std_name or c.raw_name
             if not name:
                 name = f"region_{next_fallback}"
                 next_fallback += 1
             region_map[str(c.id)] = {
                 "name": name,
                 "atlas": c.source_atlas or "",
+                "source_atlas": c.source_atlas or "",
+                "source_version": c.source_version,
+                "granularity_level": c.granularity_level or "macro",
+                "granularity_family": c.granularity_family or c.granularity_level,
+                "resource_id": c.resource_id,
+                "batch_id": c.batch_id,
             }
 
     # Build graph text
@@ -440,7 +574,10 @@ async def _resolve_connection_graph(session, connection_ids: list) -> dict:
 
     return {
         "edges": edges,
-        "regions": {rid: region_map.get(str(rid), {"name": str(rid)[:8], "atlas": ""}) for rid in region_ids},
+        "regions": {
+            str(rid): region_map.get(str(rid), {"name": str(rid)[:8], "atlas": ""})
+            for rid in region_ids
+        },
         "graph_text": "\n".join(lines),
     }
 
@@ -703,20 +840,45 @@ async def _execute_connection_based_extraction(
                         member_rids = [r for r in member_rids if r is not None]
                         sp = await psession.begin_nested()
                         try:
-                            circuit = MirrorRegionCircuit(
-                                circuit_name=cname,
-                                circuit_type=_normalize_circuit_type(str(cdata.get("circuit_type", ""))),
-                                function_association=str(cdata.get("function_association", ""))[:512] or None,
-                                description=str(cdata.get("description", ""))[:1024] or None,
-                                confidence=float(cdata.get("confidence", 0.7)),
-                                granularity_level="macro",
-                                source_atlas=region_map.get(list(pack_region_ids)[0] if pack_region_ids else "", {}).get("atlas", "") or "",
-                                mirror_status=tier_status, review_status="pending",
+                            seed_rid = list(pack_region_ids)[0] if pack_region_ids else ""
+                            meta = _meta_from_candidate(region_map.get(str(seed_rid)))
+                            gran = meta["granularity_level"]
+                            full_name = str(cdata.get("circuit_name", ""))[:512]
+                            existing = await psession.execute(
+                                select(MirrorRegionCircuit).where(
+                                    MirrorRegionCircuit.circuit_name == full_name,
+                                    MirrorRegionCircuit.granularity_level == gran,
+                                )
                             )
-                            psession.add(circuit)
-                            await psession.flush()
-                            local_circuits += 1
-                            local_created += 1
+                            existing = existing.scalar_one_or_none()
+                            if existing:
+                                new_conf = float(cdata.get("confidence", 0.7))
+                                if new_conf > (existing.confidence or 0):
+                                    existing.confidence = new_conf
+                                    existing.description = str(cdata.get("description", ""))[:1024] or existing.description
+                                    existing.circuit_strength = float(cdata.get("circuit_strength", new_conf))
+                                    existing.name_cn = str(cdata.get("name_cn", ""))[:512] or existing.name_cn
+                                    if not existing.evidence_text:
+                                        existing.evidence_text = str(cdata.get("evidence_text", ""))[:4000] or existing.evidence_text
+                                    if not existing.uncertainty_reason:
+                                        existing.uncertainty_reason = str(cdata.get("uncertainty_reason", ""))[:2000] or existing.uncertainty_reason
+                                    existing.mirror_status = MirrorStatus.llm_suggested
+                                    psession.add(existing)
+                                local_merged += 1
+                                local_circuits += 1
+                                circuit = existing
+                            else:
+                                circuit = _build_circuit_orm(
+                                    cdata=cdata,
+                                    member_rids=member_rids,
+                                    meta=meta,
+                                    created_by=f"circuit_pack:{run.id}",
+                                )
+                                psession.add(circuit)
+                                await psession.flush()
+                                _add_circuit_memberships(psession, circuit, member_rids, cdata.get("steps"))
+                                local_circuits += 1
+                                local_created += 1
                         except Exception as exc:
                             await sp.rollback()
                             if not _is_constraint_error(exc):
@@ -731,6 +893,7 @@ async def _execute_connection_based_extraction(
                                     existing_circ.description = str(cdata.get("description", ""))[:1024] or existing_circ.description
                                     existing_circ.function_association = str(cdata.get("function_association", ""))[:512] or existing_circ.function_association
                                     existing_circ.circuit_type = _normalize_circuit_type(str(cdata.get("circuit_type", ""))) or existing_circ.circuit_type
+                                    existing_circ.mirror_status = MirrorStatus.llm_suggested
                                     psession.add(existing_circ)
                                     await psession.flush()
                                     local_merged += 1
@@ -745,37 +908,15 @@ async def _execute_connection_based_extraction(
                             step_rid_raw = str(sdata.get("region_id", ""))
                             step_rid_str = _resolve_alias(step_rid_raw, alias_to_uuid) or step_rid_raw
                             step_rid = _to_uuid(step_rid_str)
-                            step = MirrorCircuitStep(
-                                circuit_id=circuit.id,
-                                step_order=int(sdata.get("step_order", 1)),
-                                step_name=str(sdata.get("step_name", ""))[:256],
-                                step_type=_normalize_step_type(str(sdata.get("step_type", ""))),
-                                role=_normalize_step_role(str(sdata.get("role", ""))),
-                                description=str(sdata.get("description", ""))[:1024] or None,
-                                confidence=float(sdata.get("confidence", 0.7)),
-                                region_candidate_id=step_rid,
-                                granularity_level=circuit.granularity_level,
-                                source_atlas=circuit.source_atlas,
-                                mirror_status=tier_status, review_status="pending",
+                            step = _build_step_orm(
+                                circuit=circuit, sdata=sdata, region_candidate_id=step_rid,
                             )
                             psession.add(step)
                             await psession.flush()
                             local_steps += 1
 
                             for fdata in sdata.get("functions", []):
-                                fn = MirrorCircuitFunction(
-                                    circuit_id=circuit.id,
-                                    function_term_en=str(fdata.get("function_term_en", ""))[:512],
-                                    function_term_cn=str(fdata.get("function_term_cn", ""))[:512] or None,
-                                    function_domain=str(fdata.get("function_domain", ""))[:256] or None,
-                                    function_role=str(fdata.get("function_role", ""))[:256] or None,
-                                    effect_type=str(fdata.get("effect_type", ""))[:128] or None,
-                                    description=str(fdata.get("description", ""))[:1024] or None,
-                                    confidence=float(fdata.get("confidence", 0.7)),
-                                    granularity_level=circuit.granularity_level,
-                                    source_atlas=circuit.source_atlas,
-                                    mirror_status=tier_status, review_status="pending",
-                                )
+                                fn = _build_function_orm(circuit=circuit, fdata=fdata)
                                 psession.add(fn)
                                 local_fns += 1
                         await psession.commit()
@@ -932,10 +1073,12 @@ async def execute_circuit_extraction_background(
             logger.info("[circuit-extraction] %d candidates x %d rounds -> %d packs (size=%d)",
                          len(ids), rounds, len(packs), request.candidates_per_pack)
 
-            # ── Pre-load connection & function context (best-effort, non-blocking) ──
+            # ── Pre-load connection & function context from Mirror KG ──
             all_candidate_ids = [cid for cid in ids]
-            all_connections_json = "[]"
-            all_functions_json = "[]"
+            all_connections_json = await _build_connections_context(session, all_candidate_ids)
+            all_functions_json = await _build_functions_context(session, all_candidate_ids)
+            logger.info("[circuit-extraction] pre-loaded %s connections, %s functions",
+                        len(all_connections_json), len(all_functions_json))
 
             # Shared state protected by locks
             total_circuits = total_steps = total_functions = 0
@@ -973,6 +1116,7 @@ async def execute_circuit_extraction_background(
                             regions_json=regions_json,
                             connections_json=conns_json,
                             functions_json=funcs_json,
+                            max_circuits=getattr(request, 'max_circuits', 200),
                         )
                         system_prompt = _get_circuit_system_prompt()
 
@@ -1049,57 +1193,48 @@ async def execute_circuit_extraction_background(
                                         existing.confidence = new_conf
                                         existing.function_association = str(cdata.get("function_association", ""))[:512] or existing.function_association
                                         existing.description = str(cdata.get("description", ""))[:1024] or existing.description
+                                        existing.circuit_strength = float(cdata.get("circuit_strength", new_conf))
+                                        existing.name_cn = str(cdata.get("name_cn", ""))[:512] or existing.name_cn
                                         psession.add(existing)
                                         local_merged += 1
                                     else:
                                         local_skipped += 1
                                     continue
 
-                                circuit = MirrorRegionCircuit(
-                                    circuit_name=cname,
-                                    circuit_type=_normalize_circuit_type(str(cdata.get("circuit_type", ""))),
-                                    function_association=str(cdata.get("function_association", ""))[:512] or None,
-                                    description=str(cdata.get("description", ""))[:1024] or None,
-                                    confidence=float(cdata.get("confidence", 0.7)),
-                                    granularity_level=getattr(candidates.get(pack_ids[0], None), "granularity_level", "macro") or "macro",
-                                    source_atlas=getattr(candidates.get(pack_ids[0], None), "source_atlas", "") or "",
-                                    mirror_status=tier_status, review_status="pending",
+                                # Build full-field circuit + memberships + nested steps/functions
+                                _mids = cdata.get("member_region_ids", [])
+                                _mids = _mids if isinstance(_mids, list) else []
+                                member_rids = []
+                                for mid in _mids:
+                                    try:
+                                        member_rids.append(uuid.UUID(str(mid)))
+                                    except (ValueError, TypeError):
+                                        continue
+                                meta = _meta_from_candidate(candidates.get(pack_ids[0]) if pack_ids else None)
+                                circuit = _build_circuit_orm(
+                                    cdata=cdata,
+                                    member_rids=member_rids,
+                                    meta=meta,
+                                    created_by=f"circuit_pack:{run.id}",
                                 )
                                 psession.add(circuit)
                                 await psession.flush()
+                                _add_circuit_memberships(psession, circuit, member_rids, cdata.get("steps"))
                                 local_circuits += 1
                                 local_created += 1
 
                                 for sdata in cdata.get("steps", []):
-                                    step = MirrorCircuitStep(
-                                        circuit_id=circuit.id,
-                                        step_order=int(sdata.get("step_order", 1)),
-                                        step_name=str(sdata.get("step_name", ""))[:256],
-                                        step_type=_normalize_step_type(str(sdata.get("step_type", ""))),
-                                        role=_normalize_step_role(str(sdata.get("role", ""))),
-                                        description=str(sdata.get("description", ""))[:1024] or None,
-                                        confidence=float(sdata.get("confidence", 0.7)),
+                                    step = _build_step_orm(
+                                        circuit=circuit,
+                                        sdata=sdata,
                                         region_candidate_id=_safe_region_id(sdata.get("region_id"), candidates),
-                                        granularity_level=circuit.granularity_level, source_atlas=circuit.source_atlas,
-                                        mirror_status=tier_status, review_status="pending",
                                     )
                                     psession.add(step)
                                     await psession.flush()
                                     local_steps += 1
 
                                     for fdata in sdata.get("functions", []):
-                                        fn = MirrorCircuitFunction(
-                                            circuit_id=circuit.id,
-                                            function_term_en=str(fdata.get("function_term_en", ""))[:512],
-                                            function_term_cn=str(fdata.get("function_term_cn", ""))[:512] or None,
-                                            function_domain=str(fdata.get("function_domain", ""))[:256] or None,
-                                            function_role=str(fdata.get("function_role", ""))[:256] or None,
-                                            effect_type=str(fdata.get("effect_type", ""))[:128] or None,
-                                            description=str(fdata.get("description", ""))[:1024] or None,
-                                            confidence=float(fdata.get("confidence", 0.7)),
-                                            granularity_level=circuit.granularity_level, source_atlas=circuit.source_atlas,
-                                            mirror_status=tier_status, review_status="pending",
-                                        )
+                                        fn = _build_function_orm(circuit=circuit, fdata=fdata)
                                         psession.add(fn)
                                         local_fns += 1
                                 await psession.commit()

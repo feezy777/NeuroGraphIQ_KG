@@ -370,10 +370,12 @@ class MirrorRegionCircuitCreate(BaseModel):
     source_atlas: str
     source_version: str | None = None
     circuit_name: str
+    name_cn: str | None = None
     circuit_type: str = CircuitType.unknown
     function_association: str | None = None
     description: str | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    circuit_strength: float | None = Field(default=None, ge=0.0, le=1.0)
     evidence_text: str | None = None
     uncertainty_reason: str | None = None
     mirror_status: str = MirrorStatus.llm_suggested
@@ -382,6 +384,8 @@ class MirrorRegionCircuitCreate(BaseModel):
     raw_payload_json: dict[str, Any] = Field(default_factory=dict)
     normalized_payload_json: dict[str, Any] = Field(default_factory=dict)
     created_by: str | None = None
+    canonical_start_region_id: uuid.UUID | None = None
+    canonical_end_region_id: uuid.UUID | None = None
     circuit_regions: list[MirrorCircuitRegionCreate] = Field(default_factory=list)
 
     @field_validator("promotion_status")
@@ -404,10 +408,12 @@ class MirrorRegionCircuitRead(BaseModel):
     source_atlas: str
     source_version: str | None
     circuit_name: str
+    name_cn: str | None = None
     circuit_type: str
     function_association: str | None
     description: str | None
     confidence: float | None = None
+    circuit_strength: float | None = None
     evidence_text: str | None
     uncertainty_reason: str | None
     mirror_status: str
@@ -417,6 +423,8 @@ class MirrorRegionCircuitRead(BaseModel):
     normalized_payload_json: dict[str, Any]
     created_by: str | None
     updated_by: str | None
+    canonical_start_region_id: uuid.UUID | None = None
+    canonical_end_region_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
     circuit_regions: list[MirrorCircuitRegionRead] = Field(default_factory=list)

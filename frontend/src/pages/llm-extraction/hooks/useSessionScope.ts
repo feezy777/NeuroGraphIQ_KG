@@ -39,13 +39,20 @@ function clearSessionKey(key: keyof PipelineIds) {
 export function useSessionScope() {
   const [scope, setScope] = useState<SessionScope>(() => {
     const sess = readSessionIds()
+    const level = sess.granularity_level || 'macro'
     return {
       resource_id: sess.resource_id ?? '',
       batch_id: sess.batch_id ?? '',
-      source_atlas: 'AAL3',
-      granularity_level: 'macro',
-      granularity_family: 'macro_clinical',
-      source_version: '',
+      source_atlas: sess.source_atlas || 'AAL3',
+      granularity_level: level,
+      granularity_family: sess.granularity_family || (
+        level === 'molecular_attr' || level === 'molecular' ? 'molecular_attr'
+        : level === 'meso' ? 'meso_anatomical'
+        : level === 'sub_connectivity' || level === 'micro' ? 'sub_connectivity'
+        : level === 'fine_cyto' ? 'fine_cyto'
+        : 'macro_clinical'
+      ),
+      source_version: sess.source_version || '',
     }
   })
 

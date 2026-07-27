@@ -57,6 +57,7 @@ async def list_runs(
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
 ):
+    """List circuit extraction runs (lightweight — omits pack/request payloads)."""
     base = sa_select(CircuitExtractionRun)
     if status:
         base = base.where(CircuitExtractionRun.status == status)
@@ -70,10 +71,31 @@ async def list_runs(
         .offset(offset)
     )
     rows = (await session.execute(q)).scalars().all()
-    return {
-        "items": [CircuitExtractionRunRead.model_validate(r) for r in rows],
-        "total": total,
-    }
+    items = []
+    for r in rows:
+        read = CircuitExtractionRunRead.model_validate(r)
+        # Strip heavy JSON — detail endpoint still returns full payloads
+        items.append(
+            read.model_copy(
+                update={
+                    "request_json": None,
+                    "pack_results_json": None,
+                    "usage_summary_json": None,
+                    "result_summary_json": (
+                        {
+                            k: (r.result_summary_json or {}).get(k)
+                            for k in ("circuit_count", "step_count", "function_count", "pack_count")
+                            if (r.result_summary_json or {}).get(k) is not None
+                        }
+                        if r.result_summary_json
+                        else None
+                    ),
+                    "errors_json": list(r.errors_json or [])[:10],
+                    "warnings_json": list(r.warnings_json or [])[:10],
+                }
+            )
+        )
+    return {"items": items, "total": total}
 
 
 @router.get("/runs/{run_id}", response_model=CircuitExtractionRunRead)

@@ -1430,34 +1430,11 @@ async def _resolve_circuit_ids(
         if items:
             return _dedupe_uuid_list([c.id for c in items])
 
+    # Never fall back to "all circuits in scope" — that reprocesses the entire
+    # molecular corpus for steps/functions after a no-op / all-duplicate batch.
     if strict:
         return []
-
-    scope = _scope_from_request(request)
-    items, _ = await mirror_kg_service.list_mirror_circuits(
-        session,
-        resource_id=scope.resource_id,
-        batch_id=scope.batch_id,
-        source_atlas=scope.source_atlas,
-        granularity_level=scope.granularity_level,
-        granularity_family=scope.granularity_family,
-        limit=10000,
-        offset=0,
-    )
-    if items:
-        return _dedupe_uuid_list([c.id for c in items])
-
-    items, _ = await mirror_kg_service.list_mirror_circuits(
-        session,
-        resource_id=scope.resource_id,
-        batch_id=scope.batch_id,
-        source_atlas=scope.source_atlas,
-        granularity_level=scope.granularity_level,
-        granularity_family=scope.granularity_family,
-        limit=10000,
-        offset=0,
-    )
-    return _dedupe_uuid_list([c.id for c in items])
+    return []
 
 
 async def _load_workflow_run_with_steps(
@@ -2046,11 +2023,20 @@ async def run_circuit_with_function_steps_workflow(
     )
 
     # ── Batch circuit extraction ─────────────────────────────────────────
-    CIRCUIT_BATCH_SIZE = 20
+    # Maximum-discovery strategy: small overlapping batches maximize the
+    # number of distinct LLM calls, each with a different window into the
+    # connection graph. Low confidence accepted; precision traded for recall.
+    CIRCUIT_BATCH_SIZE = 30
+    CIRCUIT_BATCH_OVERLAP = 25  # each region appears in ~6 batches
     all_candidate_ids = list(request.candidate_ids)
+    all_candidate_ids.sort()
+
     batches: list[list[uuid.UUID]] = []
-    for i in range(0, len(all_candidate_ids), CIRCUIT_BATCH_SIZE):
-        batches.append(all_candidate_ids[i:i + CIRCUIT_BATCH_SIZE])
+    i = 0
+    while i < len(all_candidate_ids):
+        batch = all_candidate_ids[i:i + CIRCUIT_BATCH_SIZE]
+        batches.append(batch)
+        i += CIRCUIT_BATCH_SIZE - CIRCUIT_BATCH_OVERLAP
 
     all_circuit_ids: list[uuid.UUID] = []
     batch_warnings: list[str] = []
@@ -2063,9 +2049,9 @@ async def run_circuit_with_function_steps_workflow(
         if batch_errors:
             break  # Stop on first failing batch (circuit extraction is critical)
         try:
-            batch_max_tokens = max(5000, min(8192, len(batch_ids) * 200))
-            batch_max_circuits = getattr(request, 'max_circuits', None) or 100
-            batch_temperature = getattr(request, 'temperature', None) or 0.2
+            batch_max_tokens = max(4000, min(8192, len(batch_ids) * 200))
+            batch_max_circuits = getattr(request, 'max_circuits', None) or 300
+            batch_temperature = getattr(request, 'temperature', None) or 0.5
             batch_request = SameGranularityCircuitExtractionRequest(
                 provider=request.provider,
                 model_name=request.model_name,
@@ -2098,8 +2084,13 @@ async def run_circuit_with_function_steps_workflow(
                 warnings=list(batch_warnings),
             )
         except Exception as exc:
-            logger.exception("[llm-composite-workflow][extract_circuits] batch %s failed", bi)
-            batch_errors.append(f"batch {bi}: {normalize_step_error(exc)}")
+            err_msg = normalize_step_error(exc)
+            if "UniqueViolation" in err_msg or "IntegrityError" in err_msg:
+                logger.warning("[llm-composite-workflow][extract_circuits] batch %s already exists", bi)
+                batch_warnings.append(f"batch {bi}: circuits exist in DB, skipping duplicate")
+            else:
+                logger.exception("[llm-composite-workflow][extract_circuits] batch %s failed", bi)
+                batch_errors.append(f"batch {bi}: {err_msg}")
 
     # Deduplicate circuit IDs
     all_circuit_ids = list(dict.fromkeys(all_circuit_ids))
@@ -2715,6 +2706,12 @@ async def list_composite_workflow_runs(
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[CompositeWorkflowRunRead], int]:
+    """List runs for task center / dropdowns.
+
+    Intentionally lightweight: no per-run step payload / pack summaries
+    (those can be tens of MB and make the task center hang).
+    Full detail remains available via get_composite_workflow_run().
+    """
     base = select(LlmCompositeWorkflowRun)
     if workflow_type:
         base = base.where(LlmCompositeWorkflowRun.workflow_type == workflow_type)
@@ -2736,17 +2733,92 @@ async def list_composite_workflow_runs(
 
     q = base.order_by(LlmCompositeWorkflowRun.created_at.desc()).limit(limit).offset(offset)
     runs = list((await session.execute(q)).scalars().all())
+    if not runs:
+        return [], total
+
+    # One query for progress only (status columns) — avoid loading response_json
+    run_ids = [r.id for r in runs]
+    steps_q = (
+        select(
+            LlmCompositeWorkflowStep.workflow_run_id,
+            LlmCompositeWorkflowStep.status,
+        ).where(LlmCompositeWorkflowStep.workflow_run_id.in_(run_ids))
+    )
+    step_rows = (await session.execute(steps_q)).all()
+    statuses_by_run: dict[uuid.UUID, list[str]] = {}
+    for workflow_run_id, step_status in step_rows:
+        statuses_by_run.setdefault(workflow_run_id, []).append(step_status)
 
     items: list[CompositeWorkflowRunRead] = []
     for run in runs:
-        steps_q = (
-            select(LlmCompositeWorkflowStep)
-            .where(LlmCompositeWorkflowStep.workflow_run_id == run.id)
-            .order_by(LlmCompositeWorkflowStep.step_order)
-        )
-        steps = list((await session.execute(steps_q)).scalars().all())
-        items.append(_run_read(run, steps))
+        items.append(_run_read_list(run, statuses_by_run.get(run.id, [])))
     return items, total
+
+
+def _progress_from_statuses(statuses: list[str]) -> float:
+    if not statuses:
+        return 0.0
+    completed = 0.0
+    for status in statuses:
+        if status in {
+            CompositeStepStatus.succeeded.value,
+            CompositeStepStatus.skipped.value,
+            CompositeStepStatus.failed.value,
+        }:
+            completed += 1.0
+        elif status == CompositeStepStatus.running.value:
+            completed += 0.5
+    return round((completed / len(statuses)) * 100.0, 1)
+
+
+def _run_read_list(run: LlmCompositeWorkflowRun, step_statuses: list[str]) -> CompositeWorkflowRunRead:
+    """Compact list DTO — omit heavy JSON blobs used only in detail views."""
+    summary = dict(run.result_summary_json or {})
+    light_summary = {
+        key: summary[key]
+        for key in (
+            "outcome",
+            "display_status",
+            "semantic_status",
+            "connection_count",
+            "circuit_count",
+            "function_count",
+            "step_count",
+        )
+        if key in summary
+    }
+    semantic = _workflow_semantic_fields(summary)
+    return CompositeWorkflowRunRead(
+        id=run.id,
+        workflow_type=CompositeWorkflowType(run.workflow_type),
+        status=CompositeWorkflowStatus(run.status),
+        provider=run.provider,
+        model_name=run.model_name,
+        dry_run=run.dry_run,
+        resource_id=run.resource_id,
+        batch_id=run.batch_id,
+        source_atlas=run.source_atlas,
+        source_version=run.source_version,
+        granularity_level=run.granularity_level,
+        granularity_family=run.granularity_family,
+        candidate_count=run.candidate_count,
+        pair_count=run.pair_count,
+        progress_percent=_progress_from_statuses(step_statuses),
+        result_summary=light_summary,
+        provider_audit={},
+        diagnostics=[],
+        outcome=semantic["outcome"],
+        display_status=semantic["display_status"],
+        semantic_status=semantic["semantic_status"],
+        recent_events=[],
+        warnings=list(run.warnings_json or [])[:20],
+        errors=list(run.errors_json or [])[:20],
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
+        steps=[],
+    )
 
 
 async def get_composite_workflow_run(

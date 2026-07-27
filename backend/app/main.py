@@ -30,6 +30,7 @@ from app.routers import (
     llm_circuit_connection_extraction,
     llm_circuit_extraction,
     llm_composite_workflow,
+    molecular_circuit_extraction,
     kg_graph,
     final_kg,
     final_macro_clinical_browser,
@@ -50,6 +51,7 @@ from app.routers import (
     settings,
     symptom_query,
     system_admin,
+    unified_tasks,
     workbench_pipeline,
     workspace_files,
 )
@@ -236,6 +238,14 @@ app.include_router(
 )
 app.include_router(
     llm_composite_workflow.router, prefix="/api/llm-extraction", tags=["LLM Composite Workflow"]
+)
+app.include_router(
+    molecular_circuit_extraction.router,
+    prefix="/api/llm-extraction/molecular-circuit",
+    tags=["Molecular Circuit Extraction"],
+)
+app.include_router(
+    unified_tasks.router, prefix="/api", tags=["Unified Tasks"]
 )
 app.include_router(
     kg_graph.router, prefix="/api/kg/graph", tags=["Knowledge Graph"]

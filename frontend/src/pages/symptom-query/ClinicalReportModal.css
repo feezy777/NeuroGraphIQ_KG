@@ -1,162 +1,194 @@
-/* ClinicalReportModal.css — AI报告弹窗 (workbench配色) */
+/* ClinicalReportModal.css — Professional medical report modal */
 
+/* ── Overlay ─────────────────────────────────────────────────── */
 .report-modal-overlay {
   position: fixed; inset: 0; z-index: 9999;
-  background: rgba(0,0,0,0.45);
+  background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px);
   display: flex; align-items: center; justify-content: center;
-  animation: rmFadeIn 0.25s ease;
+  animation: rmFadeIn 0.2s ease;
 }
 @keyframes rmFadeIn { from { opacity: 0 } to { opacity: 1 } }
 
+/* ── Container ───────────────────────────────────────────────── */
 .report-modal-container {
-  width: min(960px, 94vw); max-height: 92vh;
-  background: #fff; border-radius: 8px;
-  box-shadow: 0 6px 30px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.06);
+  width: min(960px, 94vw); max-height: 90vh;
+  background: #fff; border-radius: 12px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.06);
   display: flex; flex-direction: column; overflow: hidden;
   animation: rmSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
-@keyframes rmSlideUp { from { transform: translateY(30px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
+@keyframes rmSlideUp {
+  from { transform: translateY(40px) scale(0.97); opacity: 0 }
+  to { transform: translateY(0) scale(1); opacity: 1 }
+}
 
-/* Header */
+/* ── Header ──────────────────────────────────────────────────── */
 .report-modal-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 20px; background: #fafbfc;
-  border-bottom: 1px solid #e5e6e8;
+  padding: 14px 24px; background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
 }
-.report-modal-header-left { display: flex; align-items: center; gap: 8px }
-.report-modal-icon { font-size: 20px }
-.report-modal-title { font-size: 15px; font-weight: 600; color: #1d2129 }
+.report-modal-header-left { display: flex; align-items: center; gap: 10px }
+.report-modal-title { font-size: 16px; font-weight: 600; color: #1d2129; letter-spacing: -0.2px }
+.report-modal-header-right { display: flex; gap: 8px; align-items: center }
 
-.report-modal-header-right { display: flex; gap: 6px }
 .report-btn {
-  padding: 5px 14px; border-radius: 6px; border: 1px solid #d9d9d9;
-  background: #fff; color: #555; font-size: 12px;
-  cursor: pointer; transition: all 0.2s;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 16px; border-radius: 6px; border: 1px solid #d9d9d9;
+  background: #fff; color: #555; font-size: 12px; line-height: 1.4;
+  cursor: pointer; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
 }
-.report-btn:hover { border-color: #1677ff; color: #1677ff }
-.report-btn-download {
-  background: #1677ff; border-color: #1677ff; color: #fff;
-}
+.report-btn:hover { border-color: #1677ff; color: #1677ff; background: #f0f5ff }
+.report-btn:active { transform: scale(0.97) }
+.report-btn-download { background: #1677ff; border-color: #1677ff; color: #fff; font-weight: 500 }
 .report-btn-download:hover { background: #4096ff; border-color: #4096ff; color: #fff }
-.report-btn-print:hover { border-color: #1677ff; color: #1677ff }
-.report-btn-close { font-size: 16px; padding: 3px 8px; border: none; background: none; color: #999 }
+.report-btn-download:disabled { opacity: 0.6; cursor: not-allowed }
+.report-btn-close { border: none; background: none; color: #999; padding: 4px 8px; font-size: 18px }
 .report-btn-close:hover { color: #333; background: #f5f5f5 }
-.report-btn-retry { border-color: #faad14; color: #d48806; margin-top: 12px }
-.report-btn-retry:hover { border-color: #d48806; color: #d48806 }
+.report-btn-retry { border-color: #faad14; color: #d48806; margin-top: 16px }
+.report-btn-retry:hover { border-color: #d48806; color: #d48806; background: #fffbe6 }
 
-/* Progress */
+/* ── Progress ────────────────────────────────────────────────── */
 .report-progress-container {
   flex: 1; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; padding: 40px 48px; gap: 20px
-}
-.report-progress-spinner { position: relative }
-.report-progress-ring { width: 120px; height: 120px }
-.report-progress-ring svg { width: 100%; height: 100% }
-.report-progress-arc { transition: stroke-dashoffset 0.5s ease }
-.report-progress-pct {
-  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
-  font-size: 24px; font-weight: 700; color: #1677ff
+  justify-content: center; padding: 48px 64px; gap: 32px;
+  background: #fafbfc;
 }
 
-.report-progress-stages { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 360px }
+.report-progress-spinner { position: relative; width: 100px; height: 100px }
+.report-progress-ring { width: 100%; height: 100% }
+.report-progress-ring svg { display: block; width: 100%; height: 100% }
+.report-progress-arc { transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1) }
+.report-progress-pct {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  font-size: 24px; font-weight: 700; color: #1677ff;
+  line-height: 1; pointer-events: none;
+}
+
+.report-progress-stages {
+  display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 400px;
+}
 .report-stage {
-  display: flex; align-items: center; gap: 10px; padding: 8px 14px;
-  border-radius: 6px; background: #fafbfc; border: 1px solid #f0f0f0;
-  font-size: 13px; position: relative; overflow: hidden
+  display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+  border-radius: 8px; transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative; overflow: hidden;
 }
 .report-stage.active {
-  background: #e6f4ff; border-color: #91caff;
-  box-shadow: 0 0 0 2px rgba(22,119,255,0.1)
+  background: #e6f4ff; border: 1px solid #91caff;
+  box-shadow: 0 0 12px rgba(22,119,255,0.08);
+  transform: scale(1.02);
 }
-.report-stage.done { opacity: 0.55 }
-.report-stage.pending { opacity: 0.35 }
-.report-stage-icon { font-size: 16px; width: 24px; text-align: center }
-.report-stage-label { color: #333; flex: 1 }
-.report-stage-check { color: #52c41a; font-weight: 700 }
+.report-stage.done {
+  background: #f6ffed; border: 1px solid #b7eb8f;
+  opacity: 0.75;
+}
+.report-stage.pending { background: #fafbfc; border: 1px solid #f0f0f0 }
+.report-stage.pending .report-stage-label { color: #999 }
+
+.report-stage-icon { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0 }
+.report-stage-label { color: #444; flex: 1; font-size: 13px; line-height: 1.5; font-weight: 400 }
+.report-stage.active .report-stage-label { color: #0958d9; font-weight: 600 }
+.report-stage.done .report-stage-label { color: #389e0d }
 .report-stage-pulse {
-  position: absolute; inset: 0; border-radius: 6px;
-  animation: rmPulse 2s ease-in-out infinite;
-  background: linear-gradient(90deg,transparent,rgba(22,119,255,0.04),transparent)
+  position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(22,119,255,0.08), transparent);
+  animation: rmPulse 2.5s ease-in-out infinite;
 }
-@keyframes rmPulse { 0%,100% { opacity: 0.3 } 50% { opacity: 1 } }
+@keyframes rmPulse { 0%,100% { opacity: 0.2 } 50% { opacity: 0.8 } }
 
 .report-progress-info {
-  text-align: center; font-size: 12px; color: #86909c;
-  display: flex; flex-direction: column; gap: 2px
+  text-align: center; font-size: 13px; color: #666; line-height: 1.7;
+  display: flex; flex-direction: column; gap: 4px;
 }
 
-.report-circuit-preview { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; max-width: 500px }
+.report-circuit-preview { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 500px }
 .circuit-chip {
-  padding: 3px 10px; border-radius: 20px; font-size: 11px;
+  padding: 5px 14px; border-radius: 20px; font-size: 11px; line-height: 1.5;
   background: #e6f4ff; border: 1px solid #bae0ff; color: #1677ff;
-  display: flex; align-items: center; gap: 5px
+  display: flex; align-items: center; gap: 6px;
 }
-.circuit-dot { width: 5px; height: 5px; border-radius: 50%; background: #1677ff; animation: rmDotPulse 1.5s ease-in-out infinite }
-@keyframes rmDotPulse { 0%,100% { opacity: 0.4 } 50% { opacity: 1 } }
+.circuit-dot { width: 6px; height: 6px; border-radius: 50%; background: #1677ff }
+.circuit-dot:first-child { animation: rmDotPulse 1.5s ease-in-out infinite }
+@keyframes rmDotPulse { 0%,100% { opacity: 0.3 } 50% { opacity: 1 } }
 
-/* Error */
-.report-error-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 40px }
-.report-error-icon { font-size: 40px }
+@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+.spin { animation: spin 1.2s linear infinite }
+
+/* ── Error ───────────────────────────────────────────────────── */
+.report-error-container {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 12px; padding: 64px;
+  background: #fafbfc;
+}
 .report-error-container h3 { color: #cf1322; margin: 0; font-size: 16px }
-.report-error-container p { color: #86909c; font-size: 13px }
+.report-error-container p { color: #86909c; font-size: 13px; text-align: center }
 
-/* Report content */
-.report-content-container { flex: 1; overflow-y: auto; padding: 20px 28px; background: #fff }
-.report-content-body { font-size: 14px; line-height: 1.9; color: #333 }
+/* ── Report content ──────────────────────────────────────────── */
+.report-content-container {
+  flex: 1; overflow-y: auto; padding: 24px 32px;
+  background: #fff;
+}
+.report-content-container::-webkit-scrollbar { width: 6px }
+.report-content-container::-webkit-scrollbar-track { background: transparent }
+.report-content-container::-webkit-scrollbar-thumb { background: #e0e0e0; border-radius: 3px }
+
+.report-content-body { font-size: 14px; line-height: 1.85; color: #333; word-break: break-word; overflow-wrap: anywhere }
 .report-content-body h2 {
-  font-size: 16px; color: #1677ff; margin: 22px 0 10px;
-  padding: 7px 12px; background: #f0f5ff; border-left: 3px solid #1677ff; border-radius: 0 4px 4px 0
+  font-size: 16px; color: #1677ff; margin: 28px 0 12px;
+  padding: 0 0 6px; font-weight: 600; line-height: 1.5;
+  border-bottom: 1px solid #e8eef5;
+  background: none; border-left: none; border-radius: 0;
+  clear: both; position: relative; z-index: 1;
 }
-.report-content-body p { margin: 6px 0; color: #444 }
-.report-content-body li { margin: 3px 0; color: #555; font-size: 13px }
+.report-content-body h3 { font-size: 14px; color: #333; margin: 18px 0 10px; clear: both; background: none }
+.report-content-body p { margin: 10px 0; color: #444; line-height: 1.85; clear: both }
+.report-content-body li { margin: 6px 0; color: #555; font-size: 13px; line-height: 1.7 }
+.report-content-body ul { padding-left: 22px; margin: 8px 0 12px; clear: both }
 .report-content-body pre {
-  font-family: 'Courier New',monospace; font-size: 11px; line-height: 1.4;
-  background: #fafbfc; border: 1px solid #e5e6e8; border-radius: 4px;
-  padding: 12px; color: #555; overflow-x: auto; white-space: pre-wrap
+  font-family: 'Courier New', monospace; font-size: 11px; line-height: 1.5;
+  background: #fafbfc; border: 1px solid #e5e6e8; border-radius: 6px;
+  padding: 14px; color: #555; overflow-x: auto; white-space: pre-wrap; margin: 12px 0;
+  clear: both;
 }
-.report-content-body::-webkit-scrollbar { width: 5px }
-.report-content-body::-webkit-scrollbar-track { background: transparent }
-.report-content-body::-webkit-scrollbar-thumb { background: #d9d9d9; border-radius: 3px }
 
-/* Circuit graph section */
+/* ── Circuit graph ───────────────────────────────────────────── */
 .circuit-graph-section {
-  margin: 20px 0; padding: 16px;
-  background: #fafbfc; border: 1px solid #e5e6e8; border-radius: 8px;
+  margin: 24px 0; padding: 20px;
+  background: #fafbfc; border: 1px solid #e5e6e8; border-radius: 10px;
+  clear: both; position: relative; z-index: 1;
+  overflow: hidden;
 }
-.circuit-graph-section h3 {
-  font-size: 15px; color: #1d2129; margin: 0 0 6px;
-}
+.circuit-graph-section h3 { font-size: 16px; color: #1d2129; margin: 0 0 8px; font-weight: 600 }
 .circuit-type-badge {
-  display: inline-block; font-size: 11px; background: #e6f4ff;
-  color: #1677ff; padding: 2px 8px; border-radius: 3px; margin-bottom: 12px;
+  display: inline-block; font-size: 11px; line-height: 1.5;
+  background: #e6f4ff; color: #1677ff; padding: 3px 10px;
+  border-radius: 4px; margin-bottom: 14px;
 }
-.circuit-explain {
-  margin-bottom: 14px; font-size: 13px; color: #444; line-height: 1.9;
-}
-.circuit-explain p { margin: 6px 0 }
+.circuit-explain { margin-bottom: 16px; font-size: 13px; color: #444; line-height: 1.85 }
+.circuit-explain p { margin: 8px 0 }
 .circuit-explain code {
   display: inline-block; font-size: 11px; background: #f0f5ff;
-  padding: 1px 6px; border-radius: 3px; margin: 2px 4px 2px 0; color: #1677ff;
+  padding: 2px 8px; border-radius: 4px; margin: 2px 6px 2px 0; color: #1677ff;
+  border: 1px solid #d6e4ff;
 }
 .circuit-graph-wrapper {
-  height: 420px; border: 1px solid #e5e6e8; border-radius: 8px;
+  height: 440px; border: 1px solid #e5e6e8; border-radius: 8px;
   overflow: hidden; background: #fff; position: relative;
-}
-.circuit-graph-wrapper:hover {
-  /* When hovering the graph, parent should not scroll */
+  isolation: isolate;
 }
 .circuit-graph-wrapper svg {
-  /* D3 SVG gets zoom, parent does NOT */
+  display: block; width: 100%; height: 100%;
 }
-.circuit-graph-wrapper::after {
-  content: '拖拽平移 · 滚轮缩放 · 点击查看脑区';
-  position: absolute; top: 8px; left: 12px; z-index: 10;
-  font-size: 10px; color: #bbb; pointer-events: none;
+.circuit-graph-hint {
+  font-size: 11px; color: #bbb; text-align: center;
+  padding: 4px 0 0; pointer-events: none;
 }
 .circuit-stats {
-  margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap;
+  margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap;
 }
 .circuit-stats span {
-  padding: 5px 12px; background: #f0f5ff; border-radius: 6px;
-  font-size: 12px; color: #1677ff; font-weight: 500;
+  padding: 6px 14px; background: #f0f5ff; border-radius: 6px;
+  font-size: 12px; color: #1677ff; font-weight: 500; border: 1px solid #d6e4ff;
 }

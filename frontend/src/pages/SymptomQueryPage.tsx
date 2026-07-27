@@ -7,6 +7,7 @@ import { SymptomCircuitGraph } from './symptom-query/SymptomCircuitGraph'
 import { ClinicalReportModal } from './symptom-query/ClinicalReportModal'
 import { normalizeSymptomGraph } from './symptom-query/normalizeSymptomGraph'
 import type { NormalizedEdge, RawGraphData } from './symptom-query/symptomGraphTypes'
+import { Target, Compass, Search, Sparkles, FileText, RefreshCw, Send, X, Brain } from 'lucide-react'
 
 interface CircuitResult {
   id: string; circuit_name: string; circuit_type: string | null
@@ -143,8 +144,8 @@ export function SymptomQueryPage() {
         {(phase === 'idle' || phase === 'chatting') && (
           <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
             <span style={{ fontSize: 12, color: '#888', lineHeight: '24px' }}>模式：</span>
-            <button className={`btn btn-sm ${mode === 'focused' ? 'btn-primary' : ''}`} onClick={() => setMode('focused')}>🎯 聚焦</button>
-            <button className={`btn btn-sm ${mode === 'exploratory' ? 'btn-primary' : ''}`} onClick={() => setMode('exploratory')}>🔍 探索</button>
+            <button className={`btn btn-sm ${mode === 'focused' ? 'btn-primary' : ''}`} onClick={() => setMode('focused')}><Target size={14} /> 聚焦</button>
+            <button className={`btn btn-sm ${mode === 'exploratory' ? 'btn-primary' : ''}`} onClick={() => setMode('exploratory')}><Compass size={14} /> 探索</button>
           </div>
         )}
         {phase !== 'results' && (
@@ -172,8 +173,8 @@ export function SymptomQueryPage() {
                 <textarea className="form-input" value={summary} onChange={e => setSummary(e.target.value)}
                   style={{ width: '100%', minHeight: 80, fontSize: 12, marginBottom: 8 }} />
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-primary btn-sm" onClick={handleConfirm}>确认并开始分析</button>
-                  <button className="btn btn-sm" onClick={handleContinueChat}>继续对话</button>
+                  <button className="btn btn-primary btn-sm" onClick={handleConfirm}><Brain size={14} /> 确认并开始分析</button>
+                  <button className="btn btn-sm" onClick={handleContinueChat}><RefreshCw size={14} /> 继续对话</button>
                 </div>
               </div>
             )}
@@ -185,25 +186,26 @@ export function SymptomQueryPage() {
                   onKeyDown={e => e.key === 'Enter' && handleSend()}
                   disabled={chatLoading || phase === 'analyzing'} />
                 <button className="btn btn-primary" onClick={handleSend} disabled={chatLoading || !chatInput.trim()}>
-                  {chatLoading ? '…' : '发送'}
+                  {chatLoading ? <span className="pulse-dot" /> : <Send size={16} />} 发送
                 </button>
-                {messages.length > 0 && <button className="btn" onClick={handleClear}>清空</button>}
+                {messages.length > 0 && <button className="btn" onClick={handleClear}><X size={16} /> 清空</button>}
               </div>
             )}
           </>
         )}
         {phase === 'analyzing' && (
-          <div style={{ textAlign: 'center', padding: 20, color: '#888', fontSize: 14 }}>
-            正在分析症状并检索回路…
+          <div style={{ textAlign: 'center', padding: 32, color: '#888' }}>
+            <Sparkles size={32} style={{ animation: 'pulse 1.5s ease-in-out infinite', color: '#1677ff' }} />
+            <p style={{ marginTop: 12, fontSize: 14 }}>正在分析症状并检索回路…</p>
           </div>
         )}
         {phase === 'results' && (
           <details style={{ fontSize: 12, color: '#888' }}>
             <summary>重新查询</summary>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-              <button className={`btn btn-sm ${mode === 'focused' ? 'btn-primary' : ''}`} onClick={() => setMode('focused')}>🎯 聚焦</button>
-              <button className={`btn btn-sm ${mode === 'exploratory' ? 'btn-primary' : ''}`} onClick={() => setMode('exploratory')}>🔍 探索</button>
-              <button className="btn btn-sm" onClick={handleClear}>新查询</button>
+              <button className={`btn btn-sm ${mode === 'focused' ? 'btn-primary' : ''}`} onClick={() => setMode('focused')}><Target size={14} /> 聚焦</button>
+              <button className={`btn btn-sm ${mode === 'exploratory' ? 'btn-primary' : ''}`} onClick={() => setMode('exploratory')}><Compass size={14} /> 探索</button>
+              <button className="btn btn-sm" onClick={handleClear}><RefreshCw size={14} /> 新查询</button>
             </div>
           </details>
         )}
@@ -221,7 +223,7 @@ export function SymptomQueryPage() {
           <button className="btn btn-primary"
             onClick={() => setReportOpen(true)}
             disabled={!summary || circuits.length === 0}
-          >📄 生成报告</button>
+          ><FileText size={16} /> 生成报告</button>
           {circuits.length === 0 && <span style={{fontSize:12,color:'#888'}}>需先完成回路分析后才能生成报告</span>}
         </div>
       )}
@@ -355,6 +357,7 @@ export function SymptomQueryPage() {
         graphNodes={graph?.nodes?.length ?? 0}
         graphEdges={graph?.edges?.length ?? 0}
         graphData={graph}
+        matchedCircuitIds={matchedCircuitIds}
         syndrome={clinSyndrome}
         implicatedRegions={clinRegions}
         neurotransmitters={clinNeurotransmitters}

@@ -1,16 +1,14 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { StatusBadge } from './StatusBadge'
 import { ModelBadge } from './ModelBadge'
 import { CancelConfirmDialog } from './CancelConfirmDialog'
+import { getTaskDef } from '../services/taskRegistry'
+import { listUnifiedTasks } from '../api/endpoints'
 import type { BgTask } from '../hooks/useBackgroundTasks'
 
 interface Props {
-  tasks: BgTask[]
-  loading: boolean
   onViewAll: () => void
   onViewTask: (task: BgTask) => void
-  onOpen?: () => void
-  onClose?: () => void
 }
 
 function elapsed(createdAt: string): string {
@@ -20,44 +18,62 @@ function elapsed(createdAt: string): string {
   return `${Math.floor(sec / 3600)}h`
 }
 
-function taskIcon(type: string): string {
-  if (type === 'field_completion') return '🔧'
-  if (type === 'circuit_connection_extraction') return '🔄'
-  if (type === 'composite_workflow') return '🔗'
-  return '⭕'
-}
-
-export function TaskCenterDropdown({ tasks, loading, onViewAll, onViewTask, onOpen, onClose }: Props) {
+/**
+ * Header bell-dropdown — fetch-on-open only, NO background polling.
+ * Only the full task center page runs continuous polling.
+ */
+export function TaskCenterDropdown({ onViewAll, onViewTask }: Props) {
   const [open, setOpen] = useState(false)
   const [cancelTarget, setCancelTarget] = useState<BgTask | null>(null)
+  const [tasks, setTasks] = useState<BgTask[]>([])
+  const [loading, setLoading] = useState(false)
 
-  const toggle = () => {
+  const handleToggle = useCallback(async () => {
     const next = !open
     setOpen(next)
-    if (next) onOpen?.()
-    else onClose?.()
-  }
+    if (next) {
+      setLoading(true)
+      try {
+        const resp = await listUnifiedTasks({ limit: 40 })
+        setTasks(resp.items.map(item => ({
+          id: item.id,
+          type: item.type,
+          status: item.status,
+          targetType: item.target_type,
+          targetCount: item.target_count,
+          label: item.label,
+          provider: item.provider,
+          modelName: item.model_name,
+          createdAt: item.created_at,
+          startedAt: item.started_at,
+          completedAt: item.completed_at,
+          detail: null,
+        })))
+      } catch { /* ignore */ }
+      setLoading(false)
+    }
+  }, [open])
 
-  const running = tasks.filter(t => t.status === 'running' || t.status === 'pending')
-  const recent = tasks.filter(t => t.status !== 'running' && t.status !== 'pending').slice(0, 5)
-  const displayTasks = [...running, ...recent]
+  const running = tasks.filter(t => t.status === 'running' || t.status === 'pending' || t.status === 'queued')
+  const recent = tasks.filter(t => t.status !== 'running' && t.status !== 'pending' && t.status !== 'queued').slice(0, 5)
+  const displayTasks = [...running, ...recent].slice(0, 12)
   const count = running.length
 
   return (
     <div className="task-center-dropdown" style={{ position: 'relative' }}>
-      <button className="task-center-bell" onClick={toggle} title="后台任务">
+      <button className="task-center-bell" onClick={handleToggle} title="后台任务">
         🔔
         {count > 0 && <span className="task-center-badge">{count}</span>}
       </button>
 
       {open && (
         <>
-          <div className="task-center-overlay" onClick={() => { setOpen(false); onClose?.() }} />
+          <div className="task-center-overlay" onClick={() => setOpen(false)} />
           <div className="task-center-panel">
             <div className="task-center-panel-header">
               <strong>后台任务</strong>
               {count > 0 && <span style={{ color: 'var(--primary)', fontSize: 12 }}>{count} 个运行中</span>}
-              <button className="btn btn-sm" onClick={() => { setOpen(false); onClose?.(); onViewAll() }}>查看全部</button>
+              <button className="btn btn-sm" onClick={() => { setOpen(false); onViewAll() }}>查看全部</button>
             </div>
             <div className="task-center-panel-body">
               {loading ? (
@@ -65,24 +81,27 @@ export function TaskCenterDropdown({ tasks, loading, onViewAll, onViewTask, onOp
               ) : displayTasks.length === 0 ? (
                 <div style={{ padding: 16, textAlign: 'center', color: '#888' }}>无任务</div>
               ) : (
-                displayTasks.slice(0, 10).map(task => (
-                  <div key={task.id} className="task-center-item" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <button style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, border: 'none', background: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
-                      onClick={() => { setOpen(false); onViewTask(task) }}>
-                      <span className="task-center-item-icon">{taskIcon(task.type)}</span>
-                      <span className="task-center-item-label" style={{ flex: 1 }}>{task.label}</span>
-                      <ModelBadge provider={task.provider} modelName={task.modelName} />
-                      <StatusBadge status={task.status} />
-                      <span className="task-center-item-time">{elapsed(task.createdAt)}</span>
-                    </button>
-                    {(task.status === 'running' || task.status === 'pending') && (
-                      <button className="btn btn-xs" style={{ color: '#dc2626', fontSize: 11, padding: '2px 6px' }}
-                        onClick={(e) => { e.stopPropagation(); setCancelTarget(task) }}>
-                        ✕
+                displayTasks.map(task => {
+                  const def = getTaskDef(task.type)
+                  return (
+                    <div key={task.id} className="task-center-item" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <button style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, border: 'none', background: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
+                        onClick={() => { setOpen(false); onViewTask(task) }}>
+                        <span className="task-center-item-icon">{def.icon}</span>
+                        <span className="task-center-item-label" style={{ flex: 1 }}>{def.label(task)}</span>
+                        <ModelBadge provider={task.provider} modelName={task.modelName} />
+                        <StatusBadge status={task.status} />
+                        <span className="task-center-item-time">{elapsed(task.createdAt)}</span>
                       </button>
-                    )}
-                  </div>
-                ))
+                      {(task.status === 'running' || task.status === 'pending' || task.status === 'queued') && (
+                        <button className="btn btn-xs" style={{ color: '#dc2626', fontSize: 11, padding: '2px 6px' }}
+                          onClick={(e) => { e.stopPropagation(); setCancelTarget(task) }}>
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  )
+                })
               )}
             </div>
             <div className="task-center-panel-footer">
